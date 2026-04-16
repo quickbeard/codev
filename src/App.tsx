@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { Box, Text, useApp } from "ink";
 import { useState } from "react";
-import { Banner } from "./components/Banner.js";
-import { ToolSelect } from "./components/ToolSelect.js";
-import { setupClaude, type Tool } from "./setup.js";
+import { Banner } from "@/components/Banner.js";
+import { ToolSelect } from "@/components/ToolSelect.js";
+import { setupClaude, type Tool } from "@/setup.js";
 
 type Step = "select" | "installing" | "done";
 

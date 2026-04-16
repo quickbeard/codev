@@ -18,6 +18,20 @@ Default to using Bun instead of Node.js.
 
 When writing or reviewing React components, follow the Vercel React best practices defined in `.claude/skills/vercel-react-best-practices/`. Refer to `SKILL.md` for the rule index and read individual rule files in `rules/` for detailed examples.
 
+## Imports
+
+Use absolute imports with the `@/*` alias. Don't use relative imports.
+
+```ts
+// Good
+import { App } from "@/App.js";
+import { Banner } from "@/components/Banner.js";
+
+// Bad
+import { App } from "./App.js";
+import { Banner } from "../components/Banner.js";
+```
+
 ## Validation
 
 Always run these commands after making changes and ensure they pass:
