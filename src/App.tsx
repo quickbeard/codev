@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
 import { Box, Text, useApp } from "ink";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Banner } from "@/components/Banner.js";
+import { Login } from "@/components/Login.js";
 import { ToolSelect } from "@/components/ToolSelect.js";
 import { setupClaude, type Tool } from "@/setup.js";
 
-type Step = "select" | "installing" | "done";
+type Step = "select" | "installing" | "login" | "done";
 
 export function App() {
 	const { exit } = useApp();
@@ -19,10 +20,14 @@ export function App() {
 	const handleConfirm = (tools: Tool[]) => {
 		setStep("installing");
 		runInstall(tools, addLog).then(() => {
-			setStep("done");
-			exit();
+			setStep("login");
 		});
 	};
+
+	const handleLoginDone = useCallback(() => {
+		setStep("done");
+		exit();
+	}, [exit]);
 
 	return (
 		<Box flexDirection="column" padding={1}>
@@ -35,6 +40,7 @@ export function App() {
 					))}
 				</Box>
 			)}
+			{step === "login" && <Login onDone={handleLoginDone} />}
 		</Box>
 	);
 }
