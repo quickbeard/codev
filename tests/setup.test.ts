@@ -26,7 +26,7 @@ afterEach(() => {
 describe("setupClaude", () => {
 	test("creates .claude.json with hasCompletedOnboarding when file does not exist", async () => {
 		// Re-import to pick up the mocked homedir
-		const { setupClaude } = await import("../src/setup.js");
+		const { setupClaude } = await import("@/setup.js");
 		await setupClaude();
 
 		const filePath = join(tempDir, ".claude.json");
@@ -40,7 +40,7 @@ describe("setupClaude", () => {
 		const filePath = join(tempDir, ".claude.json");
 		writeFileSync(filePath, JSON.stringify({ someKey: "someValue" }, null, 2));
 
-		const { setupClaude } = await import("../src/setup.js");
+		const { setupClaude } = await import("@/setup.js");
 		await setupClaude();
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
@@ -53,7 +53,7 @@ describe("setupClaude", () => {
 		const original = { hasCompletedOnboarding: true, other: "data" };
 		writeFileSync(filePath, JSON.stringify(original, null, 2));
 
-		const { setupClaude } = await import("../src/setup.js");
+		const { setupClaude } = await import("@/setup.js");
 		await setupClaude();
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
@@ -64,7 +64,7 @@ describe("setupClaude", () => {
 		const filePath = join(tempDir, ".claude.json");
 		writeFileSync(filePath, "not valid json{{{");
 
-		const { setupClaude } = await import("../src/setup.js");
+		const { setupClaude } = await import("@/setup.js");
 		await setupClaude();
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));

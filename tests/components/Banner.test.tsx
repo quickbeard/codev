@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
-import { Banner } from "../../src/components/Banner.js";
+import { Banner } from "@/components/Banner.js";
 
 afterEach(() => {
 	cleanup();

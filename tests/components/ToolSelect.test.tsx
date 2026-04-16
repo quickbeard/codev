@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
-import { ToolSelect } from "../../src/components/ToolSelect.js";
+import { ToolSelect } from "@/components/ToolSelect.js";
 
 afterEach(() => {
 	cleanup();
