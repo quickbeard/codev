@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -13,6 +13,7 @@ function authFilePath() {
 export interface AuthData {
 	access_token: string;
 	id_token: string;
+	refresh_token?: string;
 	expires_at: number;
 	user: {
 		sub: string;
@@ -21,30 +22,69 @@ export interface AuthData {
 	};
 }
 
-export function loadAuth(): AuthData | null {
+interface TokenResponse {
+	access_token: string;
+	id_token: string;
+	refresh_token?: string;
+	expires_in: number;
+}
+
+function readAuthFile(): AuthData | null {
 	try {
-		const raw = readFileSync(authFilePath(), "utf-8");
-		const data: AuthData = JSON.parse(raw);
-		if (Date.now() > data.expires_at) return null;
-		return data;
+		return JSON.parse(readFileSync(authFilePath(), "utf-8")) as AuthData;
 	} catch {
 		return null;
 	}
 }
 
+export function loadAuth(): AuthData | null {
+	const data = readAuthFile();
+	if (!data) return null;
+	if (Date.now() > data.expires_at) return null;
+	return data;
+}
+
 function saveAuth(data: AuthData) {
-	mkdirSync(dirname(authFilePath()), { recursive: true });
-	writeFileSync(authFilePath(), JSON.stringify(data, null, 2));
+	mkdirSync(dirname(authFilePath()), { recursive: true, mode: 0o700 });
+	writeFileSync(authFilePath(), JSON.stringify(data, null, 2), { mode: 0o600 });
+}
+
+export function logout(): boolean {
+	try {
+		unlinkSync(authFilePath());
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+	let str = "";
+	for (const b of bytes) str += String.fromCharCode(b);
+	return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function generateCodeVerifier(): string {
+	const bytes = new Uint8Array(32);
+	crypto.getRandomValues(bytes);
+	return base64UrlEncode(bytes);
+}
+
+async function generateCodeChallenge(verifier: string): Promise<string> {
+	const hash = await crypto.subtle.digest(
+		"SHA-256",
+		new TextEncoder().encode(verifier),
+	);
+	return base64UrlEncode(new Uint8Array(hash));
 }
 
 /**
- * Runs the full OAuth2 Authorization Code flow:
- * 1. Start a temporary local HTTP server
- * 2. Open the browser to the SSO /authorize endpoint
- * 3. Wait for the redirect callback with the auth code
- * 4. Exchange the code for tokens via POST /token
- * 5. Fetch user info via GET /userinfo
- * 6. Save everything to ~/.codev/auth.json
+ * Runs the full OAuth2 Authorization Code flow with PKCE:
+ * 1. Reuse cached tokens if still valid
+ * 2. Try a silent refresh if a refresh_token is on disk
+ * 3. Otherwise: start a loopback HTTP server, send the user to /authorize
+ *    with state + PKCE, wait for the callback, exchange code for tokens,
+ *    fetch userinfo, and persist to ~/.codev/auth.json
  */
 export async function login(
 	onLog: (msg: string) => void,
@@ -58,15 +98,44 @@ export async function login(
 		return existing;
 	}
 
-	const code = await getAuthCode(onLog, onReady);
+	const stale = readAuthFile();
+	if (stale?.refresh_token) {
+		try {
+			onLog("Refreshing session...");
+			const refreshed = await refreshTokens(stale.refresh_token);
+			const authData: AuthData = {
+				access_token: refreshed.access_token,
+				id_token: refreshed.id_token,
+				refresh_token: refreshed.refresh_token || stale.refresh_token,
+				expires_at: Date.now() + refreshed.expires_in * 1000,
+				user: stale.user,
+			};
+			saveAuth(authData);
+			onLog(`Logged in as ${authData.user.email}`);
+			return authData;
+		} catch {
+			onLog("Refresh failed, starting full login...");
+		}
+	}
 
-	const tokenRes = await exchangeCode(code.code, code.redirectUri);
+	const verifier = generateCodeVerifier();
+	const challenge = await generateCodeChallenge(verifier);
+	const state = crypto.randomUUID();
 
+	const { code, redirectUri } = await getAuthCode(
+		onLog,
+		onReady,
+		state,
+		challenge,
+	);
+
+	const tokenRes = await exchangeCode(code, redirectUri, verifier);
 	const user = await fetchUserInfo(tokenRes.access_token);
 
 	const authData: AuthData = {
 		access_token: tokenRes.access_token,
 		id_token: tokenRes.id_token,
+		refresh_token: tokenRes.refresh_token,
 		expires_at: Date.now() + tokenRes.expires_in * 1000,
 		user: {
 			sub: user.sub,
@@ -83,10 +152,13 @@ export async function login(
 async function getAuthCode(
 	onLog: (msg: string) => void,
 	onReady: (openBrowserFn: () => void) => void,
+	expectedState: string,
+	codeChallenge: string,
 ): Promise<{ code: string; redirectUri: string }> {
 	return new Promise((resolve, reject) => {
 		const server = Bun.serve({
 			port: 0,
+			hostname: "127.0.0.1",
 			fetch(req) {
 				const url = new URL(req.url);
 				if (url.pathname !== "/callback") {
@@ -95,6 +167,7 @@ async function getAuthCode(
 
 				const code = url.searchParams.get("code");
 				const error = url.searchParams.get("error");
+				const returnedState = url.searchParams.get("state");
 
 				if (error) {
 					const desc = url.searchParams.get("error_description") || error;
@@ -110,16 +183,22 @@ async function getAuthCode(
 					reject(new Error("No authorization code received"));
 					return new Response(
 						loginResultHtml(false, "No authorization code received"),
-						{
-							headers: { "Content-Type": "text/html" },
-						},
+						{ headers: { "Content-Type": "text/html" } },
 					);
+				}
+
+				if (returnedState !== expectedState) {
+					server.stop();
+					reject(new Error("State mismatch (possible CSRF attack)"));
+					return new Response(loginResultHtml(false, "State mismatch"), {
+						headers: { "Content-Type": "text/html" },
+					});
 				}
 
 				server.stop();
 				resolve({
 					code,
-					redirectUri: `http://localhost:${server.port}/callback`,
+					redirectUri: `http://127.0.0.1:${server.port}/callback`,
 				});
 
 				return new Response(loginResultHtml(true), {
@@ -128,15 +207,16 @@ async function getAuthCode(
 			},
 		});
 
-		const redirectUri = `http://localhost:${server.port}/callback`;
-		const state = crypto.randomUUID();
+		const redirectUri = `http://127.0.0.1:${server.port}/callback`;
 		const authorizeUrl =
 			`${SSO_BASE_URL}/authorize?` +
 			`response_type=code` +
 			`&client_id=${encodeURIComponent(CLIENT_ID)}` +
 			`&redirect_uri=${encodeURIComponent(redirectUri)}` +
-			`&scope=openid%20profile%20email` +
-			`&state=${state}`;
+			`&scope=openid%20profile%20email%20offline_access` +
+			`&state=${expectedState}` +
+			`&code_challenge=${codeChallenge}` +
+			`&code_challenge_method=S256`;
 
 		onReady(() => {
 			onLog("Opening browser for Viettel SSO login...");
@@ -153,17 +233,17 @@ async function getAuthCode(
 async function exchangeCode(
 	code: string,
 	redirectUri: string,
-): Promise<{ access_token: string; id_token: string; expires_in: number }> {
+	codeVerifier: string,
+): Promise<TokenResponse> {
 	const res = await fetch(`${SSO_BASE_URL}/token`, {
 		method: "POST",
-		headers: {
-			"Content-Type": "application/x-www-form-urlencoded",
-			Authorization: `Basic ${btoa(`${CLIENT_ID}`)}`,
-		},
+		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({
 			grant_type: "authorization_code",
 			code,
 			redirect_uri: redirectUri,
+			client_id: CLIENT_ID,
+			code_verifier: codeVerifier,
 		}),
 	});
 
@@ -172,11 +252,25 @@ async function exchangeCode(
 		throw new Error(`Token exchange failed (${res.status}): ${body}`);
 	}
 
-	return (await res.json()) as {
-		access_token: string;
-		id_token: string;
-		expires_in: number;
-	};
+	return (await res.json()) as TokenResponse;
+}
+
+async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
+	const res = await fetch(`${SSO_BASE_URL}/token`, {
+		method: "POST",
+		headers: { "Content-Type": "application/x-www-form-urlencoded" },
+		body: new URLSearchParams({
+			grant_type: "refresh_token",
+			refresh_token: refreshToken,
+			client_id: CLIENT_ID,
+		}),
+	});
+
+	if (!res.ok) {
+		throw new Error(`Token refresh failed (${res.status})`);
+	}
+
+	return (await res.json()) as TokenResponse;
 }
 
 async function fetchUserInfo(accessToken: string) {
