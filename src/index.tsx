@@ -11,4 +11,6 @@ if (command === "logout") {
 	process.exit(0);
 }
 
-render(<App />);
+const { waitUntilExit } = render(<App />);
+await waitUntilExit();
+process.exit(0);

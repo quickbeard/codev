@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
 import * as auth from "@/auth.js";
+import * as backend from "@/backend.js";
 import { Login } from "@/components/Login.js";
 
 afterEach(() => {
@@ -100,5 +101,70 @@ describe("Login", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		expect(openBrowserFn).not.toHaveBeenCalled();
+	});
+
+	test("shows API key and Happy coding after successful exchange", async () => {
+		spyOn(auth, "login").mockImplementation(() =>
+			Promise.resolve({
+				access_token: "access-xyz",
+				id_token: "id-xyz",
+				expires_at: Date.now() + 3600000,
+				user: { sub: "u", email: "test@viettel.com.vn", displayName: "Test" },
+			}),
+		);
+		spyOn(backend, "fetchApiKey").mockResolvedValue("sk-test-key-123");
+
+		const onDone = mock();
+		const { lastFrame } = render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 100));
+
+		const output = lastFrame() ?? "";
+		expect(output).toContain("sk-test-key-123");
+		expect(output).toContain("Happy coding!");
+	});
+
+	test("calls onDone roughly 1 second after API key is shown", async () => {
+		spyOn(auth, "login").mockImplementation(() =>
+			Promise.resolve({
+				access_token: "access-xyz",
+				id_token: "id-xyz",
+				expires_at: Date.now() + 3600000,
+				user: { sub: "u", email: "test@viettel.com.vn", displayName: "Test" },
+			}),
+		);
+		spyOn(backend, "fetchApiKey").mockResolvedValue("sk-test-key-123");
+
+		const onDone = mock();
+		render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 500));
+		expect(onDone).not.toHaveBeenCalled();
+
+		await new Promise((r) => setTimeout(r, 700));
+		expect(onDone).toHaveBeenCalledTimes(1);
+	});
+
+	test("shows error if backend key exchange fails", async () => {
+		spyOn(auth, "login").mockImplementation(() =>
+			Promise.resolve({
+				access_token: "access-xyz",
+				id_token: "id-xyz",
+				expires_at: Date.now() + 3600000,
+				user: { sub: "u", email: "test@viettel.com.vn", displayName: "Test" },
+			}),
+		);
+		spyOn(backend, "fetchApiKey").mockRejectedValue(
+			new Error("Backend /auth/exchange failed (502): boom"),
+		);
+
+		const onDone = mock();
+		const { lastFrame } = render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 100));
+
+		const output = lastFrame() ?? "";
+		expect(output).toContain("Login failed: Backend /auth/exchange failed");
+		expect(onDone).not.toHaveBeenCalled();
 	});
 });

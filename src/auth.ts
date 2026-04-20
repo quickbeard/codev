@@ -213,6 +213,14 @@ async function getAuthCode(
 	nonce: string,
 ): Promise<{ code: string; redirectUri: string }> {
 	return new Promise((resolve, reject) => {
+		let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+		const finish = () => {
+			if (timeoutHandle) {
+				clearTimeout(timeoutHandle);
+				timeoutHandle = null;
+			}
+		};
+
 		const server = Bun.serve({
 			port: 0,
 			hostname: "127.0.0.1",
@@ -228,6 +236,7 @@ async function getAuthCode(
 
 				if (error) {
 					const desc = url.searchParams.get("error_description") || error;
+					finish();
 					server.stop();
 					reject(new Error(`SSO login failed: ${desc}`));
 					return new Response(loginResultHtml(false, desc), {
@@ -236,6 +245,7 @@ async function getAuthCode(
 				}
 
 				if (!code) {
+					finish();
 					server.stop();
 					reject(new Error("No authorization code received"));
 					return new Response(
@@ -245,6 +255,7 @@ async function getAuthCode(
 				}
 
 				if (returnedState !== expectedState) {
+					finish();
 					server.stop();
 					reject(new Error("State mismatch (possible CSRF attack)"));
 					return new Response(loginResultHtml(false, "State mismatch"), {
@@ -252,6 +263,7 @@ async function getAuthCode(
 					});
 				}
 
+				finish();
 				server.stop();
 				resolve({
 					code,
@@ -281,7 +293,8 @@ async function getAuthCode(
 			openBrowser(authorizeUrl);
 		});
 
-		setTimeout(() => {
+		timeoutHandle = setTimeout(() => {
+			timeoutHandle = null;
 			server.stop();
 			reject(new Error("Login timed out after 120 seconds"));
 		}, 120_000);
