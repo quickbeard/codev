@@ -19,7 +19,7 @@ import {
 import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AuthData, loadAuth, login } from "@/auth.js";
+import { type AuthData, loadAuth, login, logout } from "@/auth.js";
 
 let tempDir: string;
 let homedirSpy: ReturnType<typeof spyOn>;
@@ -85,6 +85,19 @@ describe("loadAuth", () => {
 	});
 });
 
+describe("logout", () => {
+	test("removes the auth file", () => {
+		writeAuthFile(VALID_AUTH);
+		expect(loadAuth()).not.toBeNull();
+		expect(logout()).toBe(true);
+		expect(loadAuth()).toBeNull();
+	});
+
+	test("returns false when no auth file exists", () => {
+		expect(logout()).toBe(false);
+	});
+});
+
 describe("login", () => {
 	test("returns existing auth when already logged in", async () => {
 		writeAuthFile(VALID_AUTH);
@@ -127,6 +140,13 @@ function getCallbackPort(spy: ReturnType<typeof spyOn>): number {
 	const redirectUri = authorizeUrl.searchParams.get("redirect_uri");
 	if (!redirectUri) return 0;
 	return Number.parseInt(new URL(redirectUri).port, 10);
+}
+
+function getCallbackState(spy: ReturnType<typeof spyOn>): string {
+	const call = spy.mock.calls[0];
+	if (!call) return "";
+	const authorizeUrl = new URL(call[1]?.[0] as string);
+	return authorizeUrl.searchParams.get("state") ?? "";
 }
 
 describe("login full OAuth flow", () => {
@@ -186,9 +206,10 @@ describe("login full OAuth flow", () => {
 			(openBrowserFn) => {
 				openBrowserFn();
 				const port = getCallbackPort(execFileSpy);
+				const state = getCallbackState(execFileSpy);
 				setTimeout(() => {
 					originalFetch(
-						`http://localhost:${port}/callback?code=test-auth-code&state=test`,
+						`http://localhost:${port}/callback?code=test-auth-code&state=${state}`,
 					);
 				}, 50);
 			},
@@ -221,6 +242,23 @@ describe("login full OAuth flow", () => {
 		);
 
 		expect(loginPromise).rejects.toThrow("SSO login failed: User denied");
+	});
+
+	test("rejects when callback state does not match", async () => {
+		const loginPromise = login(
+			() => {},
+			(openBrowserFn) => {
+				openBrowserFn();
+				const port = getCallbackPort(execFileSpy);
+				setTimeout(() => {
+					originalFetch(
+						`http://localhost:${port}/callback?code=abc&state=wrong-state`,
+					);
+				}, 50);
+			},
+		);
+
+		expect(loginPromise).rejects.toThrow("State mismatch");
 	});
 
 	test("rejects when callback receives no code", async () => {
@@ -267,10 +305,11 @@ describe("login full OAuth flow", () => {
 			(openBrowserFn) => {
 				openBrowserFn();
 				const port = getCallbackPort(execFileSpy);
+				const state = getCallbackState(execFileSpy);
 				callbackResPromise = new Promise((resolve) => {
 					setTimeout(async () => {
 						const res = await originalFetch(
-							`http://localhost:${port}/callback?code=c&state=s`,
+							`http://localhost:${port}/callback?code=c&state=${state}`,
 						);
 						resolve(res);
 					}, 50);
