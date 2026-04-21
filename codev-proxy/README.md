@@ -55,13 +55,13 @@ Returns `{ "status": "ok" }`.
 
 Copy `.env.example` to `.env` and fill in:
 
-| Var                | Required | Secret  | Purpose                                                            |
-| ------------------ | -------- | ------- | ------------------------------------------------------------------ |
-| `API_URL`          | yes      | no      | Gateway endpoint that provisions/returns a LiteLLM key             |
+| Var                | Required | Secret  | Purpose                                                             |
+| ------------------ | -------- | ------- | ------------------------------------------------------------------- |
+| `API_URL`          | yes      | no      | Gateway endpoint that provisions/returns a LiteLLM key              |
 | `AUTH_TOKEN`       | yes      | **yes** | Bearer token for the gateway — route through a secret store in prod |
-| `SSO_USERINFO_URL` | yes      | no      | OIDC userinfo endpoint — used to verify the CLI's SSO access token |
-| `PORT`             | no       | no      | HTTP port (default `8787`)                                         |
-| `NODE_ENV`         | no       | no      | `production` in prod; anything else enables verbose key logging    |
+| `SSO_USERINFO_URL` | yes      | no      | OIDC userinfo endpoint — used to verify the CLI's SSO access token  |
+| `PORT`             | no       | no      | HTTP port (default `8787`)                                          |
+| `NODE_ENV`         | no       | no      | `production` in prod; anything else enables verbose key logging     |
 
 Bun loads `.env` automatically. The server fails fast on startup if any required var is missing.
 
@@ -96,7 +96,13 @@ REPO=your-dockerhub-org/codev-proxy
 docker build -t $REPO:$VERSION -t $REPO:$SHA .
 ```
 
-### 2. Push to Docker Hub
+### 2. Run
+
+```bash
+docker run --name codev-proxy --rm -p 8787:8787 --env-file .env $REPO:$VERSION
+```
+
+### 3. Push to Docker Hub
 
 ```bash
 docker login

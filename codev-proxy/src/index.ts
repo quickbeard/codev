@@ -9,6 +9,12 @@ function json(body: unknown, status = 200): Response {
 	});
 }
 
+const useColor = process.stderr.isTTY && !process.env.NO_COLOR;
+
+function red(msg: string): string {
+	return useColor ? `\x1b[31m${msg}\x1b[0m` : msg;
+}
+
 function extractBearer(req: Request): string | null {
 	const header = req.headers.get("authorization");
 	if (!header) return null;
@@ -39,14 +45,14 @@ export async function handleExchange(req: Request): Promise<Response> {
 		});
 	} catch (err) {
 		if (err instanceof SsoError) {
-			console.error(`[exchange] SSO error: ${err.message}`);
+			console.error(red(`[exchange] SSO error: ${err.message}`));
 			return json({ error: err.message }, err.status);
 		}
 		if (err instanceof LiteLlmError) {
-			console.error(`[exchange] LiteLLM error: ${err.message}`);
+			console.error(red(`[exchange] LiteLLM error: ${err.message}`));
 			return json({ error: err.message }, err.status);
 		}
-		console.error("Unexpected error in /auth/exchange:", err);
+		console.error(red("Unexpected error in /auth/exchange:"), err);
 		return json({ error: "Internal server error" }, 500);
 	}
 }
