@@ -9,16 +9,6 @@ afterEach(() => {
 });
 
 describe("Login", () => {
-	test("renders step 2/3 header", () => {
-		spyOn(auth, "login").mockImplementation(() => new Promise(() => {}));
-		const onDone = mock();
-		const { lastFrame } = render(<Login onDone={onDone} />);
-
-		const output = lastFrame() ?? "";
-		expect(output).toContain("Step 2/3");
-		expect(output).toContain("Login to Viettel SSO");
-	});
-
 	test("shows 'Press Enter' when onReady is called", async () => {
 		spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
 			onReady(() => {});
@@ -37,12 +27,12 @@ describe("Login", () => {
 	test("shows log messages from login", async () => {
 		spyOn(auth, "login").mockImplementation((onLog) => {
 			onLog("Starting SSO login...");
-			onLog("Already logged in as test@viettel.com.vn");
+			onLog("Already logged in as test@example.com");
 			return Promise.resolve({
 				access_token: "t",
 				id_token: "i",
 				expires_at: Date.now() + 3600000,
-				user: { sub: "u", email: "test@viettel.com.vn", displayName: "Test" },
+				user: { sub: "u", email: "test@example.com", displayName: "Test" },
 			});
 		});
 
@@ -53,7 +43,7 @@ describe("Login", () => {
 
 		const output = lastFrame() ?? "";
 		expect(output).toContain("Starting SSO login...");
-		expect(output).toContain("Already logged in as test@viettel.com.vn");
+		expect(output).toContain("Already logged in as test@example.com");
 	});
 
 	test("shows error message on login failure", async () => {
@@ -109,7 +99,7 @@ describe("Login", () => {
 				access_token: "access-xyz",
 				id_token: "id-xyz",
 				expires_at: Date.now() + 3600000,
-				user: { sub: "u", email: "test@viettel.com.vn", displayName: "Test" },
+				user: { sub: "u", email: "test@example.com", displayName: "Test" },
 			}),
 		);
 		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-key-123");
@@ -129,7 +119,7 @@ describe("Login", () => {
 				access_token: "access-xyz",
 				id_token: "id-xyz",
 				expires_at: Date.now() + 3600000,
-				user: { sub: "u", email: "test@viettel.com.vn", displayName: "Test" },
+				user: { sub: "u", email: "test@example.com", displayName: "Test" },
 			}),
 		);
 		spyOn(proxy, "fetchApiKey").mockRejectedValue(

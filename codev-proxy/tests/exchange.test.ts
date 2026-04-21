@@ -46,7 +46,7 @@ describe("handleExchange", () => {
 					new Response(
 						JSON.stringify({
 							sub: "u-1",
-							email: "test@viettel.com.vn",
+							email: "test@example.com",
 							displayName: "Test",
 						}),
 						{ status: 200 },
@@ -72,7 +72,7 @@ describe("handleExchange", () => {
 		expect(body.api_key).toBe("sk-hello");
 		expect(body.user).toEqual({
 			sub: "u-1",
-			email: "test@viettel.com.vn",
+			email: "test@example.com",
 			displayName: "Test",
 		});
 	});

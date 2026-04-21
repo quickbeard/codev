@@ -2,13 +2,15 @@ import { execFile } from "node:child_process";
 import { Box, Text, useApp } from "ink";
 import { useCallback, useState } from "react";
 import { Banner } from "@/components/Banner.js";
-import { Configure } from "@/components/Configure.js";
-import { Confirm } from "@/components/Confirm.js";
-import { Login } from "@/components/Login.js";
-import { ToolSelect } from "@/components/ToolSelect.js";
+import { Configure, configureTitle } from "@/components/Configure.js";
+import { Confirm, confirmTitle } from "@/components/Confirm.js";
+import { Frame } from "@/components/Frame.js";
+import { Login, loginTitle } from "@/components/Login.js";
+import { Step } from "@/components/Step.js";
+import { ToolSelect, toolSelectTitle } from "@/components/ToolSelect.js";
 import type { Tool } from "@/setup.js";
 
-type Step =
+type Phase =
 	| "select"
 	| "confirm"
 	| "installing"
@@ -18,7 +20,7 @@ type Step =
 
 export function App() {
 	const { exit } = useApp();
-	const [step, setStep] = useState<Step>("select");
+	const [step, setStep] = useState<Phase>("select");
 	const [logs, setLogs] = useState<string[]>([]);
 	const [tools, setTools] = useState<Tool[]>([]);
 	const [apiKey, setApiKey] = useState<string | null>(null);
@@ -59,27 +61,51 @@ export function App() {
 	return (
 		<Box flexDirection="column" padding={1}>
 			<Banner />
-			<ToolSelect onConfirm={handleConfirm} readOnly={step !== "select"} />
-			{step !== "select" && (
-				<Confirm
-					tools={tools}
-					onConfirm={handleConfirmProceed}
-					readOnly={step !== "confirm"}
-				/>
-			)}
-			{step !== "select" && step !== "confirm" && (
-				<Box flexDirection="column" marginTop={1}>
-					{logs.map((log, i) => (
-						<Text key={`log-${i.toString()}`}>{log}</Text>
-					))}
-				</Box>
-			)}
-			{(step === "login" || step === "configuring") && (
-				<Login onDone={handleLoginDone} />
-			)}
-			{step === "configuring" && apiKey && (
-				<Configure tools={tools} apiKey={apiKey} onDone={handleConfigureDone} />
-			)}
+			<Frame tag="codev">
+				<Step
+					active={step === "select"}
+					title={toolSelectTitle(step !== "select")}
+				>
+					<ToolSelect onConfirm={handleConfirm} readOnly={step !== "select"} />
+				</Step>
+				{step !== "select" && (
+					<Step active={step === "confirm"} title={confirmTitle()}>
+						<Confirm
+							tools={tools}
+							onConfirm={handleConfirmProceed}
+							readOnly={step !== "confirm"}
+						/>
+					</Step>
+				)}
+				{(step === "installing" ||
+					step === "login" ||
+					step === "configuring") && (
+					<Step
+						active={step === "installing"}
+						title={<Text bold>Installing packages</Text>}
+					>
+						<Box flexDirection="column">
+							{logs.map((log, i) => (
+								<Text key={`log-${i.toString()}`}>{log}</Text>
+							))}
+						</Box>
+					</Step>
+				)}
+				{(step === "login" || step === "configuring") && (
+					<Step active={step === "login"} title={loginTitle()}>
+						<Login onDone={handleLoginDone} />
+					</Step>
+				)}
+				{step === "configuring" && apiKey && (
+					<Step active={step === "configuring"} title={configureTitle()}>
+						<Configure
+							tools={tools}
+							apiKey={apiKey}
+							onDone={handleConfigureDone}
+						/>
+					</Step>
+				)}
+			</Frame>
 		</Box>
 	);
 }

@@ -20,8 +20,9 @@ import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AuthData, loadAuth, login, logout } from "@/auth.js";
+import { BASE_URL } from "@/const.js";
 
-const SSO_BASE_URL = "https://netmind.viettel.vn/sso-wrapper";
+const SSO_BASE_URL = `${BASE_URL}sso-wrapper`;
 const REVOCATION_ENDPOINT = `${SSO_BASE_URL}/revoke`;
 
 let tempDir: string;
@@ -33,7 +34,7 @@ const VALID_AUTH: AuthData = {
 	expires_at: Date.now() + 3600000,
 	user: {
 		sub: "testuser",
-		email: "test@viettel.com.vn",
+		email: "test@example.com",
 		displayName: "Test User",
 	},
 };
@@ -80,7 +81,7 @@ describe("loadAuth", () => {
 		const result = loadAuth();
 		expect(result).not.toBeNull();
 		expect(result?.access_token).toBe("test-access-token");
-		expect(result?.user.email).toBe("test@viettel.com.vn");
+		expect(result?.user.email).toBe("test@example.com");
 	});
 
 	test("returns null when file does not exist", () => {
@@ -158,7 +159,7 @@ describe("login", () => {
 		const result = await login((msg) => logs.push(msg), onReady);
 
 		expect(result.access_token).toBe("test-access-token");
-		expect(result.user.email).toBe("test@viettel.com.vn");
+		expect(result.user.email).toBe("test@example.com");
 		expect(logs).toContain("Starting SSO login...");
 		expect(logs.some((l) => l.includes("Already logged in"))).toBe(true);
 		expect(onReady).not.toHaveBeenCalled();
@@ -225,7 +226,7 @@ describe("login full OAuth flow", () => {
 				new Response(
 					JSON.stringify({
 						sub: "flowuser",
-						email: "flow@viettel.com.vn",
+						email: "flow@example.com",
 						displayName: "Flow User",
 					}),
 					{ headers: { "Content-Type": "application/json" } },
@@ -263,7 +264,7 @@ describe("login full OAuth flow", () => {
 		);
 
 		expect(result.access_token).toBe("flow-access-token");
-		expect(result.user.email).toBe("flow@viettel.com.vn");
+		expect(result.user.email).toBe("flow@example.com");
 		expect(result.user.displayName).toBe("Flow User");
 
 		const authFile = join(tempDir, ".codev", "auth.json");
