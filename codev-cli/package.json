@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "description": "Interactive CLI that installs and configures AI coding agents.",
   "type": "module",
-  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/quickbeard/codev-cli.git"
