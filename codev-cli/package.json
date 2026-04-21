@@ -1,12 +1,25 @@
 {
   "name": "codev-cli",
   "version": "0.1.0",
+  "description": "Interactive CLI that installs and configures AI coding agents.",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/quickbeard/codev-cli.git"
+  },
   "bin": {
     "codev": "./dist/index.js"
   },
   "files": [
     "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "cli",
+    "ai"
   ],
   "scripts": {
     "dev": "bun --hot src/index.tsx",
@@ -15,7 +28,8 @@
     "test": "bun test",
     "typecheck": "bunx --bun tsc --noEmit",
     "check": "bunx --bun @biomejs/biome check",
-    "fix": "bunx --bun @biomejs/biome check --write"
+    "fix": "bunx --bun @biomejs/biome check --write",
+    "prepublishOnly": "bun run build"
   },
   "dependencies": {
     "ink": "^7.0.0",
