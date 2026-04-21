@@ -31,7 +31,7 @@ export function Confirm({ tools, onConfirm }: ConfirmProps) {
 			<Text bold>
 				{"⚠️  "}
 				<Text color="yellow">Heads up</Text>
-				{" — codev will replace existing settings for the tools you chose:"}
+				{" — CoDev will replace existing settings for the tools you chose:"}
 			</Text>
 			{tools.map((tool) => {
 				const [status] = getBackupStatus(tool);
