@@ -119,33 +119,32 @@ export function Configure({ tools, apiKey, onDone }: ConfigureProps) {
 	}, [phase, tools, apiKey, overwrites, onDone]);
 
 	return (
-		<Box flexDirection="column" marginTop={1}>
-			<Text bold>
-				{"⚙️ "}
-				<Text color="yellow">Step 3/3</Text>
-				{" — Configure tools:"}
-			</Text>
+		<Box flexDirection="column">
 			{phase === "prompt" && current && (
 				<Box flexDirection="column">
 					<Text color="cyan">
-						{`  Backup already exists at ${current.backupPath}`}
+						{`Backup already exists at ${current.backupPath}`}
 					</Text>
 					<Text color="cyan">
-						{`  Overwrite it with the current ${LABEL[current.kind]} contents? [y/N] (${index + 1}/${conflicts.length})`}
+						{`Overwrite it with the current ${LABEL[current.kind]} contents? [y/N] (${index + 1}/${conflicts.length})`}
 					</Text>
 				</Box>
 			)}
 			{logs.map((log, i) => (
-				<Text key={`cfg-${i.toString()}`}>{`  ${log}`}</Text>
+				<Text key={`cfg-${i.toString()}`}>{log}</Text>
 			))}
 			{phase === "done" && (
 				<Box marginTop={1} marginBottom={1}>
 					<Text bold color="magenta">
-						{"  🎉 Happy coding!"}
+						{"🎉 Happy coding!"}
 					</Text>
 				</Box>
 			)}
-			{error && <Text color="red">{`  Configure failed: ${error}`}</Text>}
+			{error && <Text color="red">{`Configure failed: ${error}`}</Text>}
 		</Box>
 	);
+}
+
+export function configureTitle() {
+	return <Text bold>{"Configure tools"}</Text>;
 }

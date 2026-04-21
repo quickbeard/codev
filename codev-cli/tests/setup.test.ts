@@ -10,6 +10,7 @@ import {
 import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BASE_URL } from "@/const.js";
 
 let tempDir: string;
 let homedirSpy: ReturnType<typeof spyOn>;
@@ -95,7 +96,7 @@ describe("configureClaudeCode", () => {
 			"https://json.schemastore.org/claude-code-settings.json",
 		);
 		expect(config.env).toEqual({
-			ANTHROPIC_BASE_URL: "https://netmind.viettel.vn/gateway/",
+			ANTHROPIC_BASE_URL: `${BASE_URL}gateway/`,
 			ANTHROPIC_API_KEY: "sk-abc",
 			ANTHROPIC_MODEL: "MiniMax",
 			ANTHROPIC_DEFAULT_OPUS_MODEL: "MiniMax",
@@ -187,7 +188,7 @@ describe("configureClaudeCode", () => {
 });
 
 describe("configureOpenCode", () => {
-	test("creates ~/.config/opencode/opencode.json with netmind provider when file does not exist", async () => {
+	test("creates ~/.config/opencode/opencode.json with aigateway provider when file does not exist", async () => {
 		const { configureOpenCode } = await import("@/setup.js");
 		configureOpenCode("sk-xyz");
 
@@ -196,12 +197,12 @@ describe("configureOpenCode", () => {
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
 		expect(config.$schema).toBe("https://opencode.ai/config.json");
-		expect(config.provider.netmind.npm).toBe("@ai-sdk/openai-compatible");
-		expect(config.provider.netmind.options.baseURL).toBe(
-			"https://netmind.viettel.vn/gateway/v1",
+		expect(config.provider.aigateway.npm).toBe("@ai-sdk/openai-compatible");
+		expect(config.provider.aigateway.options.baseURL).toBe(
+			`${BASE_URL}gateway/v1`,
 		);
-		expect(config.provider.netmind.options.apiKey).toBe("sk-xyz");
-		expect(config.provider.netmind.models.MiniMax.name).toBe("MiniMax");
+		expect(config.provider.aigateway.options.apiKey).toBe("sk-xyz");
+		expect(config.provider.aigateway.models.MiniMax.name).toBe("MiniMax");
 	});
 
 	test("does not touch ~/.claude.json (OpenCode-only install)", async () => {
@@ -237,7 +238,7 @@ describe("configureOpenCode", () => {
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
 		expect(config.someSetting).toBeUndefined();
 		expect(config.provider.other).toBeUndefined();
-		expect(config.provider.netmind.options.apiKey).toBe("sk-new");
+		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
 	});
 });
 

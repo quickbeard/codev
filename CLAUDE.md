@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Two independent Bun packages in a single git repo:
 
-- `codev-cli/` — interactive Ink + React CLI. Owns the full OIDC/PKCE login flow with Viettel SSO. Has its own `CLAUDE.md` with CLI-specific conventions (Bun APIs, absolute imports via `@/*`, validation commands) — **read it when working in `codev-cli/`.**
+- `codev-cli/` — interactive Ink + React CLI. Owns the full OIDC/PKCE login flow with the SSO provider. Has its own `CLAUDE.md` with CLI-specific conventions (Bun APIs, absolute imports via `@/*`, validation commands) — **read it when working in `codev-cli/`.**
 - `codev-proxy/` — Bun HTTP server. Verifies an SSO access token and exchanges it for a LiteLLM API key via a gateway endpoint.
 
 Each package has its own `package.json`, `bun.lock`, `biome.json`, `tsconfig.json`, and `Dockerfile`. There is no root `package.json` and no workspaces configured — run package scripts from inside each subdir.
@@ -73,7 +73,7 @@ codev-cli (src/auth.ts)              codev-proxy (src/index.ts)          Gateway
 Key invariants across the boundary:
 
 - **The CLI is the SSO client, not the proxy.** All OIDC/PKCE state, tokens, and the loopback callback server live in `codev-cli/src/auth.ts`. The proxy only verifies the access token via `/userinfo`.
-- **The "gateway" is a single endpoint, not the LiteLLM admin API.** `API_URL` is a full URL (e.g. `https://netmind.viettel.vn/gateway/add_user_and_generate_key`), not a base. The proxy posts `{ username }` and reads `key_token` from the response (with fallback to `api_key`/`key`/`token`).
+- **The "gateway" is a single endpoint, not the LiteLLM admin API.** `API_URL` is a full URL (e.g. `https://api.example.com/gateway/add_user_and_generate_key`), not a base. The proxy posts `{ username }` and reads `key_token` from the response (with fallback to `api_key`/`key`/`token`).
 - **Key reuse is the gateway's responsibility.** The proxy makes one call per exchange and trusts the gateway to return the existing key for an existing user. Don't add local caching without confirming behavior.
 - **The CLI's proxy URL is hardcoded.** `codev-cli/src/proxy.ts` targets `http://localhost:8787` as a module constant — the CLI has no runtime env vars and ships no `.env.example`.
 - **`NODE_ENV` gates key logging in the proxy.** In `development`/`staging` (or unset), `/auth/exchange` logs the API key in plaintext for debugging. In `production`, only the email is logged. The proxy's Dockerfile sets `NODE_ENV=production`.

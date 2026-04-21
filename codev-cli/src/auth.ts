@@ -290,7 +290,7 @@ async function getAuthCode(
 			`&code_challenge_method=S256`;
 
 		onReady(() => {
-			onLog("Opening browser for Viettel SSO login...");
+			onLog("Opening browser for SSO login...");
 			openBrowser(authorizeUrl);
 		});
 

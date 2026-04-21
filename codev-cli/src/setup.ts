@@ -144,9 +144,9 @@ export function configureOpenCode(
 	writeJson(join(dirPath, "opencode.json"), {
 		$schema: "https://opencode.ai/config.json",
 		provider: {
-			netmind: {
+			aigateway: {
 				npm: "@ai-sdk/openai-compatible",
-				name: "NetMind Gateway",
+				name: "AI Gateway",
 				options: {
 					baseURL: GATEWAY_OPENAI_BASE_URL,
 					apiKey,

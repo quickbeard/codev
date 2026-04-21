@@ -2,8 +2,8 @@
 
 Token-exchange service between `codev-cli` and the LiteLLM gateway.
 
-The CLI owns the full OIDC / PKCE flow with Viettel SSO. Once it has an access
-token, it calls this proxy to exchange that token for a LiteLLM API key.
+The CLI owns the full OIDC / PKCE flow with the SSO provider. Once it has an
+access token, it calls this proxy to exchange that token for a LiteLLM API key.
 
 ## Flow
 
@@ -32,7 +32,7 @@ per exchange and trusts the gateway to return the existing key.
 Headers:
 
 - `Authorization: Bearer <sso_access_token>` — the token obtained by the CLI
-  from Viettel SSO.
+  from the SSO provider.
 
 Responses:
 

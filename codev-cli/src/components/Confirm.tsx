@@ -31,38 +31,43 @@ export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
 	);
 
 	return (
-		<Box flexDirection="column" marginTop={1}>
-			<Text bold>
-				{"⚠️  "}
-				<Text color="yellow">Heads up</Text>
-				{" — CoDev will replace existing settings for the tools you chose:"}
-			</Text>
+		<Box flexDirection="column">
 			{tools.map((tool) => {
 				const [status] = getBackupStatus(tool);
 				if (!status) return null;
 				const target = `${status.sourcePath}/${CONFIG_FILE[tool]}`;
 				return (
-					<Box key={tool} flexDirection="column" marginTop={1}>
-						<Text>{`  • ${TOOL_LABEL[tool]}`}</Text>
+					<Box key={tool} flexDirection="column">
+						<Text>{`• ${TOOL_LABEL[tool]}`}</Text>
 						<Text>
-							{`    Replaces: ${target}${status.hasSource ? " (exists)" : " (new)"}`}
+							{`  Replaces: ${target}${status.hasSource ? " (exists)" : " (new)"}`}
 						</Text>
 						{status.hasSource && (
 							<Text>
-								{`    Backup:   ${status.sourcePath} → ${status.backupPath}`}
+								{`  Backup:   ${status.sourcePath} → ${status.backupPath}`}
 							</Text>
 						)}
 						<Text>
-							{`    Restore:  rm -rf ${status.sourcePath} && mv ${status.backupPath} ${status.sourcePath}`}
+							{`  Restore:  rm -rf ${status.sourcePath} && mv ${status.backupPath} ${status.sourcePath}`}
 						</Text>
 					</Box>
 				);
 			})}
 			{!readOnly && (
 				<Box marginTop={1}>
-					<Text color="cyan">{"  Continue? [y/N]"}</Text>
+					<Text color="cyan">Continue? [y/N]</Text>
 				</Box>
 			)}
 		</Box>
+	);
+}
+
+export function confirmTitle() {
+	return (
+		<Text bold color="yellow">
+			{
+				"Heads up — CoDev will replace existing settings for the tools you chose"
+			}
+		</Text>
 	);
 }

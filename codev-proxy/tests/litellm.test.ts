@@ -3,7 +3,7 @@ import { getOrProvisionKey, LiteLlmError } from "@/litellm.ts";
 
 const fakeUser = {
 	sub: "u-1",
-	email: "test@viettel.com.vn",
+	email: "test@example.com",
 	displayName: "Test",
 };
 
@@ -114,8 +114,6 @@ describe("getOrProvisionKey", () => {
 			Authorization: "Bearer test-auth-token",
 			"Content-Type": "application/json",
 		});
-		expect(init?.body).toBe(
-			JSON.stringify({ username: "test@viettel.com.vn" }),
-		);
+		expect(init?.body).toBe(JSON.stringify({ username: "test@example.com" }));
 	});
 });

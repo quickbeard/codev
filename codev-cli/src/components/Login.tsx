@@ -38,21 +38,20 @@ export function Login({ onDone }: LoginProps) {
 	});
 
 	return (
-		<Box flexDirection="column" marginTop={1}>
-			<Text bold>
-				{"🔐 "}
-				<Text color="yellow">Step 2/3</Text>
-				{" — Login to Viettel SSO:"}
-			</Text>
+		<Box flexDirection="column">
 			{logs.map((log, i) => (
-				<Text key={`login-${i.toString()}`}>{`  ${log}`}</Text>
+				<Text key={`login-${i.toString()}`}>{log}</Text>
 			))}
 			{waitingForEnter && (
 				<Text color="cyan">
-					{"  Press Enter to open the browser and login..."}
+					{"Press Enter to open the browser and login..."}
 				</Text>
 			)}
-			{error && <Text color="red">{`  Login failed: ${error}`}</Text>}
+			{error && <Text color="red">{`Login failed: ${error}`}</Text>}
 		</Box>
 	);
+}
+
+export function loginTitle() {
+	return <Text bold>{"Login to SSO"}</Text>;
 }

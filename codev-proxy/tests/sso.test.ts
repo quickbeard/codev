@@ -11,7 +11,7 @@ describe("verifySsoToken", () => {
 			new Response(
 				JSON.stringify({
 					sub: "user-123",
-					email: "test@viettel.com.vn",
+					email: "test@example.com",
 					displayName: "Test User",
 				}),
 				{ status: 200 },
@@ -21,7 +21,7 @@ describe("verifySsoToken", () => {
 		const user = await verifySsoToken("valid-token");
 		expect(user).toEqual({
 			sub: "user-123",
-			email: "test@viettel.com.vn",
+			email: "test@example.com",
 			displayName: "Test User",
 		});
 	});

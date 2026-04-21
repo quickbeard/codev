@@ -2,9 +2,9 @@ import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 import type { Tool } from "@/setup.js";
 
-const TOOLS: { label: string; icon: string; value: Tool }[] = [
-	{ label: "Claude Code", icon: "🤖", value: "claude-code" },
-	{ label: "OpenCode", icon: "💻", value: "opencode" },
+const TOOLS: { label: string; value: Tool }[] = [
+	{ label: "Claude Code", value: "claude-code" },
+	{ label: "OpenCode", value: "opencode" },
 ];
 
 interface ToolSelectProps {
@@ -43,39 +43,31 @@ export function ToolSelect({ onConfirm, readOnly = false }: ToolSelectProps) {
 	);
 
 	return (
-		<Box marginTop={1} flexDirection="column">
-			<Text bold>
-				{"📋 "}
-				<Text color="yellow">Step 1/3</Text>
-				{" — Select the AI agent(s) to install and configure:"}
-			</Text>
-			{!readOnly && (
-				<Text dimColor>
-					{"\n"}Use ↑/↓ to navigate, Space to select, Enter to confirm
-				</Text>
-			)}
-			<Box flexDirection="column" marginTop={1}>
-				{TOOLS.map((tool, i) => {
-					const isSelected = selected.has(tool.value);
-					const isCursor = !readOnly && cursor === i;
-					const pointer = readOnly ? " " : isCursor ? "❯" : " ";
-					return (
-						<Box key={tool.value}>
-							<Text bold color={isCursor ? "yellow" : undefined}>
-								{pointer}{" "}
-							</Text>
-							<Text>{tool.icon} </Text>
-							<Text
-								color={isCursor ? "yellow" : isSelected ? "green" : undefined}
-								bold={isCursor}
-							>
-								{tool.label}
-							</Text>
-							{isSelected && <Text color="green"> ✔</Text>}
-						</Box>
-					);
-				})}
-			</Box>
+		<Box flexDirection="column">
+			{TOOLS.map((tool, i) => {
+				const isSelected = selected.has(tool.value);
+				const isCursor = !readOnly && cursor === i;
+				return (
+					<Box key={tool.value}>
+						<Text color={isSelected ? "green" : undefined}>
+							{isSelected ? "■" : "□"}
+						</Text>
+						<Text> </Text>
+						<Text bold={isCursor} dimColor={!isCursor}>
+							{tool.label}
+						</Text>
+					</Box>
+				);
+			})}
 		</Box>
+	);
+}
+
+export function toolSelectTitle(readOnly = false) {
+	return (
+		<Text bold>
+			{"Select the AI agent(s) to install "}
+			{!readOnly && <Text dimColor>(space to toggle, enter to confirm)</Text>}
+		</Text>
 	);
 }
