@@ -134,7 +134,8 @@ export function Configure({ tools, apiKey, onDone }: ConfigureProps) {
 				<Text key={`cfg-${i.toString()}`}>{log}</Text>
 			))}
 			{phase === "done" && (
-				<Box marginTop={1} marginBottom={1}>
+				<Box marginTop={1} marginBottom={1} flexDirection="column">
+					<Text dimColor>{"Run `codev --help` to see all commands."}</Text>
 					<Text bold color="magenta">
 						{"🎉 Happy coding!"}
 					</Text>

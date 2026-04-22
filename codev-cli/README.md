@@ -1,11 +1,11 @@
-# codev-cli
+# codev-ai
 
-A CLI tool to install and configure coding agents (Claude Code, OpenCode).
+CoDev — AI Coding Agent Hub. Install, configure, and launch AI coding agents (Claude Code, OpenCode) from a single CLI.
 
 ## Install
 
 ```bash
-npm install -g codev-cli
+npm install -g codev-ai
 ```
 
 Then run:

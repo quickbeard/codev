@@ -1,5 +1,5 @@
 {
-  "name": "codev-cli",
+  "name": "codev-ai",
   "version": "0.1.0",
   "type": "module",
   "bin": {
@@ -15,7 +15,8 @@
     "test": "bun test",
     "typecheck": "bunx --bun tsc --noEmit",
     "check": "bunx --bun @biomejs/biome check",
-    "fix": "bunx --bun @biomejs/biome check --write"
+    "fix": "bunx --bun @biomejs/biome check --write",
+    "prepublishOnly": "bun run check && bun run typecheck && bun test && bun run build"
   },
   "dependencies": {
     "ink": "^7.0.0",

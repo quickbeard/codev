@@ -6,7 +6,7 @@ function link(url: string): string {
 }
 
 export function printHelp() {
-	console.log(`codev v${VERSION} — AI Coding Agent Hub
+	console.log(`CoDev v${VERSION} — AI Coding Agent Hub
 
 Usage:
   codev install       Install and configure AI coding agents

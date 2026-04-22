@@ -61,7 +61,7 @@ export function App() {
 	return (
 		<Box flexDirection="column" padding={1}>
 			<Banner />
-			<Frame tag="codev">
+			<Frame tag="CoDev">
 				<Step
 					active={step === "select"}
 					title={toolSelectTitle(step !== "select")}
