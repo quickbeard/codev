@@ -6,6 +6,8 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { BASE_URL } from "@/const.js";
@@ -222,83 +224,85 @@ async function getAuthCode(
 			}
 		};
 
-		const server = Bun.serve({
-			port: 0,
-			hostname: "127.0.0.1",
-			fetch(req) {
-				const url = new URL(req.url);
-				if (url.pathname !== "/callback") {
-					return new Response("Not found", { status: 404 });
-				}
+		const server = createServer((req, res) => {
+			const host = req.headers.host ?? "127.0.0.1";
+			const url = new URL(req.url ?? "/", `http://${host}`);
 
-				const code = url.searchParams.get("code");
-				const error = url.searchParams.get("error");
-				const returnedState = url.searchParams.get("state");
+			if (url.pathname !== "/callback") {
+				res.writeHead(404, { "Content-Type": "text/plain" });
+				res.end("Not found");
+				return;
+			}
 
-				if (error) {
-					const desc = url.searchParams.get("error_description") || error;
-					finish();
-					server.stop();
-					reject(new Error(`SSO login failed: ${desc}`));
-					return new Response(loginResultHtml(false, desc), {
-						headers: { "Content-Type": "text/html" },
-					});
-				}
+			const code = url.searchParams.get("code");
+			const error = url.searchParams.get("error");
+			const returnedState = url.searchParams.get("state");
 
-				if (!code) {
-					finish();
-					server.stop();
-					reject(new Error("No authorization code received"));
-					return new Response(
-						loginResultHtml(false, "No authorization code received"),
-						{ headers: { "Content-Type": "text/html" } },
-					);
-				}
+			const respond = (ok: boolean, msg?: string) => {
+				res.writeHead(ok ? 200 : 400, { "Content-Type": "text/html" });
+				res.end(loginResultHtml(ok, msg));
+			};
 
-				if (returnedState !== expectedState) {
-					finish();
-					server.stop();
-					reject(new Error("State mismatch (possible CSRF attack)"));
-					return new Response(loginResultHtml(false, "State mismatch"), {
-						headers: { "Content-Type": "text/html" },
-					});
-				}
-
+			if (error) {
+				const desc = url.searchParams.get("error_description") || error;
+				respond(false, desc);
 				finish();
-				server.stop();
-				resolve({
-					code,
-					redirectUri: `http://127.0.0.1:${server.port}/callback`,
-				});
+				server.close();
+				reject(new Error(`SSO login failed: ${desc}`));
+				return;
+			}
 
-				return new Response(loginResultHtml(true), {
-					headers: { "Content-Type": "text/html" },
-				});
-			},
+			if (!code) {
+				respond(false, "No authorization code received");
+				finish();
+				server.close();
+				reject(new Error("No authorization code received"));
+				return;
+			}
+
+			if (returnedState !== expectedState) {
+				respond(false, "State mismatch");
+				finish();
+				server.close();
+				reject(new Error("State mismatch (possible CSRF attack)"));
+				return;
+			}
+
+			const { port } = server.address() as AddressInfo;
+			respond(true);
+			finish();
+			server.close();
+			resolve({
+				code,
+				redirectUri: `http://127.0.0.1:${port}/callback`,
+			});
 		});
 
-		const redirectUri = `http://127.0.0.1:${server.port}/callback`;
-		const authorizeUrl =
-			`${SSO_BASE_URL}/authorize?` +
-			`response_type=code` +
-			`&client_id=${encodeURIComponent(CLIENT_ID)}` +
-			`&redirect_uri=${encodeURIComponent(redirectUri)}` +
-			`&scope=openid%20profile%20email%20offline_access` +
-			`&state=${expectedState}` +
-			`&nonce=${nonce}` +
-			`&code_challenge=${codeChallenge}` +
-			`&code_challenge_method=S256`;
+		server.listen(0, "127.0.0.1", () => {
+			const { port } = server.address() as AddressInfo;
+			const redirectUri = `http://127.0.0.1:${port}/callback`;
+			const authorizeUrl =
+				`${SSO_BASE_URL}/authorize?` +
+				`response_type=code` +
+				`&client_id=${encodeURIComponent(CLIENT_ID)}` +
+				`&redirect_uri=${encodeURIComponent(redirectUri)}` +
+				`&scope=openid%20profile%20email%20offline_access` +
+				`&state=${expectedState}` +
+				`&nonce=${nonce}` +
+				`&code_challenge=${codeChallenge}` +
+				`&code_challenge_method=S256`;
 
-		onReady(() => {
-			onLog("Opening browser for SSO login...");
-			openBrowser(authorizeUrl);
+			onReady(() => {
+				onLog("Opening browser for SSO login...");
+				openBrowser(authorizeUrl);
+			});
+
+			timeoutHandle = setTimeout(() => {
+				timeoutHandle = null;
+				server.close();
+				reject(new Error("Login timed out after 120 seconds"));
+			}, 120_000);
 		});
-
-		timeoutHandle = setTimeout(() => {
-			timeoutHandle = null;
-			server.stop();
-			reject(new Error("Login timed out after 120 seconds"));
-		}, 120_000);
 	});
 }
 
