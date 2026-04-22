@@ -1,10 +1,10 @@
 function link(url: string): string {
-  if (!process.stdout.isTTY) return url;
-  return `\x1b]8;;${url}\x1b\\${url}\x1b]8;;\x1b\\`;
+	if (!process.stdout.isTTY) return url;
+	return `\x1b]8;;${url}\x1b\\${url}\x1b]8;;\x1b\\`;
 }
 
 export function printHelp() {
-  console.log(`CoDev — AI Coding Agent Hub
+	console.log(`CoDev — AI Coding Agent Hub
 
 Usage: codev <command> [options]
 
