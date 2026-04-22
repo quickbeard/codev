@@ -1,6 +1,6 @@
 import {
 	chmodSync,
-	cpSync,
+	copyFileSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
@@ -9,11 +9,11 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { BASE_URL } from "@/const.js";
 
 export type Tool = "claude-code" | "opencode";
-export type BackupKind = "claude-dir" | "opencode-dir";
+export type BackupKind = "claude-settings" | "opencode-config";
 
 export interface BackupStatus {
 	kind: BackupKind;
@@ -39,10 +39,10 @@ const MODEL_NAME = "MiniMax";
 
 function sourcePathOf(kind: BackupKind): string {
 	switch (kind) {
-		case "claude-dir":
-			return join(homedir(), ".claude");
-		case "opencode-dir":
-			return join(homedir(), ".config", "opencode");
+		case "claude-settings":
+			return join(homedir(), ".claude", "settings.json");
+		case "opencode-config":
+			return join(homedir(), ".config", "opencode", "opencode.json");
 	}
 }
 
@@ -60,9 +60,9 @@ function statusFor(kind: BackupKind): BackupStatus {
 
 export function getBackupStatus(tool: Tool): BackupStatus[] {
 	if (tool === "claude-code") {
-		return [statusFor("claude-dir")];
+		return [statusFor("claude-settings")];
 	}
-	return [statusFor("opencode-dir")];
+	return [statusFor("opencode-config")];
 }
 
 function ensureBackup(kind: BackupKind, overwrite: boolean): string | null {
@@ -73,9 +73,9 @@ function ensureBackup(kind: BackupKind, overwrite: boolean): string | null {
 	}
 	if (existsSync(backupPath)) {
 		if (!overwrite) return backupPath;
-		rmSync(backupPath, { recursive: true, force: true });
+		rmSync(backupPath, { force: true });
 	}
-	cpSync(sourcePath, backupPath, { recursive: true });
+	copyFileSync(sourcePath, backupPath);
 	return backupPath;
 }
 
@@ -110,11 +110,14 @@ export function configureClaudeCode(
 
 	bypassClaudeLogin();
 
-	const dirBackup = ensureBackup("claude-dir", overwrites.has("claude-dir"));
-	const dirPath = sourcePathOf("claude-dir");
-	mkdirSync(dirPath, { recursive: true });
+	const backupPath = ensureBackup(
+		"claude-settings",
+		overwrites.has("claude-settings"),
+	);
+	const sourcePath = sourcePathOf("claude-settings");
+	mkdirSync(dirname(sourcePath), { recursive: true });
 
-	writeJson(join(dirPath, "settings.json"), {
+	writeJson(sourcePath, {
 		$schema: "https://json.schemastore.org/claude-code-settings.json",
 		env: {
 			ANTHROPIC_BASE_URL: GATEWAY_BASE_URL,
@@ -127,7 +130,7 @@ export function configureClaudeCode(
 		},
 	});
 
-	return [{ kind: "claude-dir", sourcePath: dirPath, backupPath: dirBackup }];
+	return [{ kind: "claude-settings", sourcePath, backupPath }];
 }
 
 export type RestoreStatus = "restored" | "no-backup";
@@ -140,7 +143,7 @@ export interface RestoreResult {
 
 export function restoreTool(tool: Tool): RestoreResult {
 	const kind: BackupKind =
-		tool === "claude-code" ? "claude-dir" : "opencode-dir";
+		tool === "claude-code" ? "claude-settings" : "opencode-config";
 	const sourcePath = sourcePathOf(kind);
 	const backupPath = `${sourcePath}.backup`;
 
@@ -148,7 +151,7 @@ export function restoreTool(tool: Tool): RestoreResult {
 		return { status: "no-backup", sourcePath, backupPath };
 	}
 
-	rmSync(sourcePath, { recursive: true, force: true });
+	rmSync(sourcePath, { force: true });
 	renameSync(backupPath, sourcePath);
 	return { status: "restored", sourcePath, backupPath };
 }
@@ -158,14 +161,14 @@ export function configureOpenCode(
 	opts: ConfigureOptions = {},
 ): ConfigureResult[] {
 	const overwrites = opts.overwriteBackups ?? new Set<BackupKind>();
-	const dirBackup = ensureBackup(
-		"opencode-dir",
-		overwrites.has("opencode-dir"),
+	const backupPath = ensureBackup(
+		"opencode-config",
+		overwrites.has("opencode-config"),
 	);
-	const dirPath = sourcePathOf("opencode-dir");
-	mkdirSync(dirPath, { recursive: true });
+	const sourcePath = sourcePathOf("opencode-config");
+	mkdirSync(dirname(sourcePath), { recursive: true });
 
-	writeJson(join(dirPath, "opencode.json"), {
+	writeJson(sourcePath, {
 		$schema: "https://opencode.ai/config.json",
 		provider: {
 			aigateway: {
@@ -184,5 +187,5 @@ export function configureOpenCode(
 		},
 	});
 
-	return [{ kind: "opencode-dir", sourcePath: dirPath, backupPath: dirBackup }];
+	return [{ kind: "opencode-config", sourcePath, backupPath }];
 }

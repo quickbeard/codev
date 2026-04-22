@@ -31,27 +31,27 @@ afterEach(() => {
 	rmSync(tempDir, { recursive: true, force: true });
 });
 
-function seedBackup(relBackupPath: string, marker: string) {
-	const backupPath = join(tempDir, relBackupPath);
-	mkdirSync(backupPath, { recursive: true });
-	writeFileSync(join(backupPath, "marker.json"), JSON.stringify({ marker }));
-	return backupPath;
+function seedBackup(relFilePath: string, marker: string) {
+	const livePath = join(tempDir, relFilePath);
+	const backupPath = `${livePath}.backup`;
+	mkdirSync(join(livePath, ".."), { recursive: true });
+	writeFileSync(backupPath, JSON.stringify({ marker }));
+	return { livePath, backupPath };
 }
 
 describe("runRestore", () => {
 	test("restores Claude from backup and prints success", () => {
-		const livePath = join(tempDir, ".claude");
-		const backupPath = seedBackup(".claude.backup", "claude-backup");
-		mkdirSync(livePath, { recursive: true });
-		writeFileSync(join(livePath, "marker.json"), '{"marker":"claude-live"}');
+		const { livePath, backupPath } = seedBackup(
+			".claude/settings.json",
+			"claude-backup",
+		);
+		writeFileSync(livePath, '{"marker":"claude-live"}');
 
 		const code = runRestore("claude-code");
 
 		expect(code).toBe(0);
 		expect(existsSync(backupPath)).toBe(false);
-		const restored = JSON.parse(
-			readFileSync(join(livePath, "marker.json"), "utf-8"),
-		);
+		const restored = JSON.parse(readFileSync(livePath, "utf-8"));
 		expect(restored.marker).toBe("claude-backup");
 
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
@@ -67,8 +67,10 @@ describe("runRestore", () => {
 	});
 
 	test("restores OpenCode from backup and prints success", () => {
-		const livePath = join(tempDir, ".config", "opencode");
-		const backupPath = seedBackup(".config/opencode.backup", "opencode-backup");
+		const { livePath, backupPath } = seedBackup(
+			".config/opencode/opencode.json",
+			"opencode-backup",
+		);
 
 		const code = runRestore("opencode");
 
@@ -96,7 +98,7 @@ describe("runRestore", () => {
 			errors.some(
 				(e: string) =>
 					e.startsWith("No backup found at") &&
-					e.includes(join(tempDir, ".claude.backup")),
+					e.includes(join(tempDir, ".claude", "settings.json.backup")),
 			),
 		).toBe(true);
 		expect(logSpy).not.toHaveBeenCalled();
@@ -111,7 +113,9 @@ describe("runRestore", () => {
 			errors.some(
 				(e: string) =>
 					e.startsWith("No backup found at") &&
-					e.includes(join(tempDir, ".config", "opencode.backup")),
+					e.includes(
+						join(tempDir, ".config", "opencode", "opencode.json.backup"),
+					),
 			),
 		).toBe(true);
 	});
