@@ -23,13 +23,13 @@ interface Conflict {
 }
 
 const LABEL: Record<BackupKind, string> = {
-	"claude-dir": "Claude Code",
-	"opencode-dir": "OpenCode",
+	"claude-settings": "Claude Code",
+	"opencode-config": "OpenCode",
 };
 
 const RESTORE_CMD: Record<BackupKind, string> = {
-	"claude-dir": "codev claude --restore",
-	"opencode-dir": "codev opencode --restore",
+	"claude-settings": "codev claude --restore",
+	"opencode-config": "codev opencode --restore",
 };
 
 function scanConflicts(tools: Tool[]): Conflict[] {

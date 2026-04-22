@@ -22,21 +22,21 @@ codev install
 | `codev --help`             | Show version and help                                         |
 | `codev install`            | Install and configure AI coding agents                        |
 | `codev claude`             | Run the `claude` CLI (forwards remaining arguments)           |
-| `codev claude --restore`   | Restore `~/.claude` from `~/.claude.backup`                   |
-| `codev opencode`           | Run the `opencode` CLI (forwards remaining arguments)         |
-| `codev opencode --restore` | Restore `~/.config/opencode` from `~/.config/opencode.backup` |
-| `codev logout`             | Sign out of SSO                                               |
+| `codev claude --restore`   | Restore `~/.claude/settings.json` from `~/.claude/settings.json.backup`                   |
+| `codev opencode`           | Run the `opencode` CLI (forwards remaining arguments)                                     |
+| `codev opencode --restore` | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup` |
+| `codev logout`             | Sign out of SSO                                                                           |
 
 ## Restoring a previous configuration
 
-CoDev will replace `~/.claude/settings.json` and `~/.config/opencode/opencode.json` with new configs. Before writing its own config, CoDev backs up the directory it would replace.
+CoDev will replace `~/.claude/settings.json` and `~/.config/opencode/opencode.json` with new configs. Before writing its own config, CoDev backs up the specific file it would replace — other files in those directories are left untouched.
 
-| Selection   | Backed up                   |
-| ----------- | --------------------------- |
-| Claude Code | `~/.claude.backup`          |
-| OpenCode    | `~/.config/opencode.backup` |
+| Selection   | Backed up                                  |
+| ----------- | ------------------------------------------ |
+| Claude Code | `~/.claude/settings.json.backup`           |
+| OpenCode    | `~/.config/opencode/opencode.json.backup`  |
 
-`settings.json` and `opencode.json` are **replaced** (not merged), so any keys you had before live only in the directory backup.
+`settings.json` and `opencode.json` are **replaced** (not merged), so any keys you had before live only in the file backup.
 
 ### Existing backups
 
@@ -51,16 +51,16 @@ codev claude --restore
 codev opencode --restore
 ```
 
-Each command removes the active directory and renames the corresponding `*.backup` back into place. If no backup exists, the command prints a "No backup found" message and exits with code 1.
+Each command removes the active config file and renames the corresponding `*.backup` back into place. If no backup exists, the command prints a "No backup found" message and exits with code 1.
 
 Or do it manually:
 
 ```bash
 # Claude Code
-rm -rf ~/.claude && mv ~/.claude.backup ~/.claude
+mv ~/.claude/settings.json.backup ~/.claude/settings.json
 
 # OpenCode
-rm -rf ~/.config/opencode && mv ~/.config/opencode.backup ~/.config/opencode
+mv ~/.config/opencode/opencode.json.backup ~/.config/opencode/opencode.json
 ```
 
 The restore command for each backup is also printed in the CLI after each tool is configured.

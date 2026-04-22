@@ -116,11 +116,11 @@ describe("configureClaudeCode", () => {
 		expect(config.hasCompletedOnboarding).toBe(true);
 	});
 
-	test("replaces existing settings.json and backs up the directory", async () => {
+	test("replaces existing settings.json and backs up the file", async () => {
 		const dir = join(tempDir, ".claude");
-		const backupDir = join(tempDir, ".claude.backup");
-		mkdirSync(dir, { recursive: true });
 		const filePath = join(dir, "settings.json");
+		const backupPath = `${filePath}.backup`;
+		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			filePath,
 			JSON.stringify({
@@ -128,19 +128,15 @@ describe("configureClaudeCode", () => {
 				env: { FOO: "bar", ANTHROPIC_API_KEY: "old" },
 			}),
 		);
-		writeFileSync(join(dir, "CLAUDE.md"), "user notes");
 
 		const { configureClaudeCode } = await import("@/setup.js");
 		const results = configureClaudeCode("sk-new");
 
-		const dirResult = results.find((r) => r.kind === "claude-dir");
-		expect(dirResult?.backupPath).toBe(backupDir);
-		expect(existsSync(join(backupDir, "settings.json"))).toBe(true);
-		expect(existsSync(join(backupDir, "CLAUDE.md"))).toBe(true);
+		const result = results.find((r) => r.kind === "claude-settings");
+		expect(result?.backupPath).toBe(backupPath);
+		expect(existsSync(backupPath)).toBe(true);
 
-		const backup = JSON.parse(
-			readFileSync(join(backupDir, "settings.json"), "utf-8"),
-		);
+		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
 		expect(backup.otherKey).toBe("keep");
 		expect(backup.env.ANTHROPIC_API_KEY).toBe("old");
 
@@ -150,40 +146,52 @@ describe("configureClaudeCode", () => {
 		expect(config.env.ANTHROPIC_API_KEY).toBe("sk-new");
 	});
 
-	test("preserves a pre-existing .claude backup across repeated runs", async () => {
+	test("does not touch unrelated files in ~/.claude", async () => {
 		const dir = join(tempDir, ".claude");
-		const backupDir = join(tempDir, ".claude.backup");
-		mkdirSync(backupDir, { recursive: true });
-		writeFileSync(join(backupDir, "marker.txt"), "original");
 		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "settings.json"), JSON.stringify({ env: {} }));
+		writeFileSync(join(dir, "CLAUDE.md"), "user notes");
+
+		const { configureClaudeCode } = await import("@/setup.js");
+		configureClaudeCode("sk-new");
+
+		expect(readFileSync(join(dir, "CLAUDE.md"), "utf-8")).toBe("user notes");
+		expect(existsSync(join(dir, "CLAUDE.md.backup"))).toBe(false);
+	});
+
+	test("preserves a pre-existing settings.json backup across repeated runs", async () => {
+		const dir = join(tempDir, ".claude");
+		const filePath = join(dir, "settings.json");
+		const backupPath = `${filePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(backupPath, JSON.stringify({ marker: "original" }));
 		writeFileSync(
-			join(dir, "settings.json"),
+			filePath,
 			JSON.stringify({ env: { ANTHROPIC_API_KEY: "prev-codev-run" } }),
 		);
 
 		const { configureClaudeCode } = await import("@/setup.js");
 		configureClaudeCode("sk-new");
 
-		expect(readFileSync(join(backupDir, "marker.txt"), "utf-8")).toBe(
-			"original",
-		);
+		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
+		expect(backup.marker).toBe("original");
 	});
 
-	test("overwrites pre-existing .claude backup when claude-dir is in overwriteBackups", async () => {
+	test("overwrites pre-existing settings.json backup when claude-settings is in overwriteBackups", async () => {
 		const dir = join(tempDir, ".claude");
-		const backupDir = join(tempDir, ".claude.backup");
-		mkdirSync(backupDir, { recursive: true });
-		writeFileSync(join(backupDir, "stale.txt"), "old");
+		const filePath = join(dir, "settings.json");
+		const backupPath = `${filePath}.backup`;
 		mkdirSync(dir, { recursive: true });
-		writeFileSync(join(dir, "fresh.txt"), "new");
+		writeFileSync(backupPath, JSON.stringify({ marker: "stale" }));
+		writeFileSync(filePath, JSON.stringify({ marker: "fresh" }));
 
 		const { configureClaudeCode } = await import("@/setup.js");
 		configureClaudeCode("sk-new", {
-			overwriteBackups: new Set(["claude-dir"]),
+			overwriteBackups: new Set(["claude-settings"]),
 		});
 
-		expect(existsSync(join(backupDir, "stale.txt"))).toBe(false);
-		expect(existsSync(join(backupDir, "fresh.txt"))).toBe(true);
+		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
+		expect(backup.marker).toBe("fresh");
 	});
 });
 
@@ -212,11 +220,11 @@ describe("configureOpenCode", () => {
 		expect(existsSync(join(tempDir, ".claude.json"))).toBe(false);
 	});
 
-	test("replaces existing opencode.json and backs up the directory", async () => {
+	test("replaces existing opencode.json and backs up the file", async () => {
 		const dir = join(tempDir, ".config", "opencode");
-		const backupDir = join(tempDir, ".config", "opencode.backup");
-		mkdirSync(dir, { recursive: true });
 		const filePath = join(dir, "opencode.json");
+		const backupPath = `${filePath}.backup`;
+		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			filePath,
 			JSON.stringify({
@@ -228,10 +236,8 @@ describe("configureOpenCode", () => {
 		const { configureOpenCode } = await import("@/setup.js");
 		const results = configureOpenCode("sk-new");
 
-		expect(results[0]?.backupPath).toBe(backupDir);
-		const backup = JSON.parse(
-			readFileSync(join(backupDir, "opencode.json"), "utf-8"),
-		);
+		expect(results[0]?.backupPath).toBe(backupPath);
+		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
 		expect(backup.someSetting).toBe("keep");
 		expect(backup.provider.other.name).toBe("Other");
 
@@ -243,16 +249,16 @@ describe("configureOpenCode", () => {
 });
 
 describe("getBackupStatus", () => {
-	test("returns only claude-dir for claude-code", async () => {
+	test("returns claude-settings for claude-code", async () => {
 		const { getBackupStatus } = await import("@/setup.js");
 		const statuses = getBackupStatus("claude-code");
-		expect(statuses.map((s) => s.kind)).toEqual(["claude-dir"]);
+		expect(statuses.map((s) => s.kind)).toEqual(["claude-settings"]);
 	});
 
-	test("returns opencode-dir for opencode", async () => {
+	test("returns opencode-config for opencode", async () => {
 		const { getBackupStatus } = await import("@/setup.js");
 		const statuses = getBackupStatus("opencode");
-		expect(statuses.map((s) => s.kind)).toEqual(["opencode-dir"]);
+		expect(statuses.map((s) => s.kind)).toEqual(["opencode-config"]);
 	});
 
 	test("reports hasSource and hasBackup accurately", async () => {
@@ -267,13 +273,13 @@ describe("getBackupStatus", () => {
 });
 
 describe("restoreTool", () => {
-	test("replaces the live Claude dir with the backup", async () => {
-		const livePath = join(tempDir, ".claude");
+	test("replaces the live Claude settings.json with the backup", async () => {
+		const dir = join(tempDir, ".claude");
+		const livePath = join(dir, "settings.json");
 		const backupPath = `${livePath}.backup`;
-		mkdirSync(livePath, { recursive: true });
-		writeFileSync(join(livePath, "settings.json"), '{"marker":"live"}');
-		mkdirSync(backupPath, { recursive: true });
-		writeFileSync(join(backupPath, "settings.json"), '{"marker":"backup"}');
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(livePath, '{"marker":"live"}');
+		writeFileSync(backupPath, '{"marker":"backup"}');
 
 		const { restoreTool } = await import("@/setup.js");
 		const result = restoreTool("claude-code");
@@ -281,17 +287,31 @@ describe("restoreTool", () => {
 		expect(result.status).toBe("restored");
 		expect(existsSync(backupPath)).toBe(false);
 		expect(existsSync(livePath)).toBe(true);
-		const restored = JSON.parse(
-			readFileSync(join(livePath, "settings.json"), "utf-8"),
-		);
+		const restored = JSON.parse(readFileSync(livePath, "utf-8"));
 		expect(restored.marker).toBe("backup");
 	});
 
-	test("restores when no live dir is present", async () => {
-		const livePath = join(tempDir, ".config", "opencode");
+	test("does not disturb other files in the target directory", async () => {
+		const dir = join(tempDir, ".claude");
+		const livePath = join(dir, "settings.json");
 		const backupPath = `${livePath}.backup`;
-		mkdirSync(backupPath, { recursive: true });
-		writeFileSync(join(backupPath, "opencode.json"), '{"marker":"backup"}');
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(livePath, '{"marker":"live"}');
+		writeFileSync(backupPath, '{"marker":"backup"}');
+		writeFileSync(join(dir, "CLAUDE.md"), "user notes");
+
+		const { restoreTool } = await import("@/setup.js");
+		restoreTool("claude-code");
+
+		expect(readFileSync(join(dir, "CLAUDE.md"), "utf-8")).toBe("user notes");
+	});
+
+	test("restores when no live file is present", async () => {
+		const dir = join(tempDir, ".config", "opencode");
+		const livePath = join(dir, "opencode.json");
+		const backupPath = `${livePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(backupPath, '{"marker":"backup"}');
 
 		const { restoreTool } = await import("@/setup.js");
 		const result = restoreTool("opencode");
@@ -306,6 +326,8 @@ describe("restoreTool", () => {
 		const result = restoreTool("claude-code");
 
 		expect(result.status).toBe("no-backup");
-		expect(result.backupPath).toBe(join(tempDir, ".claude.backup"));
+		expect(result.backupPath).toBe(
+			join(tempDir, ".claude", "settings.json.backup"),
+		);
 	});
 });

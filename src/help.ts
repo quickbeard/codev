@@ -11,9 +11,9 @@ Usage: codev <command> [options]
 Commands:
   install             Install and configure AI coding agents
   claude              Run the Claude Code CLI (${link("https://code.claude.com/docs/en/cli-reference")})
-  claude --restore    Restore ~/.claude from ~/.claude.backup
-  opencode            Run the OpenCode CLI (${link("https://opencode.ai/docs/cli/")})
-  opencode --restore  Restore ~/.config/opencode from ~/.config/opencode.backup
+  claude --restore    Restore ~/.claude/settings.json from ~/.claude/settings.json.backup
+  opencode            Run the OpenCode CLI (${link("https://opencode.ai/docs/cli")})
+  opencode --restore  Restore ~/.config/opencode/opencode.json from ~/.config/opencode/opencode.json.backup
   logout              Sign out of SSO
   --help, -h          Show this help
 `);

@@ -12,11 +12,6 @@ const TOOL_LABEL: Record<Tool, string> = {
 	opencode: "OpenCode",
 };
 
-const CONFIG_FILE: Record<Tool, string> = {
-	"claude-code": "settings.json",
-	opencode: "opencode.json",
-};
-
 const RESTORE_CMD: Record<Tool, string> = {
 	"claude-code": "codev claude --restore",
 	opencode: "codev opencode --restore",
@@ -40,12 +35,11 @@ export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
 			{tools.map((tool) => {
 				const [status] = getBackupStatus(tool);
 				if (!status) return null;
-				const target = `${status.sourcePath}/${CONFIG_FILE[tool]}`;
 				return (
 					<Box key={tool} flexDirection="column">
 						<Text>{`• ${TOOL_LABEL[tool]}`}</Text>
 						<Text>
-							{`  Replaces: ${target}${status.hasSource ? " (exists)" : " (new)"}`}
+							{`  Replaces: ${status.sourcePath}${status.hasSource ? " (exists)" : " (new)"}`}
 						</Text>
 						{status.hasSource && (
 							<Text>
