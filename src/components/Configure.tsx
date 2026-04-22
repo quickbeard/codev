@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from "ink";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
 	type BackupKind,
 	type ConfigureResult,
@@ -31,6 +31,32 @@ const RESTORE_CMD: Record<BackupKind, string> = {
 	"claude-settings": "codev claude --restore",
 	"opencode-config": "codev opencode --restore",
 };
+
+const RESUME_CMD: Record<Tool, string> = {
+	"claude-code": "codev claude -c",
+	opencode: "codev opencode -c",
+};
+
+function resumeMessage(tools: Tool[]): ReactNode {
+	if (tools.length === 0) return null;
+	const parts = tools.flatMap((t, i) => {
+		const cmd = (
+			<Text key={t} color="cyan">
+				{RESUME_CMD[t]}
+			</Text>
+		);
+		if (i === 0) return [cmd];
+		const sep = i === tools.length - 1 ? " or " : ", ";
+		return [sep, cmd];
+	});
+	return (
+		<Text>
+			{"Done! If you have a session running, you need to restart it with "}
+			{parts}
+			{" to resume your progress."}
+		</Text>
+	);
+}
 
 function scanConflicts(tools: Tool[]): Conflict[] {
 	const out: Conflict[] = [];
@@ -137,8 +163,11 @@ export function Configure({ tools, apiKey, onDone }: ConfigureProps) {
 				<Text key={`cfg-${i.toString()}`}>{log}</Text>
 			))}
 			{phase === "done" && (
-				<Box marginTop={1} marginBottom={1} flexDirection="column">
-					<Text dimColor>{"Run `codev --help` to see all commands."}</Text>
+				<Box marginBottom={1} flexDirection="column">
+					{resumeMessage(tools)}
+					<Box marginTop={1}>
+						<Text dimColor>{"Run `codev --help` to see all commands."}</Text>
+					</Box>
 					<Text bold color="magenta">
 						{"🎉 Happy coding!"}
 					</Text>

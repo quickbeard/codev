@@ -1,6 +1,6 @@
 {
   "name": "codev-ai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CoDev — AI Coding Agent Hub. Install, configure, and manage AI coding agents (Claude Code, OpenCode, etc.) from a single CLI.",
   "type": "module",
   "bin": {
@@ -17,10 +17,10 @@
     "typecheck": "bunx --bun tsc --noEmit",
     "check": "bunx --bun @biomejs/biome check",
     "fix": "bunx --bun @biomejs/biome check --write",
-    "prepublishOnly": "bun run check && bun run typecheck && bun test && bun run build",
+    "prepare": "husky",
+    "prepublishOnly": "bun check && bun typecheck && bun test && bun run build",
     "prepack": "mv README.md README.repo.md && mv README.npm.md README.md",
-    "postpack": "mv README.md README.npm.md && mv README.repo.md README.md",
-    "prepare": "husky"
+    "postpack": "mv README.md README.npm.md && mv README.repo.md README.md"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "ink": "^7.0.1",
+    "ink-spinner": "^5.0.0",
     "react": "^19.2.5"
   },
   "devDependencies": {

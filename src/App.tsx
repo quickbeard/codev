@@ -1,10 +1,10 @@
-import { execFile } from "node:child_process";
 import { Box, Text, useApp } from "ink";
 import { useCallback, useState } from "react";
 import { Banner } from "@/components/Banner.js";
 import { Configure, configureTitle } from "@/components/Configure.js";
 import { Confirm, confirmTitle } from "@/components/Confirm.js";
 import { Frame } from "@/components/Frame.js";
+import { Install } from "@/components/Install.js";
 import { Login, loginTitle } from "@/components/Login.js";
 import { Step } from "@/components/Step.js";
 import { ToolSelect, toolSelectTitle } from "@/components/ToolSelect.js";
@@ -21,13 +21,8 @@ type Phase =
 export function App() {
 	const { exit } = useApp();
 	const [step, setStep] = useState<Phase>("select");
-	const [logs, setLogs] = useState<string[]>([]);
 	const [tools, setTools] = useState<Tool[]>([]);
 	const [apiKey, setApiKey] = useState<string | null>(null);
-
-	const addLog = useCallback((msg: string) => {
-		setLogs((prev) => [...prev, msg]);
-	}, []);
 
 	const handleConfirm = (selected: Tool[]) => {
 		setTools(selected);
@@ -41,12 +36,13 @@ export function App() {
 				return;
 			}
 			setStep("installing");
-			runInstall(tools, addLog).then(() => {
-				setStep("login");
-			});
 		},
-		[exit, tools, addLog],
+		[exit],
 	);
+
+	const handleInstallDone = useCallback(() => {
+		setStep("login");
+	}, []);
 
 	const handleLoginDone = useCallback((key: string) => {
 		setApiKey(key);
@@ -84,11 +80,7 @@ export function App() {
 						active={step === "installing"}
 						title={<Text bold>Installing packages</Text>}
 					>
-						<Box flexDirection="column">
-							{logs.map((log, i) => (
-								<Text key={`log-${i.toString()}`}>{log}</Text>
-							))}
-						</Box>
+						<Install tools={tools} onDone={handleInstallDone} />
 					</Step>
 				)}
 				{(step === "login" || step === "configuring") && (
@@ -108,24 +100,4 @@ export function App() {
 			</Frame>
 		</Box>
 	);
-}
-
-async function runInstall(tools: Tool[], log: (msg: string) => void) {
-	for (const tool of tools) {
-		const pkg =
-			tool === "claude-code" ? "@anthropic-ai/claude-code" : "opencode-ai";
-		log(`Installing ${pkg}...`);
-		await new Promise<void>((resolve) => {
-			execFile("npm", ["install", "-g", pkg], (error, _stdout, stderr) => {
-				if (error) {
-					log(`Failed to install ${pkg}: ${stderr.trim()}`);
-				} else {
-					log(`Installed ${pkg}`);
-				}
-				resolve();
-			});
-		});
-	}
-
-	log("Done!");
 }
