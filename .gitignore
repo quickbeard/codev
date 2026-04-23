@@ -8,7 +8,7 @@ dist
 
 # transient swap file from the prepack/postpack README swap;
 # only exists mid-publish, but may be left behind if publish aborts
-README.repo.md
+.readme-repo.bak
 
 # code coverage
 coverage
