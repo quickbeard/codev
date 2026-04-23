@@ -24,8 +24,8 @@
     "fix": "bunx --bun @biomejs/biome check --write",
     "prepare": "husky",
     "prepublishOnly": "bun check && bun typecheck && bun test && bun run build",
-    "prepack": "mv README.md README.repo.md && mv README.npm.md README.md",
-    "postpack": "mv README.md README.npm.md && mv README.repo.md README.md"
+    "prepack": "mv README.md .readme-repo.bak && mv README.npm.md README.md",
+    "postpack": "mv README.md README.npm.md && mv .readme-repo.bak README.md"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
