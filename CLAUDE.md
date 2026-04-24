@@ -16,7 +16,18 @@ Default to using Bun instead of Node.js.
 
 ## React
 
-When writing or reviewing React components, follow the Vercel React best practices defined in `.claude/skills/vercel-react-best-practices/`. Refer to `SKILL.md` for the rule index and read individual rule files in `rules/` for detailed examples.
+When writing or reviewing React/Ink components, consult the Vercel React best practices at `.claude/skills/vercel-react-best-practices/`. The rule index is `SKILL.md`; individual rules live in `rules/`, grouped by filename prefix:
+
+- `advanced-*` — advanced hook patterns (effect event deps, event handler refs, init-once, use-latest)
+- `async-*` — async/await and suspense (cheap-condition-before-await, defer-await, dependencies, parallel, suspense boundaries, API routes)
+- `bundle-*` — bundle size (analyzable paths, barrel imports, conditional loading, dynamic imports, preload, deferring third-party)
+- `client-*` — client-side browser concerns (event listeners, passive listeners, localStorage schema, SWR dedup)
+- `js-*` — general JS perf (DOM/CSS batching, caching storage/props/results, early exit, hoisting regex, index maps, set/map lookups, toSorted, combining iterations, length-check first, requestIdleCallback)
+- `rendering-*` — render-path optimizations (activity, content-visibility, hoisting JSX, hydration flicker/warnings, resource hints, defer/async scripts, SVG precision, useTransition for loading)
+- `rerender-*` — re-render reduction (memo, derived state, functional setState, dependency lists, lazy state init, deferred reads, inline components, split hooks, transitions, useDeferredValue, useRef transient values, move-effect-to-event)
+- `server-*` — SSR/server (after-nonblocking, auth actions, cache LRU/React, dedup props, hoist static I/O, no shared module state, parallel fetching, serialization)
+
+Load a specific rule file only when the current work touches that topic; don't blanket-load the whole skill.
 
 ## Imports
 
@@ -48,7 +59,7 @@ Always run these commands after making changes and ensure they pass:
 - `Bun.redis` for Redis. Don't use `ioredis`.
 - `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
 - `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
+- Prefer `Bun.file` for async reads/writes. `node:fs` sync APIs (`readFileSync`, `writeFileSync`, `mkdirSync`, `chmodSync`, etc.) are fine when synchronous behavior is required — Bun.file is async-only.
 - Bun.$`ls` instead of execa.
 
 ## Testing
