@@ -67,7 +67,9 @@ export function toolSelectTitle(readOnly = false) {
 	return (
 		<Text bold>
 			{"Select the AI agent(s) to install "}
-			{!readOnly && <Text dimColor>(space to toggle, enter to confirm)</Text>}
+			{!readOnly && (
+				<Text dimColor>(↑/↓ to move, space to select, enter to confirm)</Text>
+			)}
 		</Text>
 	);
 }
