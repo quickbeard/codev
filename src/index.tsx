@@ -2,6 +2,7 @@
 import { render } from "ink";
 import { App } from "@/App.js";
 import { logout } from "@/auth.js";
+import { Export } from "@/components/Export.js";
 import { printHelp, printVersion } from "@/help.js";
 import { runRestore } from "@/restore.js";
 import { runAgent } from "@/run.js";
@@ -55,6 +56,16 @@ switch (command) {
 		const ok = await logout();
 		console.log(ok ? "Logged out." : "Not logged in.");
 		process.exit(0);
+		break;
+	}
+	case "export": {
+		const { waitUntilExit } = render(<Export />);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
 		break;
 	}
 	case "claude":
