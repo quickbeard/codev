@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { render } from "ink";
-import { App } from "@/App.js";
 import { logout } from "@/auth.js";
-import { Export } from "@/components/Export.js";
+import { ExportApp } from "@/ExportApp.js";
 import { printHelp, printVersion } from "@/help.js";
+import { InstallApp } from "@/InstallApp.js";
 import { runRestore } from "@/restore.js";
 import { runAgent } from "@/run.js";
 import { UpdateApp } from "@/UpdateApp.js";
@@ -37,7 +37,7 @@ switch (command) {
 		process.exit(0);
 		break;
 	case "install": {
-		const { waitUntilExit } = render(<App />);
+		const { waitUntilExit } = render(<InstallApp />);
 		await waitUntilExit();
 		process.exit(0);
 		break;
@@ -59,7 +59,7 @@ switch (command) {
 		break;
 	}
 	case "export": {
-		const { waitUntilExit } = render(<Export />);
+		const { waitUntilExit } = render(<ExportApp />);
 		try {
 			await waitUntilExit();
 			process.exit(0);

@@ -10,7 +10,7 @@ import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
-import { Export } from "@/components/Export.js";
+import { ExportApp } from "@/ExportApp.js";
 
 let tempHome: string;
 let projectCwd: string;
@@ -69,10 +69,10 @@ afterEach(() => {
 	rmSync(tempHome, { recursive: true, force: true });
 });
 
-describe("Export component", () => {
+describe("ExportApp component", () => {
 	test("renders the completion summary after work finishes", async () => {
 		seedClaudeSession();
-		const { frames } = render(<Export />);
+		const { frames } = render(<ExportApp />);
 		// Allow the runExport promise to settle and the deferred-exit effect
 		// to fire after the terminal frame commits.
 		await new Promise((r) => setTimeout(r, 250));
@@ -87,7 +87,7 @@ describe("Export component", () => {
 
 	test("shows skipped agents inline with a 0 count and a hint", async () => {
 		seedClaudeSession();
-		const { frames } = render(<Export />);
+		const { frames } = render(<ExportApp />);
 		await new Promise((r) => setTimeout(r, 250));
 
 		// Codex and OpenCode have no activity in this fixture, so they appear
@@ -101,7 +101,7 @@ describe("Export component", () => {
 
 	test("ends with the Happy coding sign-off", async () => {
 		seedClaudeSession();
-		const { frames } = render(<Export />);
+		const { frames } = render(<ExportApp />);
 		await new Promise((r) => setTimeout(r, 250));
 
 		const history = allFrames(frames);
@@ -110,7 +110,7 @@ describe("Export component", () => {
 
 	test("emits at least one progress frame before completing", async () => {
 		seedClaudeSession();
-		const { frames } = render(<Export />);
+		const { frames } = render(<ExportApp />);
 		await new Promise((r) => setTimeout(r, 250));
 
 		// Find a mid-run frame — one that contains a "Checking" or "Reading"
@@ -130,7 +130,7 @@ describe("Export component", () => {
 		// summary proves the deferred-exit fix is in place. (ink-testing-
 		// library appends an empty frame when the component unmounts.)
 		seedClaudeSession();
-		const { frames } = render(<Export />);
+		const { frames } = render(<ExportApp />);
 		await new Promise((r) => setTimeout(r, 250));
 
 		const meaningful = frames.filter((f) => f.trim().length > 0);
