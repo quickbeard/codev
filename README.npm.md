@@ -22,6 +22,7 @@ codev install
 | `codev --version`, `-v`    | Show version                                                                              |
 | `codev install`            | Install and configure AI coding agents                                                    |
 | `codev update`             | Update installed AI coding agents                                                         |
+| `codev export`             | Export this directory's agent conversations to `~/.codev/logs/<project>/`                 |
 | `codev claude`             | Run the `claude` CLI (forwards remaining arguments)                                       |
 | `codev claude --restore`   | Restore `~/.claude/settings.json` from `~/.claude/settings.json.backup`                   |
 | `codev codex`              | Run the `codex` CLI (forwards remaining arguments)                                        |
@@ -74,3 +75,23 @@ mv ~/.config/opencode/opencode.json.backup ~/.config/opencode/opencode.json
 ```
 
 If you have a session running, you might need to restart it with `claude -c`, `codex resume`, or `opencode -c` to resume your progress.
+
+## Exporting conversation history
+
+`codev export` reads each agent's on-disk session store, filters to conversations that belong to the current directory, and writes them as Markdown to `~/.codev/logs/<project>/<agent>/`. Nothing is uploaded — the files stay on your machine.
+
+```
+~/.codev/logs/works-repos-codev/
+  claude-code/
+    2026-04-27_18-32-05Z-help-me-fix-the.md
+  codex/
+    2026-04-27_19-15-22Z-refactor-auth.md
+  opencode/
+    2026-04-27_20-44-10Z-explain-the-build.md
+  statistics.json
+```
+
+- The project subfolder is the current directory's path with the home prefix stripped and non-alphanumeric characters replaced with `-`.
+- Filenames are `<UTC-timestamp>-<slug>.md`, where the slug comes from the first user message in the session.
+- `statistics.json` records per-session metadata (message counts, byte size, provider, timestamps), keyed by session ID and merged across runs.
+- Existing files are overwritten on each run; sessions with no activity in the current directory are quietly skipped.

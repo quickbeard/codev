@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import * as child_process from "node:child_process";
 import { cleanup, render } from "ink-testing-library";
-import { App } from "@/App.js";
 import * as auth from "@/auth.js";
 import * as configure from "@/configure.js";
+import { InstallApp } from "@/InstallApp.js";
 import * as proxy from "@/proxy.js";
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
@@ -101,9 +101,12 @@ function allFrames(frames: string[]): string {
 
 afterEach(() => {
 	cleanup();
+	// Restore any spyOn mocks created during a test so they don't leak across
+	// test files (bun's spyOn-on-imported-modules patches the live binding).
+	mock.restore();
 });
 
-describe("App fail-stop invariant", () => {
+describe("InstallApp fail-stop invariant", () => {
 	test("install failure does not advance to Login step", async () => {
 		stubExecFile((file, args) => {
 			if (file === "npm" && args[0] === "install") {
@@ -115,7 +118,7 @@ describe("App fail-stop invariant", () => {
 			return { stdout: "1.0.0" };
 		});
 
-		const { stdin, frames } = render(<App />);
+		const { stdin, frames } = render(<InstallApp />);
 		await advanceFromSelectToInstalling(stdin);
 		await new Promise((r) => setTimeout(r, 200));
 
@@ -131,7 +134,7 @@ describe("App fail-stop invariant", () => {
 			Promise.reject(new Error("Connection refused")),
 		);
 
-		const { stdin, frames } = render(<App />);
+		const { stdin, frames } = render(<InstallApp />);
 		await advanceFromSelectToInstalling(stdin);
 		await pickSso(stdin);
 		await new Promise((r) => setTimeout(r, 200));
@@ -158,7 +161,7 @@ describe("App fail-stop invariant", () => {
 			throw new Error("disk full");
 		});
 
-		const { stdin, frames } = render(<App />);
+		const { stdin, frames } = render(<InstallApp />);
 		await advanceFromSelectToInstalling(stdin);
 		await pickSso(stdin);
 		await new Promise((r) => setTimeout(r, 300));
@@ -191,7 +194,7 @@ describe("App fail-stop invariant", () => {
 			},
 		]);
 
-		const { stdin, frames } = render(<App />);
+		const { stdin, frames } = render(<InstallApp />);
 		await advanceFromSelectToInstalling(stdin);
 		await pickSso(stdin);
 		await new Promise((r) => setTimeout(r, 1_300));
@@ -225,7 +228,7 @@ describe("App fail-stop invariant", () => {
 		// bun's spyOn keeps call counts across tests in the same file.
 		configureCodexSpy.mockClear();
 
-		const { stdin, frames } = render(<App />);
+		const { stdin, frames } = render(<InstallApp />);
 		await advanceFromSelectToInstallingCodex(stdin);
 		await pickSso(stdin);
 		await new Promise((r) => setTimeout(r, 1_300));
@@ -261,7 +264,7 @@ describe("App fail-stop invariant", () => {
 		fetchApiKeySpy.mockClear();
 		configureSpy.mockClear();
 
-		const { stdin, frames } = render(<App />);
+		const { stdin, frames } = render(<InstallApp />);
 		await advanceFromSelectToInstalling(stdin);
 		await pickManual(stdin);
 		await typeManualCreds(
@@ -310,7 +313,7 @@ describe("App fail-stop invariant", () => {
 		fetchApiKeySpy.mockClear();
 		configureSpy.mockClear();
 
-		const { stdin, frames } = render(<App />);
+		const { stdin, frames } = render(<InstallApp />);
 		await advanceFromSelectToInstalling(stdin);
 		await pickSso(stdin);
 
@@ -381,7 +384,7 @@ describe("App fail-stop invariant", () => {
 		fetchApiKeySpy.mockClear();
 		configureSpy.mockClear();
 
-		const { stdin, frames } = render(<App />);
+		const { stdin, frames } = render(<InstallApp />);
 		await advanceFromSelectToInstalling(stdin);
 		await pickSso(stdin);
 

@@ -46,7 +46,7 @@ const POST_AUTH_METHOD: Phase[] = [
 ];
 const POST_AUTH: Phase[] = ["configuring", "configure-failed", "done"];
 
-export function App() {
+export function InstallApp() {
 	const { exit } = useApp();
 	const [step, setStep] = useState<Phase>("select");
 	const [tools, setTools] = useState<Tool[]>([]);

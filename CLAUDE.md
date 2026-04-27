@@ -29,17 +29,33 @@ When writing or reviewing React/Ink components, consult the Vercel React best pr
 
 Load a specific rule file only when the current work touches that topic; don't blanket-load the whole skill.
 
+## Layout
+
+The CLI is layered. Each layer has one job and only depends on the layer below it:
+
+- `src/index.tsx` — argv dispatcher. Maps each command to its app component or logic function and exits.
+- `src/<Name>App.tsx` — command-root Ink components, one per command (`InstallApp`, `UpdateApp`, `ExportApp`). Each is a state machine that wires together components from `src/components/` and orchestrates the command's flow. `index.tsx` mounts these via `render(<XApp />)`.
+- `src/components/*.tsx` — reusable Ink components (Banner, Frame, Step, TaskList) and command-phase components (Install, Configure, Login, Update). Apps and other components import these; they never import apps.
+- `src/*.ts` — non-UI logic modules (`auth`, `configure`, `npm`, `paths`, `markdown`, `statistics`, `export`, `run`, `restore`, `proxy`, `help`, `const`). Components and apps import logic; logic never imports UI.
+- `src/providers/*.ts` — agent-specific reader implementations for the `export` command (one file per agent).
+
+When adding a new command:
+1. Add a `src/<Name>App.tsx` for its Ink root.
+2. Put any phase-specific Ink components in `src/components/`.
+3. Put non-UI logic in `src/<name>.ts` (or a folder if it grows beyond a couple of files).
+4. Wire it up in `src/index.tsx`.
+
 ## Imports
 
 Use absolute imports with the `@/*` alias. Don't use relative imports.
 
 ```ts
 // Good
-import { App } from "@/App.js";
+import { InstallApp } from "@/InstallApp.js";
 import { Banner } from "@/components/Banner.js";
 
 // Bad
-import { App } from "./App.js";
+import { InstallApp } from "./InstallApp.js";
 import { Banner } from "../components/Banner.js";
 ```
 

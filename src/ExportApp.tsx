@@ -17,7 +17,7 @@ const AGENT_LABEL: Record<Agent, string> = {
 // runs and unaffected by detection-loop ordering.
 const AGENT_ORDER: Agent[] = ["claude-code", "codex", "opencode"];
 
-export function Export() {
+export function ExportApp() {
 	const { exit } = useApp();
 	const [phase, setPhase] = useState<Phase>("running");
 	const [status, setStatus] = useState("Exporting logs...");
