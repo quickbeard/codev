@@ -8,7 +8,7 @@ import { runRestore } from "@/restore.js";
 import { runAgent } from "@/run.js";
 import { UpdateApp } from "@/UpdateApp.js";
 
-const MIN_NODE_MAJOR = 22;
+const MIN_NODE_MAJOR = 20;
 const nodeMajor = Number.parseInt(
 	process.versions.node.split(".")[0] ?? "0",
 	10,

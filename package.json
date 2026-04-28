@@ -35,7 +35,7 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "ink": "^7.0.1",
+    "ink": "^6.8.0",
     "ink-spinner": "^5.0.0",
     "open": "^11.0.0",
     "react": "^19.2.5"
