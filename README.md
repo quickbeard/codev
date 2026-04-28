@@ -2,6 +2,8 @@
 
 CoDev — AI Coding Agent Hub. Install, configure, and manage multiple AI coding agents.
 
+Requires Node.js ≥ 22.
+
 ## Install
 
 ```bash
@@ -30,8 +32,6 @@ codev install
 | `codev opencode`           | Run the `opencode` CLI (forwards remaining arguments)                                     |
 | `codev opencode --restore` | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup` |
 | `codev logout`             | Sign out of SSO                                                                           |
-
-> Codex requires Node.js ≥ 22, and CoDev itself enforces this on every invocation.
 
 ## Restoring a previous configuration
 
