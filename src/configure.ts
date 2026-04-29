@@ -51,7 +51,8 @@ function normalizeOpenCodeBaseUrl(url: string): string {
 
 const GATEWAY_BASE_URL = `${BASE_URL}gateway/`;
 const GATEWAY_OPENAI_BASE_URL = `${GATEWAY_BASE_URL}v1`;
-const MODEL_NAME = atob("TWluaU1heA==");
+const MODEL1 = atob("TWluaU1heA==");
+const MODEL2 = atob("UXdlbi9Rd2VuMy41LTEyMkItQTEwQi1GUDg=");
 
 const CLAUDE_SCHEMA_URL = atob(
 	"aHR0cHM6Ly9qc29uLnNjaGVtYXN0b3JlLm9yZy9jbGF1ZGUtY29kZS1zZXR0aW5ncy5qc29u",
@@ -184,7 +185,7 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 	const baseUrl = creds.baseUrl
 		? normalizeClaudeBaseUrl(creds.baseUrl)
 		: GATEWAY_BASE_URL;
-	const model = creds.model ?? MODEL_NAME;
+	const model = creds.model ?? MODEL1;
 
 	writeJson(sourcePath, {
 		[CLAUDE_K.schema]: CLAUDE_SCHEMA_URL,
@@ -237,7 +238,7 @@ export function configureCodex(creds: Credentials): ConfigureResult[] {
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
 		: GATEWAY_OPENAI_BASE_URL;
-	const model = creds.model ?? MODEL_NAME;
+	const model = creds.model ?? MODEL2;
 
 	writeToml(sourcePath, {
 		[CODEX_K.model]: model,
@@ -263,7 +264,7 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
 		: GATEWAY_OPENAI_BASE_URL;
-	const model = creds.model ?? MODEL_NAME;
+	const model = creds.model ?? MODEL1;
 
 	writeJson(sourcePath, {
 		[OPENCODE_K.schema]: OPENCODE_SCHEMA_URL,

@@ -283,7 +283,7 @@ describe("configureCodex", () => {
 		expect(existsSync(filePath)).toBe(true);
 
 		const config = readCodexToml();
-		expect(config.model).toBe("MiniMax");
+		expect(config.model).toBe("Qwen/Qwen3.5-122B-A10B-FP8");
 		expect(config.model_provider).toBe("aigateway");
 		expect(config.model_providers.aigateway).toBeDefined();
 		expect(config.model_providers.aigateway?.name).toBe("AI Gateway");
