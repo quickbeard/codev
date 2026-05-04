@@ -71,7 +71,7 @@ Always run these commands after making changes and ensure they pass:
 ## APIs
 
 - `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
+- SQLite is runtime-split: the shipped CLI runs under Node and uses `better-sqlite3`; `bun test` can't load `better-sqlite3` (oven-sh/bun#4290), so test code uses `bun:sqlite`. Production modules that need SQLite (e.g. `src/providers/opencode.ts`) pick the driver at runtime via `typeof Bun !== "undefined"` and dynamic imports — never put a top-level `import ... from "bun:sqlite"` in any module reachable from `src/index.tsx`, because Node's ESM loader rejects the `bun:` scheme with `ERR_UNSUPPORTED_ESM_URL_SCHEME` at link time. Test files are free to import `bun:sqlite` directly.
 - `Bun.redis` for Redis. Don't use `ioredis`.
 - `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
 - `WebSocket` is built-in. Don't use `ws`.
