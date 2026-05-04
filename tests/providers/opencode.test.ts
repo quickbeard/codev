@@ -1,3 +1,6 @@
+// Tests run under `bun test`, so the seed code uses `bun:sqlite`. The SUT
+// (openCodeProvider) picks its driver at runtime — under Bun it also opens
+// the file via `bun:sqlite`. Both libraries read the same on-disk format.
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";

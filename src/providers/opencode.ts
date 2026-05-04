@@ -1,8 +1,54 @@
-import { Database } from "bun:sqlite";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Message, Provider, Session } from "@/providers/types.js";
+
+// Driver picked at runtime. The shipped CLI runs under Node and uses
+// `better-sqlite3` (a native npm module). Tests run under `bun test`, where
+// `better-sqlite3` cannot be loaded (oven-sh/bun#4290), so we fall back to
+// `bun:sqlite`. Both branches use dynamic import so neither runtime tries to
+// resolve the other's specifier at module-link time.
+interface Stmt<P extends unknown[], R> {
+	get(...args: P): R | undefined;
+	all(...args: P): R[];
+}
+
+interface DB {
+	prepare<P extends unknown[], R>(sql: string): Stmt<P, R>;
+	close(): void;
+}
+
+async function openDb(path: string): Promise<DB> {
+	if (typeof Bun !== "undefined") {
+		const { Database } = await import("bun:sqlite");
+		const db = new Database(path, { readonly: true });
+		return {
+			prepare<P extends unknown[], R>(sql: string): Stmt<P, R> {
+				// bun:sqlite's bind types are stricter than our generic; cast since
+				// every caller passes string/number tuples that satisfy both libs.
+				// biome-ignore lint/suspicious/noExplicitAny: cross-driver shim
+				const stmt = db.query<R, any>(sql);
+				return {
+					get: (...args: P) => stmt.get(...args) ?? undefined,
+					all: (...args: P) => stmt.all(...args),
+				};
+			},
+			close: () => db.close(),
+		};
+	}
+	const { default: Database } = await import("better-sqlite3");
+	const db = new Database(path, { readonly: true });
+	return {
+		prepare<P extends unknown[], R>(sql: string): Stmt<P, R> {
+			const stmt = db.prepare<P, R>(sql);
+			return {
+				get: (...args: P) => stmt.get(...args),
+				all: (...args: P) => stmt.all(...args),
+			};
+		},
+		close: () => db.close(),
+	};
+}
 
 function dataDir(): string {
 	const xdg = process.env.XDG_DATA_HOME;
@@ -52,17 +98,17 @@ interface PartRow {
 // `worktree` matches the cwd. When OpenCode can't find a VCS root it dumps
 // sessions under a "global" project, distinguished by the session's own
 // `directory` column.
-function resolveProject(db: Database, cwd: string): ProjectMatch | null {
+function resolveProject(db: DB, cwd: string): ProjectMatch | null {
 	const target = canonical(cwd);
 	const direct = db
-		.query<{ id: string }, [string]>(
+		.prepare<[string], { id: string }>(
 			"SELECT id FROM project WHERE worktree = ?",
 		)
 		.get(target);
 	if (direct?.id) return { projectId: direct.id, directoryFilter: "" };
 
 	const fallback = db
-		.query<{ count: number }, [string]>(
+		.prepare<[string], { count: number }>(
 			"SELECT COUNT(*) as count FROM session WHERE project_id = 'global' AND directory = ?",
 		)
 		.get(target);
@@ -72,38 +118,34 @@ function resolveProject(db: Database, cwd: string): ProjectMatch | null {
 	return null;
 }
 
-function listSessionRows(db: Database, match: ProjectMatch): SessionRow[] {
+function listSessionRows(db: DB, match: ProjectMatch): SessionRow[] {
 	if (match.directoryFilter) {
 		return db
-			.query<SessionRow, [string, string]>(
+			.prepare<[string, string], SessionRow>(
 				"SELECT id, title, directory, time_created, time_updated " +
 					"FROM session WHERE project_id = ? AND directory = ? ORDER BY time_created",
 			)
 			.all(match.projectId, match.directoryFilter);
 	}
 	return db
-		.query<SessionRow, [string]>(
+		.prepare<[string], SessionRow>(
 			"SELECT id, title, directory, time_created, time_updated " +
 				"FROM session WHERE project_id = ? ORDER BY time_created",
 		)
 		.all(match.projectId);
 }
 
-function readMessages(db: Database, sessionId: string): MessageRow[] {
+function readMessages(db: DB, sessionId: string): MessageRow[] {
 	return db
-		.query<MessageRow, [string]>(
+		.prepare<[string], MessageRow>(
 			"SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created",
 		)
 		.all(sessionId);
 }
 
-function readParts(
-	db: Database,
-	sessionId: string,
-	messageId: string,
-): PartRow[] {
+function readParts(db: DB, sessionId: string, messageId: string): PartRow[] {
 	return db
-		.query<PartRow, [string, string]>(
+		.prepare<[string, string], PartRow>(
 			"SELECT id, message_id, time_created, data FROM part " +
 				"WHERE session_id = ? AND message_id = ? ORDER BY time_created",
 		)
@@ -135,7 +177,7 @@ function partTextIfPlain(part: PartRow): string | null {
 	return obj.text;
 }
 
-function buildSession(row: SessionRow, db: Database): Session | null {
+function buildSession(row: SessionRow, db: DB): Session | null {
 	const messages: Message[] = [];
 	let firstUserMessage = "";
 	const msgRows = readMessages(db, row.id);
@@ -175,9 +217,9 @@ export const openCodeProvider: Provider = {
 	async detect(cwd: string): Promise<boolean> {
 		const path = dbPath();
 		if (!existsSync(path)) return false;
-		let db: Database | null = null;
+		let db: DB | null = null;
 		try {
-			db = new Database(path, { readonly: true });
+			db = await openDb(path);
 			const match = resolveProject(db, cwd);
 			if (!match) return false;
 			const rows = listSessionRows(db, match);
@@ -192,7 +234,7 @@ export const openCodeProvider: Provider = {
 	async listSessions(cwd: string): Promise<Session[]> {
 		const path = dbPath();
 		if (!existsSync(path)) return [];
-		const db = new Database(path, { readonly: true });
+		const db = await openDb(path);
 		try {
 			const match = resolveProject(db, cwd);
 			if (!match) return [];

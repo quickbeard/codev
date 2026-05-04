@@ -66,12 +66,12 @@ Always run these commands after making changes and ensure they pass:
 - `bun run fix` — lint and format with Biome
 - `bun run typecheck` — type-check with TypeScript
 - `bun test` — run tests
-- `bun run build` — bundle the CLI for distribution
+- `bun run build && node dist/index.js --version` — bundle the CLI and smoke-test it under Node. The shipped bundle runs under Node (`bin: dist/index.js`), not Bun, so anything that links cleanly under `bun dev` but breaks under Node's ESM loader (e.g. a stray `bun:` import) will only surface here. `bun dev` alone is not enough.
 
 ## APIs
 
 - `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
+- SQLite is runtime-split: the shipped CLI runs under Node and uses `better-sqlite3`; `bun test` can't load `better-sqlite3` (oven-sh/bun#4290), so test code uses `bun:sqlite`. Production modules that need SQLite (e.g. `src/providers/opencode.ts`) pick the driver at runtime via `typeof Bun !== "undefined"` and dynamic imports — never put a top-level `import ... from "bun:sqlite"` in any module reachable from `src/index.tsx`, because Node's ESM loader rejects the `bun:` scheme with `ERR_UNSUPPORTED_ESM_URL_SCHEME` at link time. Test files are free to import `bun:sqlite` directly.
 - `Bun.redis` for Redis. Don't use `ioredis`.
 - `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
 - `WebSocket` is built-in. Don't use `ws`.
