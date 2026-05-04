@@ -66,7 +66,7 @@ Always run these commands after making changes and ensure they pass:
 - `bun run fix` — lint and format with Biome
 - `bun run typecheck` — type-check with TypeScript
 - `bun test` — run tests
-- `bun run build` — bundle the CLI for distribution
+- `bun run build && node dist/index.js --version` — bundle the CLI and smoke-test it under Node. The shipped bundle runs under Node (`bin: dist/index.js`), not Bun, so anything that links cleanly under `bun dev` but breaks under Node's ESM loader (e.g. a stray `bun:` import) will only surface here. `bun dev` alone is not enough.
 
 ## APIs
 
