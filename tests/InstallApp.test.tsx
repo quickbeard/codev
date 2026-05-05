@@ -156,7 +156,6 @@ describe("InstallApp fail-stop invariant", () => {
 				user: { sub: "u", email: "test@example.com", displayName: "Test" },
 			}),
 		);
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
 		spyOn(configure, "configureClaudeCode").mockImplementation(() => {
 			throw new Error("disk full");
 		});
@@ -182,7 +181,6 @@ describe("InstallApp fail-stop invariant", () => {
 				user: { sub: "u", email: "test@example.com", displayName: "Test" },
 			}),
 		);
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
 		const configureSpy = spyOn(
 			configure,
 			"configureClaudeCode",
@@ -201,7 +199,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
-		expect(configureSpy).toHaveBeenCalledWith({ apiKey: "sk-test-123" });
+		expect(configureSpy).toHaveBeenCalledWith({ apiKey: "access-xyz" });
 	});
 
 	test("Codex selection routes to configureCodex and reaches done", async () => {
@@ -214,7 +212,6 @@ describe("InstallApp fail-stop invariant", () => {
 				user: { sub: "u", email: "test@example.com", displayName: "Test" },
 			}),
 		);
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-codex-123");
 		const configureCodexSpy = spyOn(
 			configure,
 			"configureCodex",
@@ -237,7 +234,7 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(history).toContain("Happy coding");
 		expect(history).toContain("codev codex");
 		expect(configureCodexSpy).toHaveBeenCalledTimes(1);
-		expect(configureCodexSpy).toHaveBeenCalledWith({ apiKey: "sk-codex-123" });
+		expect(configureCodexSpy).toHaveBeenCalledWith({ apiKey: "access-xyz" });
 	});
 
 	test("manual-credentials flow reaches the done screen", async () => {
@@ -287,88 +284,18 @@ describe("InstallApp fail-stop invariant", () => {
 		});
 	});
 
-	test("SSO empty-key fallback into manual credentials reaches the done screen", async () => {
-		stubExecFile(() => ({ stdout: "ok" }));
-		const loginSpy = spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3_600_000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
-		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey").mockResolvedValue("");
-		const configureSpy = spyOn(
-			configure,
-			"configureClaudeCode",
-		).mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: "/tmp/x.b",
-			},
-		]);
-		// bun's spyOn keeps call counts across tests in the same file.
-		loginSpy.mockClear();
-		fetchApiKeySpy.mockClear();
-		configureSpy.mockClear();
-
-		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstalling(stdin);
-		await pickSso(stdin);
-
-		// Wait for SSO to "succeed" but with an empty api_key — Login should
-		// render the fallback notice and prompt instead of advancing to Configure.
-		await new Promise((r) => setTimeout(r, 150));
-		expect(allFrames(frames)).toContain(
-			"SSO succeeded but the gateway returned an empty API key.",
-		);
-		expect(allFrames(frames)).toContain(
-			"Press Enter to enter credentials manually",
-		);
-		expect(configureSpy).not.toHaveBeenCalled();
-
-		// Press Enter to acknowledge the fallback; the manual-credentials Step
-		// should mount (without the user needing to revisit auth-method).
-		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 100));
-		expect(allFrames(frames)).toContain("Enter API credentials");
-
-		await typeManualCreds(
-			stdin,
-			"https://fallback.example.com/v1",
-			"sk-fallback-123",
-			"fallback-model",
-		);
-		await new Promise((r) => setTimeout(r, 1_300));
-
-		const history = allFrames(frames);
-		expect(history).toContain("Happy coding");
-		expect(loginSpy).toHaveBeenCalledTimes(1);
-		expect(fetchApiKeySpy).toHaveBeenCalledTimes(1);
-		expect(configureSpy).toHaveBeenCalledTimes(1);
-		expect(configureSpy).toHaveBeenCalledWith({
-			apiKey: "sk-fallback-123",
-			baseUrl: "https://fallback.example.com/v1",
-			model: "fallback-model",
-		});
-	});
-
 	test("SSO retry after failure reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		const loginSpy = spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3_600_000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
-		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey")
+		const loginSpy = spyOn(auth, "login")
+			.mockImplementationOnce(() => Promise.reject(new Error("transient")))
 			.mockImplementationOnce(() =>
-				Promise.reject(new Error("Proxy /auth/exchange failed (502): boom")),
-			)
-			.mockImplementationOnce(() => Promise.resolve("sk-retry-ok"));
+				Promise.resolve({
+					access_token: "access-retry-ok",
+					id_token: "id-xyz",
+					expires_at: Date.now() + 3_600_000,
+					user: { sub: "u", email: "test@example.com", displayName: "Test" },
+				}),
+			);
 		const configureSpy = spyOn(
 			configure,
 			"configureClaudeCode",
@@ -381,7 +308,6 @@ describe("InstallApp fail-stop invariant", () => {
 		]);
 		// bun's spyOn keeps call counts across tests in the same file.
 		loginSpy.mockClear();
-		fetchApiKeySpy.mockClear();
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
@@ -390,21 +316,18 @@ describe("InstallApp fail-stop invariant", () => {
 
 		// Wait for the first attempt to reject and the retry prompt to render.
 		await new Promise((r) => setTimeout(r, 150));
-		expect(allFrames(frames)).toContain(
-			"Login failed: Proxy /auth/exchange failed",
-		);
+		expect(allFrames(frames)).toContain("Login failed: transient");
 		expect(allFrames(frames)).toContain("Press Enter to retry, Ctrl-C to quit");
 		expect(configureSpy).not.toHaveBeenCalled();
 
-		// Press Enter to retry; the second attempt resolves with sk-retry-ok.
+		// Press Enter to retry; the second attempt resolves with a token.
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
 		expect(loginSpy).toHaveBeenCalledTimes(2);
-		expect(fetchApiKeySpy).toHaveBeenCalledTimes(2);
 		expect(configureSpy).toHaveBeenCalledTimes(1);
-		expect(configureSpy).toHaveBeenCalledWith({ apiKey: "sk-retry-ok" });
+		expect(configureSpy).toHaveBeenCalledWith({ apiKey: "access-retry-ok" });
 	});
 });

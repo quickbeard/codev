@@ -1,6 +1,5 @@
 import {
 	chmodSync,
-	existsSync,
 	mkdirSync,
 	readFileSync,
 	unlinkSync,
@@ -11,11 +10,9 @@ import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import open from "open";
-import { BASE_URL } from "@/const.js";
+import { getSupabaseConfig, SUPABASE_AUTH_PROVIDER } from "@/supabase.js";
 
-const SSO_BASE_URL = `${BASE_URL}sso-wrapper`;
-const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
-const REVOKE_TIMEOUT_MS = 3_000;
+const SUPABASE_TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
 function authFilePath() {
 	return join(homedir(), ".codev", "auth.json");
@@ -57,9 +54,19 @@ export interface AuthData {
 
 interface TokenResponse {
 	access_token: string;
-	id_token: string;
+	id_token?: string;
 	refresh_token?: string;
 	expires_in: number;
+	expires_at?: number;
+	user?: {
+		id?: string;
+		email?: string;
+		user_metadata?: {
+			full_name?: string;
+			name?: string;
+			displayName?: string;
+		};
+	};
 }
 
 function readAuthFile(): AuthData | null {
@@ -73,7 +80,8 @@ function readAuthFile(): AuthData | null {
 export function loadAuth(): AuthData | null {
 	const data = readAuthFile();
 	if (!data) return null;
-	if (Date.now() > data.expires_at) return null;
+	if (Date.now() + SUPABASE_TOKEN_EXPIRY_BUFFER_MS > data.expires_at)
+		return null;
 	return data;
 }
 
@@ -90,51 +98,13 @@ function saveAuth(data: AuthData) {
 }
 
 export async function logout(): Promise<boolean> {
-	const data = readAuthFile();
 	try {
 		unlinkSync(authFilePath());
 	} catch {
 		return false;
 	}
-	// Revoking tokens does not terminate the IdP's browser session cookie, so
-	// the next /authorize would otherwise silently return a new code. Mark the
-	// next login to force re-authentication via prompt=login.
 	markForceLogin();
-	if (data) {
-		await revokeTokens(data);
-	}
 	return true;
-}
-
-async function revokeTokens(data: AuthData): Promise<void> {
-	const endpoint = `${SSO_BASE_URL}/revoke`;
-	await Promise.all([
-		revokeToken(endpoint, data.access_token, "access_token"),
-		data.refresh_token
-			? revokeToken(endpoint, data.refresh_token, "refresh_token")
-			: Promise.resolve(),
-	]);
-}
-
-async function revokeToken(
-	endpoint: string,
-	token: string,
-	tokenTypeHint: "access_token" | "refresh_token",
-): Promise<void> {
-	try {
-		await fetch(endpoint, {
-			method: "POST",
-			headers: { "Content-Type": "application/x-www-form-urlencoded" },
-			body: new URLSearchParams({
-				token,
-				token_type_hint: tokenTypeHint,
-				client_id: CLIENT_ID,
-			}),
-			signal: AbortSignal.timeout(REVOKE_TIMEOUT_MS),
-		});
-	} catch {
-		// Best-effort; token will expire naturally if revocation fails.
-	}
 }
 
 function base64UrlEncode(bytes: Uint8Array): string {
@@ -169,7 +139,8 @@ export async function login(
 	onLog: (msg: string) => void,
 	onReady: (openBrowserFn: () => void) => void,
 ): Promise<AuthData> {
-	onLog("Starting SSO login...");
+	onLog("Starting Supabase SSO login...");
+	const config = getSupabaseConfig();
 
 	const existing = loadAuth();
 	if (existing) {
@@ -181,19 +152,8 @@ export async function login(
 	if (stale?.refresh_token) {
 		try {
 			onLog("Refreshing session...");
-			const refreshed = await refreshTokens(stale.refresh_token);
-			const user = await fetchUserInfo(refreshed.access_token);
-			const authData: AuthData = {
-				access_token: refreshed.access_token,
-				id_token: refreshed.id_token,
-				refresh_token: refreshed.refresh_token || stale.refresh_token,
-				expires_at: Date.now() + refreshed.expires_in * 1000,
-				user: {
-					sub: user.sub,
-					email: user.email,
-					displayName: user.displayName || user.name || user.sub,
-				},
-			};
+			const refreshed = await refreshTokens(config, stale.refresh_token);
+			const authData = authDataFromToken(refreshed, stale.refresh_token);
 			saveAuth(authData);
 			onLog(`Logged in as ${authData.user.email}`);
 			return authData;
@@ -202,36 +162,13 @@ export async function login(
 		}
 	}
 
-	const forceLogin = existsSync(forceLoginPath());
-
 	const verifier = generateCodeVerifier();
 	const challenge = await generateCodeChallenge(verifier);
-	const state = crypto.randomUUID();
-	const nonce = crypto.randomUUID();
 
-	const { code, redirectUri } = await getAuthCode(
-		onLog,
-		onReady,
-		state,
-		challenge,
-		nonce,
-		forceLogin,
-	);
+	const { code } = await getAuthCode(onLog, onReady, challenge, config.url);
 
-	const tokenRes = await exchangeCode(code, redirectUri, verifier);
-	const user = await fetchUserInfo(tokenRes.access_token);
-
-	const authData: AuthData = {
-		access_token: tokenRes.access_token,
-		id_token: tokenRes.id_token,
-		refresh_token: tokenRes.refresh_token,
-		expires_at: Date.now() + tokenRes.expires_in * 1000,
-		user: {
-			sub: user.sub,
-			email: user.email,
-			displayName: user.displayName || user.name || user.sub,
-		},
-	};
+	const tokenRes = await exchangeCode(config, code, verifier);
+	const authData = authDataFromToken(tokenRes);
 
 	saveAuth(authData);
 	clearForceLogin();
@@ -242,10 +179,8 @@ export async function login(
 async function getAuthCode(
 	onLog: (msg: string) => void,
 	onReady: (openBrowserFn: () => void) => void,
-	expectedState: string,
 	codeChallenge: string,
-	nonce: string,
-	forceLogin: boolean,
+	supabaseUrl: string,
 ): Promise<{ code: string; redirectUri: string }> {
 	return new Promise((resolve, reject) => {
 		let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
@@ -263,30 +198,20 @@ async function getAuthCode(
 		// throw "Cannot destructure property 'port' of 'server.address(...)'".
 		let boundPort = 0;
 
-		const buildAuthorizeUrl = (port: number) =>
-			`${SSO_BASE_URL}/authorize?` +
-			`response_type=code` +
-			`&client_id=${encodeURIComponent(CLIENT_ID)}` +
-			`&redirect_uri=${encodeURIComponent(`http://127.0.0.1:${port}/callback`)}` +
-			`&scope=openid%20profile%20email%20offline_access` +
-			`&state=${expectedState}` +
-			`&nonce=${nonce}` +
-			`&code_challenge=${codeChallenge}` +
-			`&code_challenge_method=S256`;
+		const buildAuthorizeUrl = (port: number) => {
+			const redirectUri = `http://127.0.0.1:${port}/callback`;
+			const url = new URL(`${supabaseUrl}/auth/v1/authorize`);
+			url.searchParams.set("provider", SUPABASE_AUTH_PROVIDER);
+			url.searchParams.set("redirect_to", redirectUri);
+			url.searchParams.set("scopes", "openid profile email");
+			url.searchParams.set("code_challenge", codeChallenge);
+			url.searchParams.set("code_challenge_method", "S256");
+			return url.toString();
+		};
 
 		const server = createServer((req, res) => {
 			const host = req.headers.host ?? "127.0.0.1";
 			const url = new URL(req.url ?? "/", `http://${host}`);
-
-			// Step 1 (forceLogin only): CAS has just killed its session cookie
-			// and redirected the browser back to us. Now bounce it to /authorize
-			// so the wrapper can start a fresh login — this time CAS will show
-			// the credential form because there's no session cookie.
-			if (url.pathname === "/logout-done") {
-				res.writeHead(302, { Location: buildAuthorizeUrl(boundPort) });
-				res.end();
-				return;
-			}
 
 			if (url.pathname !== "/callback") {
 				res.writeHead(404, { "Content-Type": "text/plain" });
@@ -296,7 +221,6 @@ async function getAuthCode(
 
 			const code = url.searchParams.get("code");
 			const error = url.searchParams.get("error");
-			const returnedState = url.searchParams.get("state");
 
 			const respond = (ok: boolean, msg?: string) => {
 				res.writeHead(ok ? 200 : 400, { "Content-Type": "text/html" });
@@ -320,14 +244,6 @@ async function getAuthCode(
 				return;
 			}
 
-			if (returnedState !== expectedState) {
-				respond(false, "State mismatch");
-				finish();
-				server.close();
-				reject(new Error("State mismatch (possible CSRF attack)"));
-				return;
-			}
-
 			respond(true);
 			finish();
 			server.close();
@@ -339,16 +255,10 @@ async function getAuthCode(
 
 		server.listen(0, "127.0.0.1", () => {
 			boundPort = (server.address() as AddressInfo).port;
-			const initialUrl = forceLogin
-				? `${SSO_BASE_URL}/logout?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${boundPort}/logout-done`)}`
-				: buildAuthorizeUrl(boundPort);
+			const initialUrl = buildAuthorizeUrl(boundPort);
 
 			onReady(() => {
-				onLog(
-					forceLogin
-						? "Opening browser to end existing SSO session and re-login..."
-						: "Opening browser for SSO login...",
-				);
+				onLog("Opening browser for Supabase SSO login...");
 				openBrowser(initialUrl);
 			});
 
@@ -362,18 +272,18 @@ async function getAuthCode(
 }
 
 async function exchangeCode(
+	config: { url: string; anonKey: string },
 	code: string,
-	redirectUri: string,
 	codeVerifier: string,
 ): Promise<TokenResponse> {
-	const res = await fetch(`${SSO_BASE_URL}/token`, {
+	const res = await fetch(`${config.url}/auth/v1/token?grant_type=pkce`, {
 		method: "POST",
-		headers: { "Content-Type": "application/x-www-form-urlencoded" },
-		body: new URLSearchParams({
-			grant_type: "authorization_code",
-			code,
-			redirect_uri: redirectUri,
-			client_id: CLIENT_ID,
+		headers: {
+			"Content-Type": "application/json",
+			apikey: config.anonKey,
+		},
+		body: JSON.stringify({
+			auth_code: code,
 			code_verifier: codeVerifier,
 		}),
 	});
@@ -386,16 +296,23 @@ async function exchangeCode(
 	return (await res.json()) as TokenResponse;
 }
 
-async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
-	const res = await fetch(`${SSO_BASE_URL}/token`, {
-		method: "POST",
-		headers: { "Content-Type": "application/x-www-form-urlencoded" },
-		body: new URLSearchParams({
-			grant_type: "refresh_token",
-			refresh_token: refreshToken,
-			client_id: CLIENT_ID,
-		}),
-	});
+async function refreshTokens(
+	config: { url: string; anonKey: string },
+	refreshToken: string,
+): Promise<TokenResponse> {
+	const res = await fetch(
+		`${config.url}/auth/v1/token?grant_type=refresh_token`,
+		{
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				apikey: config.anonKey,
+			},
+			body: JSON.stringify({
+				refresh_token: refreshToken,
+			}),
+		},
+	);
 
 	if (!res.ok) {
 		throw new Error(`Token refresh failed (${res.status})`);
@@ -404,21 +321,27 @@ async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
 	return (await res.json()) as TokenResponse;
 }
 
-async function fetchUserInfo(accessToken: string) {
-	const res = await fetch(`${SSO_BASE_URL}/userinfo`, {
-		headers: { Authorization: `Bearer ${accessToken}` },
-	});
-
-	if (!res.ok) {
-		const body = await res.text();
-		throw new Error(`Failed to fetch user info (${res.status}): ${body}`);
-	}
-
-	return (await res.json()) as {
-		sub: string;
-		email: string;
-		displayName?: string;
-		name?: string;
+function authDataFromToken(
+	token: TokenResponse,
+	fallbackRefresh?: string,
+): AuthData {
+	const user = token.user;
+	const sub = user?.id ?? "";
+	const email = user?.email ?? sub;
+	const meta = user?.user_metadata ?? {};
+	return {
+		access_token: token.access_token,
+		id_token: token.id_token ?? token.access_token,
+		refresh_token: token.refresh_token || fallbackRefresh,
+		expires_at: token.expires_at
+			? token.expires_at * 1000
+			: Date.now() + token.expires_in * 1000,
+		user: {
+			sub,
+			email,
+			displayName:
+				meta.displayName || meta.full_name || meta.name || email || sub,
+		},
 	};
 }
 

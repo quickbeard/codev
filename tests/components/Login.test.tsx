@@ -2,7 +2,6 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
 import * as auth from "@/auth.js";
 import { Login } from "@/components/Login.js";
-import * as proxy from "@/proxy.js";
 
 afterEach(() => {
 	cleanup();
@@ -95,7 +94,7 @@ describe("Login", () => {
 		expect(openBrowserFn).not.toHaveBeenCalled();
 	});
 
-	test("calls onDone with the api key after successful exchange", async () => {
+	test("calls onDone with the Supabase access token after successful login", async () => {
 		spyOn(auth, "login").mockImplementation(() =>
 			Promise.resolve({
 				access_token: "access-xyz",
@@ -104,7 +103,6 @@ describe("Login", () => {
 				user: { sub: "u", email: "test@example.com", displayName: "Test" },
 			}),
 		);
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-key-123");
 
 		const onDone = mock();
 		render(<Login onDone={onDone} onFallback={mock()} />);
@@ -112,49 +110,21 @@ describe("Login", () => {
 		await new Promise((r) => setTimeout(r, 100));
 
 		expect(onDone).toHaveBeenCalledTimes(1);
-		expect(onDone).toHaveBeenCalledWith("sk-test-key-123");
-	});
-
-	test("shows error and retry prompt if proxy key exchange fails", async () => {
-		spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3600000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
-		spyOn(proxy, "fetchApiKey").mockRejectedValue(
-			new Error("Proxy /auth/exchange failed (502): boom"),
-		);
-
-		const onDone = mock();
-		const { lastFrame } = render(<Login onDone={onDone} onFallback={mock()} />);
-
-		await new Promise((r) => setTimeout(r, 100));
-
-		const output = lastFrame() ?? "";
-		expect(output).toContain("Login failed: Proxy /auth/exchange failed");
-		expect(output).toContain("Press Enter to retry, Ctrl-C to quit");
-		expect(onDone).not.toHaveBeenCalled();
+		expect(onDone).toHaveBeenCalledWith("access-xyz");
 	});
 
 	test("retries on Enter after a failure and succeeds on the second attempt", async () => {
-		const loginSpy = spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3600000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
-		const fetchSpy = spyOn(proxy, "fetchApiKey")
+		const loginSpy = spyOn(auth, "login")
 			.mockImplementationOnce(() => Promise.reject(new Error("transient")))
-			.mockImplementationOnce(() => Promise.resolve("sk-retry-ok"));
-		// bun's spyOn retains call counts across tests in the same file; clear
-		// them so the per-test "called twice" assertion counts only this test.
+			.mockImplementationOnce(() =>
+				Promise.resolve({
+					access_token: "access-retry-ok",
+					id_token: "id-xyz",
+					expires_at: Date.now() + 3600000,
+					user: { sub: "u", email: "test@example.com", displayName: "Test" },
+				}),
+			);
 		loginSpy.mockClear();
-		fetchSpy.mockClear();
 
 		const onDone = mock();
 		const { stdin, lastFrame } = render(
@@ -168,46 +138,8 @@ describe("Login", () => {
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 100));
 
-		expect(fetchSpy).toHaveBeenCalledTimes(2);
 		expect(loginSpy).toHaveBeenCalledTimes(2);
-		expect(onDone).toHaveBeenCalledWith("sk-retry-ok");
-	});
-
-	test("shows fallback prompt and calls onFallback on Enter when proxy returns empty key", async () => {
-		spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3600000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("");
-
-		const onDone = mock();
-		const onFallback = mock();
-		const { stdin, lastFrame } = render(
-			<Login onDone={onDone} onFallback={onFallback} />,
-		);
-
-		await new Promise((r) => setTimeout(r, 100));
-
-		const output = lastFrame() ?? "";
-		expect(output).toContain(
-			"SSO succeeded but the gateway returned an empty API key.",
-		);
-		expect(output).toContain(
-			"Press Enter to enter credentials manually, Ctrl-C to quit",
-		);
-		expect(onDone).not.toHaveBeenCalled();
-		expect(onFallback).not.toHaveBeenCalled();
-
-		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 50));
-
-		expect(onFallback).toHaveBeenCalledTimes(1);
-		expect(onDone).not.toHaveBeenCalled();
-		expect(lastFrame() ?? "").not.toContain("Press Enter to enter credentials");
+		expect(onDone).toHaveBeenCalledWith("access-retry-ok");
 	});
 
 	test("clears the previous error and logs when retrying", async () => {
