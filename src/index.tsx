@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { render } from "ink";
 import { logout } from "@/auth.js";
+import { isAuthenticatedForUpload, parseAutoUploadFlag } from "@/autoUpload.js";
+import { BackgroundUploadApp } from "@/BackgroundUploadApp.js";
 import { ExportApp } from "@/ExportApp.js";
 import { printHelp, printVersion } from "@/help.js";
 import { InstallApp } from "@/InstallApp.js";
@@ -85,22 +87,51 @@ switch (command) {
 		if (args[0] === "--restore") {
 			process.exit(runRestore("claude-code"));
 		}
-		process.exit(await runAgent("claude", args));
+		process.exit(await runAgentWithAutoUpload("claude", args));
 		break;
 	case "codex":
 		if (args[0] === "--restore") {
 			process.exit(runRestore("codex"));
 		}
-		process.exit(await runAgent("codex", args));
+		process.exit(await runAgentWithAutoUpload("codex", args));
 		break;
 	case "opencode":
 		if (args[0] === "--restore") {
 			process.exit(runRestore("opencode"));
 		}
-		process.exit(await runAgent("opencode", args));
+		process.exit(await runAgentWithAutoUpload("opencode", args));
 		break;
 	default:
 		console.error(`Unknown command: ${command}\n`);
 		printHelp();
 		process.exit(1);
+}
+
+async function runAgentWithAutoUpload(
+	cmd: string,
+	rawArgs: string[],
+): Promise<number> {
+	const { agentArgs, autoUpload } = parseAutoUploadFlag(rawArgs);
+	const willUpload = autoUpload && isAuthenticatedForUpload();
+	if (willUpload) {
+		await renderBackgroundUpload("Starting...");
+	}
+	const code = await runAgent(cmd, agentArgs);
+	if (willUpload) {
+		await renderBackgroundUpload("Stopping...");
+	} else if (autoUpload) {
+		console.log(
+			"\nTip: run `codev upload` to sign in and enable automatic session uploads.",
+		);
+	}
+	return code;
+}
+
+async function renderBackgroundUpload(label: string): Promise<void> {
+	const { waitUntilExit } = render(<BackgroundUploadApp label={label} />);
+	try {
+		await waitUntilExit();
+	} catch {
+		// Best-effort — never block the agent lifecycle on a failed upload.
+	}
 }
