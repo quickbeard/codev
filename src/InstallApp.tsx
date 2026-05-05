@@ -1,5 +1,7 @@
 import { Box, Text, useApp } from "ink";
+import Spinner from "ink-spinner";
 import { useCallback, useState } from "react";
+import { type ApiKeyCreds, loadApiKey, saveApiKey } from "@/auth.js";
 import type { AuthMethodChoice } from "@/components/AuthMethod.js";
 import { AuthMethod, authMethodTitle } from "@/components/AuthMethod.js";
 import { Banner } from "@/components/Banner.js";
@@ -16,12 +18,14 @@ import {
 import { Step } from "@/components/Step.js";
 import { ToolSelect, toolSelectTitle } from "@/components/ToolSelect.js";
 import type { Credentials, Tool } from "@/configure.js";
+import { validateApiKey } from "@/proxy.js";
 
 type Phase =
 	| "select"
 	| "confirm"
 	| "installing"
 	| "install-failed"
+	| "validating-existing"
 	| "auth-method"
 	| "login"
 	| "manual-creds"
@@ -29,7 +33,7 @@ type Phase =
 	| "configure-failed"
 	| "done";
 
-const POST_INSTALL: Phase[] = [
+const POST_VALIDATE: Phase[] = [
 	"auth-method",
 	"login",
 	"manual-creds",
@@ -53,6 +57,9 @@ export function InstallApp() {
 	const [authMethod, setAuthMethod] = useState<AuthMethodChoice | null>(null);
 	const [creds, setCreds] = useState<Credentials | null>(null);
 	const [fallenBack, setFallenBack] = useState(false);
+	const [savedCreds, setSavedCreds] = useState<ApiKeyCreds | null>(null);
+	const [existingValid, setExistingValid] = useState(false);
+	const [existingMessage, setExistingMessage] = useState<string | null>(null);
 
 	const handleConfirm = (selected: Tool[]) => {
 		setTools(selected);
@@ -75,13 +82,52 @@ export function InstallApp() {
 	// app is left to the user (Ctrl-C), matching Login/Configure's prior
 	// hang-on-error behavior.
 	const handleInstallDone = useCallback((success: boolean) => {
-		setStep(success ? "auth-method" : "install-failed");
+		if (!success) {
+			setStep("install-failed");
+			return;
+		}
+		const saved = loadApiKey();
+		if (!saved) {
+			setStep("auth-method");
+			return;
+		}
+		setSavedCreds(saved);
+		setStep("validating-existing");
+		validateApiKey(saved.apiKey, saved.baseUrl)
+			.then((ok) => {
+				if (ok) {
+					setExistingValid(true);
+				} else {
+					setExistingMessage(
+						"Saved API key is no longer valid; choose another method.",
+					);
+				}
+			})
+			.catch((err: Error) => {
+				setExistingMessage(`Could not verify saved API key: ${err.message}`);
+			})
+			.finally(() => {
+				setStep("auth-method");
+			});
 	}, []);
 
-	const handleAuthMethod = useCallback((choice: AuthMethodChoice) => {
-		setAuthMethod(choice);
-		setStep(choice === "sso" ? "login" : "manual-creds");
-	}, []);
+	const handleAuthMethod = useCallback(
+		(choice: AuthMethodChoice) => {
+			setAuthMethod(choice);
+			if (choice === "existing") {
+				if (!savedCreds) return;
+				setCreds({
+					apiKey: savedCreds.apiKey,
+					baseUrl: savedCreds.baseUrl,
+					model: savedCreds.model,
+				});
+				setStep("configuring");
+				return;
+			}
+			setStep(choice === "sso" ? "login" : "manual-creds");
+		},
+		[savedCreds],
+	);
 
 	const handleLoginDone = useCallback((key: string) => {
 		setCreds({ apiKey: key });
@@ -94,6 +140,11 @@ export function InstallApp() {
 	}, []);
 
 	const handleManualDone = useCallback((value: ManualCredentialsValue) => {
+		saveApiKey({
+			apiKey: value.apiKey,
+			baseUrl: value.baseUrl,
+			model: value.model,
+		});
 		setCreds({
 			apiKey: value.apiKey,
 			baseUrl: value.baseUrl,
@@ -141,7 +192,29 @@ export function InstallApp() {
 						<Install tools={tools} onDone={handleInstallDone} />
 					</Step>
 				)}
-				{POST_INSTALL.includes(step) && (
+				{(step === "validating-existing" || POST_VALIDATE.includes(step)) &&
+					savedCreds && (
+						<Step
+							active={step === "validating-existing"}
+							title={<Text bold>Checking saved API key</Text>}
+						>
+							{step === "validating-existing" ? (
+								<Box>
+									<Text color="cyan">
+										<Spinner />
+									</Text>
+									<Text> Verifying with gateway...</Text>
+								</Box>
+							) : (
+								<Text dimColor>
+									{existingValid
+										? "Saved API key is valid."
+										: (existingMessage ?? "")}
+								</Text>
+							)}
+						</Step>
+					)}
+				{POST_VALIDATE.includes(step) && (
 					<Step
 						active={step === "auth-method"}
 						title={authMethodTitle(step !== "auth-method")}
@@ -150,6 +223,7 @@ export function InstallApp() {
 							onSelect={handleAuthMethod}
 							readOnly={step !== "auth-method"}
 							selected={authMethod}
+							hasExisting={existingValid}
 						/>
 					</Step>
 				)}

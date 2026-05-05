@@ -1,4 +1,12 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	mock,
+	spyOn,
+	test,
+} from "bun:test";
 import * as child_process from "node:child_process";
 import { cleanup, render } from "ink-testing-library";
 import * as auth from "@/auth.js";
@@ -106,7 +114,18 @@ afterEach(() => {
 	mock.restore();
 });
 
+// Default to "no saved API key" for tests that exercise the SSO/manual path —
+// otherwise InstallApp would discover whatever is in the dev's real
+// ~/.codev/auth.json and route through the validating-existing branch.
+function stubNoSavedKey() {
+	spyOn(auth, "loadApiKey").mockReturnValue(null);
+}
+
 describe("InstallApp fail-stop invariant", () => {
+	beforeEach(() => {
+		stubNoSavedKey();
+	});
+
 	test("install failure does not advance to Login step", async () => {
 		stubExecFile((file, args) => {
 			if (file === "npm" && args[0] === "install") {
@@ -406,5 +425,101 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(fetchApiKeySpy).toHaveBeenCalledTimes(2);
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 		expect(configureSpy).toHaveBeenCalledWith({ apiKey: "sk-retry-ok" });
+	});
+});
+
+describe("InstallApp existing-key path", () => {
+	test("validating an existing key shows it, surfaces the option, and reuses saved creds", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		const loadSpy = spyOn(auth, "loadApiKey").mockReturnValue({
+			apiKey: "sk-existing-123",
+			baseUrl: "https://my-gateway.example.com/v1",
+			model: "saved-model",
+		});
+		const validateSpy = spyOn(proxy, "validateApiKey").mockResolvedValue(true);
+		const loginSpy = spyOn(auth, "login").mockImplementation(
+			() => new Promise(() => {}),
+		);
+		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+		const configureSpy = spyOn(
+			configure,
+			"configureClaudeCode",
+		).mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.b",
+			},
+		]);
+		loadSpy.mockClear();
+		validateSpy.mockClear();
+		loginSpy.mockClear();
+		fetchApiKeySpy.mockClear();
+		configureSpy.mockClear();
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceFromSelectToInstalling(stdin);
+		// Wait for install to settle, validation to resolve, and auth-method
+		// to render with the new option as the default cursor.
+		await new Promise((r) => setTimeout(r, 200));
+
+		const beforeChoice = allFrames(frames);
+		expect(beforeChoice).toContain("Use existing API Key");
+		expect(beforeChoice).toContain("Login to SSO to get new API Key");
+
+		// Default cursor is on the existing option — Enter selects it directly.
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 1_300));
+
+		const history = allFrames(frames);
+		expect(history).toContain("Happy coding");
+		expect(loginSpy).not.toHaveBeenCalled();
+		expect(fetchApiKeySpy).not.toHaveBeenCalled();
+		expect(validateSpy).toHaveBeenCalledTimes(1);
+		expect(validateSpy).toHaveBeenCalledWith(
+			"sk-existing-123",
+			"https://my-gateway.example.com/v1",
+		);
+		expect(configureSpy).toHaveBeenCalledWith({
+			apiKey: "sk-existing-123",
+			baseUrl: "https://my-gateway.example.com/v1",
+			model: "saved-model",
+		});
+	});
+
+	test("invalid saved key surfaces an error and does not show the existing option", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		spyOn(auth, "loadApiKey").mockReturnValue({ apiKey: "sk-stale" });
+		spyOn(proxy, "validateApiKey").mockResolvedValue(false);
+		spyOn(auth, "login").mockImplementation(() => new Promise(() => {}));
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceFromSelectToInstalling(stdin);
+		await new Promise((r) => setTimeout(r, 200));
+
+		const history = allFrames(frames);
+		expect(history).toContain("Saved API key is no longer valid");
+		expect(history).not.toContain("Use existing API Key");
+		expect(history).toContain("Login to SSO to get new API Key");
+	});
+
+	test("validation network error is reported and option is hidden", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		spyOn(auth, "loadApiKey").mockReturnValue({ apiKey: "sk-x" });
+		spyOn(proxy, "validateApiKey").mockRejectedValue(
+			new Error("fetch failed: ECONNREFUSED"),
+		);
+		spyOn(auth, "login").mockImplementation(() => new Promise(() => {}));
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceFromSelectToInstalling(stdin);
+		await new Promise((r) => setTimeout(r, 200));
+
+		const history = allFrames(frames);
+		expect(history).toContain("Could not verify saved API key");
+		expect(history).toContain("ECONNREFUSED");
+		expect(history).not.toContain("Use existing API Key");
 	});
 });
