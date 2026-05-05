@@ -72,6 +72,9 @@ export function UploadApp({ skipExport = false }: UploadAppProps) {
 							- {err.file}: {err.message}
 						</Text>
 					))}
+					{summary.errors.length > 5 && (
+						<Text dimColor>(+{summary.errors.length - 5} more)</Text>
+					)}
 				</Box>
 			)}
 			<Text dimColor>Source: {summary.outDir}</Text>

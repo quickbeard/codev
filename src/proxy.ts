@@ -13,13 +13,15 @@ interface ErrorResponse {
 	error?: string;
 }
 
-const PROXY_URL = (
-	process.env.CODEV_PROXY_URL?.trim() || `${BASE_URL}codev-proxy`
-).replace(/\/+$/, "");
-const SUPABASE_PROXY_URL = (
-	process.env.CODEV_SUPABASE_PROXY_URL?.trim() ||
-	"http://localhost:3000/api/codev"
-).replace(/\/+$/, "");
+function resolveUrl(envVar: string, fallback: string): string {
+	return (process.env[envVar]?.trim() || fallback).replace(/\/+$/, "");
+}
+
+const PROXY_URL = resolveUrl("CODEV_PROXY_URL", `${BASE_URL}codev-proxy`);
+const SUPABASE_PROXY_URL = resolveUrl(
+	"CODEV_SUPABASE_PROXY_URL",
+	`${BASE_URL}api/codev`,
+);
 
 export interface SupabaseSession {
 	access_token: string;

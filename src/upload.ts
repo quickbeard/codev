@@ -1,17 +1,16 @@
-import { createHash } from "node:crypto";
 import {
 	existsSync,
 	readdirSync,
 	readFileSync,
 	realpathSync,
+	type Stats,
 	statSync,
 } from "node:fs";
 import { basename, join } from "node:path";
-import { gzipSync } from "node:zlib";
 import { loadAuth, login } from "@/auth.js";
 import { runExport } from "@/export.js";
 import { projectLogsDir } from "@/paths.js";
-import type { Agent } from "@/providers/types.js";
+import { AGENTS } from "@/providers/types.js";
 import { fetchSupabaseSession } from "@/proxy.js";
 import { getSupabaseConfig, type SupabaseConfig } from "@/supabase.js";
 
@@ -36,7 +35,7 @@ interface PresignResponse {
 	storagePath: string;
 }
 
-interface ExistingConversation {
+export interface ExistingConversation {
 	id: string;
 	local_file_path: string | null;
 	local_content_hash: string | null;
@@ -49,7 +48,6 @@ interface UploadCandidate {
 	previousVersionId: string;
 }
 
-const AGENT_DIRS: Agent[] = ["claude-code", "codex", "opencode"];
 const UPLOAD_TIMEOUT_MS = 60_000;
 
 export async function runUpload({
@@ -99,7 +97,7 @@ export async function runUpload({
 
 export function listMarkdownLogs(outDir: string): string[] {
 	const files: string[] = [];
-	for (const agent of AGENT_DIRS) {
+	for (const agent of AGENTS) {
 		const dir = join(outDir, agent);
 		if (!existsSync(dir)) continue;
 		for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -112,7 +110,9 @@ export function listMarkdownLogs(outDir: string): string[] {
 }
 
 export function fileSha256(path: string): string {
-	return createHash("sha256").update(readFileSync(path)).digest("hex");
+	return new Bun.CryptoHasher("sha256")
+		.update(readFileSync(path))
+		.digest("hex");
 }
 
 export function filterNewFiles(
@@ -174,10 +174,10 @@ async function uploadFile(
 	candidate: UploadCandidate,
 ): Promise<void> {
 	const filename = basename(candidate.path);
+	const stat = statSync(candidate.path);
 	const presign = await presignUpload(config, accessToken, filename);
 	await putGzip(candidate.path, presign.uploadUrl);
-	const stat = statSync(candidate.path);
-	await confirmUpload(config, accessToken, presign, candidate, stat.size);
+	await confirmUpload(config, accessToken, presign, candidate, stat);
 }
 
 async function presignUpload(
@@ -203,7 +203,7 @@ async function presignUpload(
 }
 
 async function putGzip(path: string, uploadUrl: string): Promise<void> {
-	const payload = gzipSync(readFileSync(path));
+	const payload = Bun.gzipSync(readFileSync(path));
 	const res = await fetch(uploadUrl, {
 		method: "PUT",
 		headers: {
@@ -225,7 +225,7 @@ async function confirmUpload(
 	accessToken: string,
 	presign: PresignResponse,
 	candidate: UploadCandidate,
-	fileSizeBytes: number,
+	stat: Stats,
 ): Promise<void> {
 	const res = await fetch(`${config.url}/functions/v1/confirm-upload`, {
 		method: "POST",
@@ -237,9 +237,9 @@ async function confirmUpload(
 			conversationId: presign.conversationId,
 			storagePath: presign.storagePath,
 			filename: basename(candidate.path),
-			fileSizeBytes,
+			fileSizeBytes: stat.size,
 			fileFormat: "markdown",
-			fileLastModified: statSync(candidate.path).mtime.toISOString(),
+			fileLastModified: stat.mtime.toISOString(),
 			localFilePath: candidate.path,
 			localContentHash: candidate.hash,
 			previousVersionId: candidate.previousVersionId,
