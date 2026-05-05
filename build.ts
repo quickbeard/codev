@@ -26,7 +26,7 @@ const result = await Bun.build({
 	plugins: [shimDevtools],
 	// `open` ships platform-specific shell scripts that the bundler can't
 	// pull in as assets; keep it external so npm resolves it at install time.
-	external: ["open"],
+	external: ["open", "sql.js"],
 });
 
 if (!result.success) {

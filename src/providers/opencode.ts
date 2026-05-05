@@ -1,8 +1,36 @@
-import { Database } from "bun:sqlite";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import initSqlJs from "sql.js";
 import type { Message, Provider, Session } from "@/providers/types.js";
+
+type SqlJsModule = Awaited<ReturnType<typeof initSqlJs>>;
+type SqlJsDb = InstanceType<SqlJsModule["Database"]>;
+
+async function loadSqlJs(): Promise<SqlJsModule> {
+	// Resolve WASM next to the sql.js package (works for global npm install and
+	// `bun link`; avoids `bun:` so `node` can run `dist/index.js`).
+	const require = createRequire(fileURLToPath(import.meta.url));
+	const wasmPath = require.resolve("sql.js/dist/sql-wasm.wasm");
+	return await initSqlJs({
+		locateFile: () => wasmPath,
+	});
+}
+
+let sqlJsCache: Promise<SqlJsModule> | null = null;
+
+function getSqlJs(): Promise<SqlJsModule> {
+	if (!sqlJsCache) sqlJsCache = loadSqlJs();
+	return sqlJsCache;
+}
+
+async function openReadonlyDb(path: string): Promise<SqlJsDb> {
+	const SQL = await getSqlJs();
+	const file = readFileSync(path);
+	return new SQL.Database(file);
+}
 
 function dataDir(): string {
 	const xdg = process.env.XDG_DATA_HOME;
@@ -48,66 +76,93 @@ interface PartRow {
 	data: string;
 }
 
-// OpenCode normally stores per-project sessions under a `project` row whose
-// `worktree` matches the cwd. When OpenCode can't find a VCS root it dumps
-// sessions under a "global" project, distinguished by the session's own
-// `directory` column.
-function resolveProject(db: Database, cwd: string): ProjectMatch | null {
+function rowGet<T extends object>(
+	db: SqlJsDb,
+	sql: string,
+	params: (string | number)[],
+): T | undefined {
+	const stmt = db.prepare(sql);
+	stmt.bind(params);
+	if (!stmt.step()) {
+		stmt.free();
+		return undefined;
+	}
+	const row = stmt.getAsObject() as T;
+	stmt.free();
+	return row;
+}
+
+function rowAll<T extends object>(
+	db: SqlJsDb,
+	sql: string,
+	params: (string | number)[],
+): T[] {
+	const stmt = db.prepare(sql);
+	stmt.bind(params);
+	const rows: T[] = [];
+	while (stmt.step()) {
+		rows.push(stmt.getAsObject() as T);
+	}
+	stmt.free();
+	return rows;
+}
+
+function resolveProject(db: SqlJsDb, cwd: string): ProjectMatch | null {
 	const target = canonical(cwd);
-	const direct = db
-		.query<{ id: string }, [string]>(
-			"SELECT id FROM project WHERE worktree = ?",
-		)
-		.get(target);
+	const direct = rowGet<{ id: string }>(
+		db,
+		"SELECT id FROM project WHERE worktree = ?",
+		[target],
+	);
 	if (direct?.id) return { projectId: direct.id, directoryFilter: "" };
 
-	const fallback = db
-		.query<{ count: number }, [string]>(
-			"SELECT COUNT(*) as count FROM session WHERE project_id = 'global' AND directory = ?",
-		)
-		.get(target);
+	const fallback = rowGet<{ count: number }>(
+		db,
+		"SELECT COUNT(*) AS count FROM session WHERE project_id = 'global' AND directory = ?",
+		[target],
+	);
 	if (fallback && fallback.count > 0) {
 		return { projectId: "global", directoryFilter: target };
 	}
 	return null;
 }
 
-function listSessionRows(db: Database, match: ProjectMatch): SessionRow[] {
+function listSessionRows(db: SqlJsDb, match: ProjectMatch): SessionRow[] {
 	if (match.directoryFilter) {
-		return db
-			.query<SessionRow, [string, string]>(
-				"SELECT id, title, directory, time_created, time_updated " +
-					"FROM session WHERE project_id = ? AND directory = ? ORDER BY time_created",
-			)
-			.all(match.projectId, match.directoryFilter);
-	}
-	return db
-		.query<SessionRow, [string]>(
+		return rowAll<SessionRow>(
+			db,
 			"SELECT id, title, directory, time_created, time_updated " +
-				"FROM session WHERE project_id = ? ORDER BY time_created",
-		)
-		.all(match.projectId);
+				"FROM session WHERE project_id = ? AND directory = ? ORDER BY time_created",
+			[match.projectId, match.directoryFilter],
+		);
+	}
+	return rowAll<SessionRow>(
+		db,
+		"SELECT id, title, directory, time_created, time_updated " +
+			"FROM session WHERE project_id = ? ORDER BY time_created",
+		[match.projectId],
+	);
 }
 
-function readMessages(db: Database, sessionId: string): MessageRow[] {
-	return db
-		.query<MessageRow, [string]>(
-			"SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created",
-		)
-		.all(sessionId);
+function readMessages(db: SqlJsDb, sessionId: string): MessageRow[] {
+	return rowAll<MessageRow>(
+		db,
+		"SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created",
+		[sessionId],
+	);
 }
 
 function readParts(
-	db: Database,
+	db: SqlJsDb,
 	sessionId: string,
 	messageId: string,
 ): PartRow[] {
-	return db
-		.query<PartRow, [string, string]>(
-			"SELECT id, message_id, time_created, data FROM part " +
-				"WHERE session_id = ? AND message_id = ? ORDER BY time_created",
-		)
-		.all(sessionId, messageId);
+	return rowAll<PartRow>(
+		db,
+		"SELECT id, message_id, time_created, data FROM part " +
+			"WHERE session_id = ? AND message_id = ? ORDER BY time_created",
+		[sessionId, messageId],
+	);
 }
 
 function safeParse<T>(raw: string): T | null {
@@ -120,14 +175,10 @@ function safeParse<T>(raw: string): T | null {
 
 function unixToISO(ms: number): string {
 	if (!Number.isFinite(ms) || ms <= 0) return "";
-	// OpenCode timestamps may be seconds or milliseconds; treat large values as ms.
 	const epochMs = ms > 1e12 ? ms : ms * 1000;
 	return new Date(epochMs).toISOString();
 }
 
-// OpenCode parts have many shapes (text, reasoning, tool, ...). For v1 we
-// only surface plain text — tools/reasoning are parsed separately and we drop
-// them rather than trying to render them as markdown.
 function partTextIfPlain(part: PartRow): string | null {
 	const obj = safeParse<{ type?: string; text?: string }>(part.data);
 	if (!obj) return null;
@@ -135,7 +186,7 @@ function partTextIfPlain(part: PartRow): string | null {
 	return obj.text;
 }
 
-function buildSession(row: SessionRow, db: Database): Session | null {
+function buildSession(row: SessionRow, db: SqlJsDb): Session | null {
 	const messages: Message[] = [];
 	let firstUserMessage = "";
 	const msgRows = readMessages(db, row.id);
@@ -175,9 +226,9 @@ export const openCodeProvider: Provider = {
 	async detect(cwd: string): Promise<boolean> {
 		const path = dbPath();
 		if (!existsSync(path)) return false;
-		let db: Database | null = null;
+		let db: SqlJsDb | null = null;
 		try {
-			db = new Database(path, { readonly: true });
+			db = await openReadonlyDb(path);
 			const match = resolveProject(db, cwd);
 			if (!match) return false;
 			const rows = listSessionRows(db, match);
@@ -192,7 +243,7 @@ export const openCodeProvider: Provider = {
 	async listSessions(cwd: string): Promise<Session[]> {
 		const path = dbPath();
 		if (!existsSync(path)) return [];
-		const db = new Database(path, { readonly: true });
+		const db = await openReadonlyDb(path);
 		try {
 			const match = resolveProject(db, cwd);
 			if (!match) return [];

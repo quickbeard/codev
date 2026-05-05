@@ -1,27 +1,54 @@
-import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import {
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	spyOn,
+	test,
+} from "bun:test";
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { createRequire } from "node:module";
 import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import initSqlJs from "sql.js";
 import { openCodeProvider } from "@/providers/opencode.js";
 
+type SqlModule = Awaited<ReturnType<typeof initSqlJs>>;
+type MemDb = InstanceType<SqlModule["Database"]>;
+
+let SQL: SqlModule;
 let tempHome: string;
 let homedirSpy: ReturnType<typeof spyOn>;
 let projectCwd: string;
 let dbPath: string;
 
-function createSchema(db: Database): void {
-	db.run("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)");
-	db.run(
-		"CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, slug TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER)",
-	);
-	db.run(
-		"CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT)",
-	);
-	db.run(
-		"CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT)",
-	);
+beforeAll(async () => {
+	const require = createRequire(fileURLToPath(import.meta.url));
+	const wasmPath = require.resolve("sql.js/dist/sql-wasm.wasm");
+	SQL = await initSqlJs({ locateFile: () => wasmPath });
+});
+
+function createSchema(db: MemDb): void {
+	db.exec(`
+CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT);
+CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, slug TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER);
+CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+`);
+}
+
+function persistDb(db: MemDb, path: string): void {
+	writeFileSync(path, Buffer.from(db.export()));
+	db.close();
 }
 
 beforeEach(() => {
@@ -40,8 +67,8 @@ afterEach(() => {
 	delete process.env.XDG_DATA_HOME;
 });
 
-function seedProjectAndSession(): void {
-	const db = new Database(dbPath);
+async function seedProjectAndSession(): Promise<void> {
+	const db = new SQL.Database();
 	createSchema(db);
 	db.run("INSERT INTO project (id, worktree) VALUES (?, ?)", [
 		"proj-1",
@@ -97,7 +124,6 @@ function seedProjectAndSession(): void {
 			JSON.stringify({ type: "text", text: "Sure — let's start." }),
 		],
 	);
-	// A reasoning part should be ignored by the v1 renderer.
 	db.run(
 		"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
 		[
@@ -108,7 +134,7 @@ function seedProjectAndSession(): void {
 			JSON.stringify({ type: "reasoning", text: "Internal thinking" }),
 		],
 	);
-	db.close();
+	persistDb(db, dbPath);
 }
 
 describe("openCodeProvider.detect", () => {
@@ -117,19 +143,19 @@ describe("openCodeProvider.detect", () => {
 	});
 
 	test("returns true when a project row matches the cwd", async () => {
-		seedProjectAndSession();
+		await seedProjectAndSession();
 		expect(await openCodeProvider.detect(projectCwd)).toBe(true);
 	});
 
 	test("returns false when no project matches the cwd", async () => {
-		seedProjectAndSession();
+		await seedProjectAndSession();
 		const otherCwd = join(tempHome, "elsewhere");
 		mkdirSync(otherCwd, { recursive: true });
 		expect(await openCodeProvider.detect(otherCwd)).toBe(false);
 	});
 
 	test("falls back to global project when matching directory column", async () => {
-		const db = new Database(dbPath);
+		const db = new SQL.Database();
 		createSchema(db);
 		db.run("INSERT INTO project (id, worktree) VALUES (?, ?)", ["global", "/"]);
 		db.run(
@@ -144,14 +170,14 @@ describe("openCodeProvider.detect", () => {
 				Math.floor(Date.UTC(2026, 3, 27, 18, 32, 5) / 1000),
 			],
 		);
-		db.close();
+		persistDb(db, dbPath);
 		expect(await openCodeProvider.detect(projectCwd)).toBe(true);
 	});
 });
 
 describe("openCodeProvider.listSessions", () => {
 	test("returns sessions with text parts only, dropping reasoning parts", async () => {
-		seedProjectAndSession();
+		await seedProjectAndSession();
 		const sessions = await openCodeProvider.listSessions(projectCwd);
 		expect(sessions.length).toBe(1);
 		const s = sessions[0];
@@ -164,7 +190,7 @@ describe("openCodeProvider.listSessions", () => {
 	});
 
 	test("returns empty list when no project matches the cwd", async () => {
-		seedProjectAndSession();
+		await seedProjectAndSession();
 		const otherCwd = join(tempHome, "elsewhere");
 		mkdirSync(otherCwd, { recursive: true });
 		const sessions = await openCodeProvider.listSessions(otherCwd);
@@ -179,7 +205,7 @@ describe("openCodeProvider.listSessions", () => {
 			const xdgOpencodeDir = join(xdg, "opencode");
 			mkdirSync(xdgOpencodeDir, { recursive: true });
 			const xdgDbPath = join(xdgOpencodeDir, "opencode.db");
-			const db = new Database(xdgDbPath);
+			const db = new SQL.Database();
 			createSchema(db);
 			db.run("INSERT INTO project (id, worktree) VALUES (?, ?)", [
 				"proj-1",
@@ -197,7 +223,7 @@ describe("openCodeProvider.listSessions", () => {
 					Math.floor(Date.UTC(2026, 3, 27, 18, 32, 5) / 1000),
 				],
 			);
-			db.close();
+			persistDb(db, xdgDbPath);
 			process.env.XDG_DATA_HOME = xdg;
 			expect(await openCodeProvider.detect(projectCwd)).toBe(true);
 		} finally {
