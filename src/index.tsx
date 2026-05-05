@@ -10,6 +10,7 @@ import { runRestore } from "@/restore.js";
 import { runAgent } from "@/run.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
+import { runUpload } from "@/upload.js";
 
 const MIN_NODE_MAJOR = 22;
 const nodeMajor = Number.parseInt(
@@ -113,11 +114,17 @@ async function runAgentWithAutoUpload(
 ): Promise<number> {
 	const { agentArgs, autoUpload } = parseAutoUploadFlag(rawArgs);
 	const willUpload = autoUpload && isAuthenticatedForUpload();
-	if (willUpload) {
-		await renderBackgroundUpload("Starting...");
-	}
+
+	// Start the pre-session upload silently in the background — previous
+	// session uploads shouldn't delay or clutter a new coding session.
+	const preUpload = willUpload ? runSilentUpload() : null;
+
 	const code = await runAgent(cmd, agentArgs);
+
+	// Await the pre-session upload (likely already done) then run the
+	// post-session upload to capture the session that just finished.
 	if (willUpload) {
+		await preUpload;
 		await renderBackgroundUpload("Stopping...");
 	} else if (autoUpload) {
 		console.log(
@@ -125,6 +132,14 @@ async function runAgentWithAutoUpload(
 		);
 	}
 	return code;
+}
+
+async function runSilentUpload(): Promise<void> {
+	try {
+		await runUpload({ onStatus: () => {} });
+	} catch {
+		// Best-effort — never block the agent lifecycle on a failed upload.
+	}
 }
 
 async function renderBackgroundUpload(label: string): Promise<void> {
