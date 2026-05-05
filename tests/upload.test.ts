@@ -124,7 +124,19 @@ describe("runUpload", () => {
 					? String(input)
 					: input.url;
 			calls.push(url);
+			if (url.includes("/api/codev/supabase/exchange")) {
+				return new Response(
+					JSON.stringify({
+						access_token: "supabase-upload-token",
+						user: { id: "u", email: "u@example.com" },
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
 			if (url.includes("/rest/v1/conversations")) {
+				expect((init?.headers as Record<string, string>).Authorization).toBe(
+					"Bearer supabase-upload-token",
+				);
 				return new Response("[]", {
 					headers: { "Content-Type": "application/json" },
 				});

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { fetchApiKey } from "@/proxy.js";
+import { fetchApiKey, fetchSupabaseSession } from "@/proxy.js";
 
 function jsonResponse(status: number, body: unknown): Response {
 	return new Response(JSON.stringify(body), {
@@ -74,5 +74,33 @@ describe("fetchApiKey", () => {
 		];
 		expect(init.method).toBe("POST");
 		expect(init.headers?.Authorization).toBe("Bearer my-token");
+	});
+});
+
+describe("fetchSupabaseSession", () => {
+	test("returns the Supabase session on a 2xx response", async () => {
+		spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, {
+				access_token: "supabase-token",
+				refresh_token: "refresh",
+				expires_at: 123,
+				user: { id: "uid", email: "x@y.z" },
+			}),
+		);
+		expect(await fetchSupabaseSession("sso-token")).toEqual({
+			access_token: "supabase-token",
+			refresh_token: "refresh",
+			expires_at: 123,
+			user: { id: "uid", email: "x@y.z" },
+		});
+	});
+
+	test("throws on a non-2xx response", async () => {
+		spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(401, { error: "invalid sso token" }),
+		);
+		await expect(fetchSupabaseSession("bad-token")).rejects.toThrow(
+			"Proxy /supabase/exchange failed (401): invalid sso token",
+		);
 	});
 });

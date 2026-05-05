@@ -12,6 +12,7 @@ import { loadAuth, login } from "@/auth.js";
 import { runExport } from "@/export.js";
 import { projectLogsDir } from "@/paths.js";
 import type { Agent } from "@/providers/types.js";
+import { fetchSupabaseSession } from "@/proxy.js";
 import { getSupabaseConfig, type SupabaseConfig } from "@/supabase.js";
 
 export interface UploadOptions {
@@ -75,15 +76,18 @@ export async function runUpload({
 
 	const config = getSupabaseConfig();
 	const auth = await ensureAuth(onStatus);
+	onStatus("Exchanging SSO session for Supabase upload session...");
+	const supabaseSession = await fetchSupabaseSession(auth.access_token);
+	const uploadToken = supabaseSession.access_token;
 	onStatus("Checking existing uploads...");
-	const existing = await fetchExistingUploads(config, auth.access_token);
+	const existing = await fetchExistingUploads(config, uploadToken);
 	const candidates = filterNewFiles(files, existing);
 	summary.skipped = files.length - candidates.length;
 
 	for (const candidate of candidates) {
 		onStatus(`Uploading ${basename(candidate.path)}...`);
 		try {
-			await uploadFile(config, auth.access_token, candidate);
+			await uploadFile(config, uploadToken, candidate);
 			summary.uploaded++;
 		} catch (err) {
 			summary.failed++;
