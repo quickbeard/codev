@@ -18,7 +18,7 @@ const PROXY_URL = (
 ).replace(/\/+$/, "");
 const SUPABASE_PROXY_URL = (
 	process.env.CODEV_SUPABASE_PROXY_URL?.trim() ||
-	"http://localhost:3002/api/codev"
+	"http://localhost:3003/api/codev"
 ).replace(/\/+$/, "");
 
 export interface SupabaseSession {
