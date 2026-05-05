@@ -1,16 +1,19 @@
 import { Box, Text, useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { login } from "@/auth.js";
+import { fetchApiKey } from "@/proxy.js";
 
 interface LoginProps {
 	onDone: (apiKey: string) => void;
 	onFallback: () => void;
 }
 
-export function Login({ onDone, onFallback: _onFallback }: LoginProps) {
+export function Login({ onDone, onFallback }: LoginProps) {
 	const [logs, setLogs] = useState<string[]>([]);
 	const [error, setError] = useState<string | null>(null);
 	const [waitingForEnter, setWaitingForEnter] = useState(false);
+	const [emptyKey, setEmptyKey] = useState(false);
+	const [fellBack, setFellBack] = useState(false);
 	const [attempt, setAttempt] = useState(0);
 	const openBrowserRef = useRef<(() => void) | null>(null);
 
@@ -27,14 +30,20 @@ export function Login({ onDone, onFallback: _onFallback }: LoginProps) {
 		setLogs([]);
 		setError(null);
 		setWaitingForEnter(false);
+		setEmptyKey(false);
 		openBrowserRef.current = null;
 
 		login(addLog, (openBrowserFn) => {
 			openBrowserRef.current = openBrowserFn;
 			setWaitingForEnter(true);
 		})
-			.then((auth) => {
-				onDone(auth.access_token);
+			.then(async (auth) => {
+				const key = await fetchApiKey(auth.access_token);
+				if (!key) {
+					setEmptyKey(true);
+					return;
+				}
+				onDone(key);
 			})
 			.catch((err: Error) => {
 				setError(err.message);
@@ -46,6 +55,11 @@ export function Login({ onDone, onFallback: _onFallback }: LoginProps) {
 			setWaitingForEnter(false);
 			openBrowserRef.current();
 			openBrowserRef.current = null;
+			return;
+		}
+		if (emptyKey && !fellBack && key.return) {
+			setFellBack(true);
+			onFallback();
 			return;
 		}
 		if (error && key.return) {
@@ -67,6 +81,18 @@ export function Login({ onDone, onFallback: _onFallback }: LoginProps) {
 				<>
 					<Text color="red">{`Login failed: ${error}`}</Text>
 					<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
+				</>
+			)}
+			{emptyKey && (
+				<>
+					<Text color="yellow">
+						{"SSO succeeded but the gateway returned an empty API key."}
+					</Text>
+					{!fellBack && (
+						<Text dimColor>
+							{"Press Enter to enter credentials manually, Ctrl-C to quit"}
+						</Text>
+					)}
 				</>
 			)}
 		</Box>

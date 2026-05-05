@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const SUPABASE_AUTH_PROVIDER = "custom:vtnet-oidc";
-
 export interface SupabaseConfig {
 	url: string;
 	anonKey: string;
