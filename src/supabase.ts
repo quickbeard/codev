@@ -5,18 +5,13 @@ export interface SupabaseConfig {
 	anonKey: string;
 }
 
-function env(name: string): string {
-	return process.env[name]?.trim() ?? "";
-}
-
+// Reads the Supabase coordinates that codev-proxy provisioned at the last
+// successful SSO login. Both accessors hard-fail with a "run codev install"
+// message if the values aren't on disk, so callers don't need their own
+// missing-config branch.
 export function getSupabaseConfig(): SupabaseConfig {
-	const url =
-		env("CODEV_SUPABASE_URL") ||
-		env("NEXT_PUBLIC_SUPABASE_URL") ||
-		SUPABASE_URL;
-	const anonKey =
-		env("CODEV_SUPABASE_ANON_KEY") ||
-		env("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") ||
-		SUPABASE_ANON_KEY;
-	return { url: url.replace(/\/+$/, ""), anonKey };
+	return {
+		url: SUPABASE_URL().replace(/\/+$/, ""),
+		anonKey: SUPABASE_ANON_KEY(),
+	};
 }

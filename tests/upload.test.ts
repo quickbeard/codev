@@ -27,16 +27,12 @@ beforeEach(() => {
 	mkdirSync(projectCwd, { recursive: true });
 	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
 	cwdSpy = spyOn(process, "cwd").mockReturnValue(projectCwd);
-	process.env.CODEV_SUPABASE_URL = "https://test.supabase.co";
-	process.env.CODEV_SUPABASE_ANON_KEY = "anon";
 });
 
 afterEach(() => {
 	homedirSpy.mockRestore();
 	cwdSpy.mockRestore();
 	rmSync(tempHome, { recursive: true, force: true });
-	delete process.env.CODEV_SUPABASE_URL;
-	delete process.env.CODEV_SUPABASE_ANON_KEY;
 });
 
 function writeAuth() {
@@ -48,6 +44,9 @@ function writeAuth() {
 			id_token: "token",
 			expires_at: Date.now() + 3600000,
 			user: { sub: "u", email: "u@example.com", displayName: "User" },
+			supabase_url: "https://test.supabase.co",
+			supabase_anon_key: "anon",
+			supabase_proxy_url: "https://api.test/api/codev",
 		}),
 	);
 }
