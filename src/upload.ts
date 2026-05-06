@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn as nodeSpawn } from "node:child_process";
 import {
 	appendFileSync,
 	closeSync,
@@ -309,10 +309,9 @@ function lastUploadStatusPath(): string {
 
 function logLine(message: string): void {
 	try {
-		appendFileSync(
-			uploadLogPath(),
-			`[${new Date().toISOString()}] ${message}\n`,
-		);
+		const path = uploadLogPath();
+		mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+		appendFileSync(path, `[${new Date().toISOString()}] ${message}\n`);
 	} catch {
 		// Best-effort.
 	}
@@ -432,6 +431,12 @@ export async function runUploadDaemon(): Promise<number> {
 	}
 }
 
+// Indirection so tests can spy on the spawn call without reaching into
+// child_process directly (mirrors `browserOpener` in auth.ts).
+export const spawner = {
+	spawn: nodeSpawn,
+};
+
 export function spawnUploadDaemon(): void {
 	// Skip when not logged in: a detached child has no TTY, so the SSO browser
 	// flow inside ensureAuth would land in the log and never resolve.
@@ -442,10 +447,11 @@ export function spawnUploadDaemon(): void {
 		mkdirSync(codevHomeDir(), { recursive: true, mode: 0o700 });
 		const logFd = openSync(uploadLogPath(), "a");
 		try {
-			const child = spawn(process.execPath, [selfPath, "upload", "--daemon"], {
-				detached: true,
-				stdio: ["ignore", logFd, logFd],
-			});
+			const child = spawner.spawn(
+				process.execPath,
+				[selfPath, "upload", "--daemon"],
+				{ detached: true, stdio: ["ignore", logFd, logFd] },
+			);
 			child.unref();
 		} finally {
 			closeSync(logFd);
