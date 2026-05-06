@@ -1,4 +1,5 @@
-import { BASE_URL } from "@/const.js";
+import type { CodevConfig } from "@/auth.js";
+import { BASE_URL, SUPABASE_PROXY_URL } from "@/const.js";
 
 interface ExchangeResponse {
 	api_key: string;
@@ -9,19 +10,17 @@ interface ExchangeResponse {
 	};
 }
 
+interface ConfigResponse {
+	supabaseUrl: string;
+	supabaseAnonKey: string;
+	supabaseProxyUrl: string;
+}
+
 interface ErrorResponse {
 	error?: string;
 }
 
-function resolveUrl(envVar: string, fallback: string): string {
-	return (process.env[envVar]?.trim() || fallback).replace(/\/+$/, "");
-}
-
-const PROXY_URL = resolveUrl("CODEV_PROXY_URL", `${BASE_URL}codev-proxy`);
-const SUPABASE_PROXY_URL = resolveUrl(
-	"CODEV_SUPABASE_PROXY_URL",
-	`${BASE_URL}api/codev`,
-);
+const PROXY_URL = `${BASE_URL}codev-proxy`;
 const GATEWAY_BASE_URL = `${BASE_URL}gateway/`;
 const VALIDATE_TIMEOUT_MS = 5_000;
 
@@ -51,6 +50,36 @@ export async function fetchApiKey(accessToken: string): Promise<string> {
 	const data = (await res.json()) as ExchangeResponse;
 	// Empty key is not thrown — callers route to manual-credentials fallback.
 	return data.api_key ?? "";
+}
+
+// Pulls the Supabase coordinates the CLI doesn't bake into its source. Called
+// from auth.ts on every successful SSO login (fresh + refresh) and persisted
+// into ~/.codev/auth.json by saveCodevConfig.
+export async function fetchCodevConfig(
+	accessToken: string,
+): Promise<CodevConfig> {
+	const res = await fetch(`${PROXY_URL}/config`, {
+		method: "POST",
+		headers: { Authorization: `Bearer ${accessToken}` },
+	});
+
+	if (!res.ok) {
+		const body = (await res.json().catch(() => ({}))) as ErrorResponse;
+		const reason = body.error || res.statusText;
+		throw new Error(`Proxy /config failed (${res.status}): ${reason}`);
+	}
+
+	const data = (await res.json()) as ConfigResponse;
+	if (!data.supabaseUrl || !data.supabaseAnonKey || !data.supabaseProxyUrl) {
+		throw new Error(
+			`Proxy /config returned incomplete payload: ${JSON.stringify(data)}`,
+		);
+	}
+	return {
+		supabaseUrl: data.supabaseUrl,
+		supabaseAnonKey: data.supabaseAnonKey,
+		supabaseProxyUrl: data.supabaseProxyUrl,
+	};
 }
 
 // Manual creds may include a `/v1` suffix (OpenAI-style); /key/info lives at
@@ -85,7 +114,8 @@ export async function validateApiKey(
 export async function fetchSupabaseSession(
 	accessToken: string,
 ): Promise<SupabaseSession> {
-	const res = await fetch(`${SUPABASE_PROXY_URL}/supabase/exchange`, {
+	const supabaseProxyUrl = SUPABASE_PROXY_URL().replace(/\/+$/, "");
+	const res = await fetch(`${supabaseProxyUrl}/supabase/exchange`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
 	});

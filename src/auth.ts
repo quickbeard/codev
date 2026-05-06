@@ -12,6 +12,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import open from "open";
 import { BASE_URL } from "@/const.js";
+import { fetchCodevConfig } from "@/proxy.js";
 
 const SSO_BASE_URL = `${BASE_URL}sso-wrapper`;
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
@@ -61,11 +62,13 @@ export interface ApiKeyCreds {
 	model?: string;
 }
 
-// auth.json holds two independent blocks: SSO tokens (issued by the IdP) and
-// the gateway API key (issued by /auth/exchange or entered manually). They
-// share a file because they're written together on a fresh install, but each
-// is updated in isolation — saving SSO must not clobber the api_key block,
-// and `codev logout` strips SSO while preserving the api_key for reuse.
+// auth.json holds three independent blocks: SSO tokens (issued by the IdP),
+// the gateway API key (issued by /auth/exchange or entered manually), and the
+// CoDev runtime config (Supabase coordinates, fetched from codev-proxy's
+// /config endpoint on every successful SSO login). They share a file because
+// they're written together on a fresh install, but each is updated in
+// isolation — saving SSO must not clobber the api_key or codev-config blocks,
+// and `codev logout` strips SSO while preserving the rest for reuse.
 interface AuthFileContents {
 	access_token?: string;
 	id_token?: string;
@@ -75,6 +78,15 @@ interface AuthFileContents {
 	api_key?: string;
 	base_url?: string;
 	model?: string;
+	supabase_url?: string;
+	supabase_anon_key?: string;
+	supabase_proxy_url?: string;
+}
+
+export interface CodevConfig {
+	supabaseUrl: string;
+	supabaseAnonKey: string;
+	supabaseProxyUrl: string;
 }
 
 interface TokenResponse {
@@ -125,9 +137,7 @@ export function loadAuth(): AuthData | null {
 function saveAuth(data: AuthData): void {
 	const existing = readAuthFile() ?? {};
 	writeAuthFile({
-		api_key: existing.api_key,
-		base_url: existing.base_url,
-		model: existing.model,
+		...existing,
 		access_token: data.access_token,
 		id_token: data.id_token,
 		refresh_token: data.refresh_token,
@@ -139,14 +149,20 @@ function saveAuth(data: AuthData): void {
 export function saveApiKey(creds: ApiKeyCreds): void {
 	const existing = readAuthFile() ?? {};
 	writeAuthFile({
-		access_token: existing.access_token,
-		id_token: existing.id_token,
-		refresh_token: existing.refresh_token,
-		expires_at: existing.expires_at,
-		user: existing.user,
+		...existing,
 		api_key: creds.apiKey,
 		base_url: creds.baseUrl,
 		model: creds.model,
+	});
+}
+
+export function saveCodevConfig(config: CodevConfig): void {
+	const existing = readAuthFile() ?? {};
+	writeAuthFile({
+		...existing,
+		supabase_url: config.supabaseUrl,
+		supabase_anon_key: config.supabaseAnonKey,
+		supabase_proxy_url: config.supabaseProxyUrl,
 	});
 }
 
@@ -166,12 +182,17 @@ export async function logout(): Promise<boolean> {
 	const hasSso = !!(raw.access_token || raw.refresh_token);
 	if (!hasSso) return false;
 	try {
-		if (raw.api_key) {
-			writeAuthFile({
-				api_key: raw.api_key,
-				base_url: raw.base_url,
-				model: raw.model,
-			});
+		const preserved: AuthFileContents = {
+			api_key: raw.api_key,
+			base_url: raw.base_url,
+			model: raw.model,
+			supabase_url: raw.supabase_url,
+			supabase_anon_key: raw.supabase_anon_key,
+			supabase_proxy_url: raw.supabase_proxy_url,
+		};
+		const hasAnything = Object.values(preserved).some((v) => v !== undefined);
+		if (hasAnything) {
+			writeAuthFile(preserved);
 		} else {
 			unlinkSync(authFilePath());
 		}
@@ -277,6 +298,7 @@ export async function login(
 				},
 			};
 			saveAuth(authData);
+			await refreshCodevConfig(authData.access_token, onLog);
 			onLog(`Logged in as ${authData.user.email}`);
 			return authData;
 		} catch {
@@ -316,9 +338,28 @@ export async function login(
 	};
 
 	saveAuth(authData);
+	await refreshCodevConfig(authData.access_token, onLog);
 	clearForceLogin();
 	onLog(`Logged in as ${authData.user.email}`);
 	return authData;
+}
+
+// Best-effort: pull the latest Supabase coordinates from codev-proxy and
+// persist them next to the SSO session. Failure here doesn't fail login —
+// downstream accessors (SUPABASE_URL/ANON_KEY/PROXY_URL in const.ts) will
+// hard-fail later if no values were ever fetched, with a "run codev install"
+// message that's actionable for the user.
+async function refreshCodevConfig(
+	accessToken: string,
+	onLog: (msg: string) => void,
+): Promise<void> {
+	try {
+		const config = await fetchCodevConfig(accessToken);
+		saveCodevConfig(config);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		onLog(`Warning: could not refresh CoDev config: ${message}`);
+	}
 }
 
 async function getAuthCode(
