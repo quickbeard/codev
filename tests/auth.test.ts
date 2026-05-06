@@ -27,6 +27,7 @@ import {
 	login,
 	logout,
 	saveApiKey,
+	saveCodevConfig,
 } from "@/auth.js";
 import { BASE_URL } from "@/const.js";
 
@@ -199,6 +200,97 @@ describe("logout", () => {
 		);
 		expect(await logout()).toBe(false);
 	});
+
+	test("preserves supabase config when stripping SSO fields", async () => {
+		const dir = join(tempDir, ".codev");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({
+				...VALID_AUTH,
+				supabase_url: "https://keep.supabase.co",
+				supabase_anon_key: "keep-anon",
+				supabase_proxy_url: "https://api.test/api/codev",
+			}),
+		);
+		expect(await logout()).toBe(true);
+		expect(loadAuth()).toBeNull();
+		const after = JSON.parse(
+			readFileSync(join(dir, "auth.json"), "utf-8"),
+		) as Record<string, unknown>;
+		expect(after.supabase_url).toBe("https://keep.supabase.co");
+		expect(after.supabase_anon_key).toBe("keep-anon");
+		expect(after.supabase_proxy_url).toBe("https://api.test/api/codev");
+		expect(after.access_token).toBeUndefined();
+		expect(after.refresh_token).toBeUndefined();
+	});
+
+	test("preserves both api_key and supabase config when stripping SSO", async () => {
+		const dir = join(tempDir, ".codev");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({
+				...VALID_AUTH,
+				api_key: "sk-keep",
+				supabase_url: "https://keep.supabase.co",
+				supabase_anon_key: "keep-anon",
+				supabase_proxy_url: "https://api.test/api/codev",
+			}),
+		);
+		expect(await logout()).toBe(true);
+		expect(loadApiKey()?.apiKey).toBe("sk-keep");
+		const after = JSON.parse(
+			readFileSync(join(dir, "auth.json"), "utf-8"),
+		) as Record<string, unknown>;
+		expect(after.supabase_url).toBe("https://keep.supabase.co");
+	});
+});
+
+describe("saveCodevConfig", () => {
+	test("round-trips the three Supabase fields through auth.json", () => {
+		saveCodevConfig({
+			supabaseUrl: "https://x.supabase.co",
+			supabaseAnonKey: "anon-x",
+			supabaseProxyUrl: "https://api.test/api/codev",
+		});
+		const file = JSON.parse(
+			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
+		) as Record<string, unknown>;
+		expect(file.supabase_url).toBe("https://x.supabase.co");
+		expect(file.supabase_anon_key).toBe("anon-x");
+		expect(file.supabase_proxy_url).toBe("https://api.test/api/codev");
+	});
+
+	test("does not clobber SSO fields when saving codev config", () => {
+		writeAuthFile(VALID_AUTH);
+		saveCodevConfig({
+			supabaseUrl: "https://x.supabase.co",
+			supabaseAnonKey: "anon-x",
+			supabaseProxyUrl: "https://api.test/api/codev",
+		});
+		expect(loadAuth()?.access_token).toBe("test-access-token");
+	});
+
+	test("does not clobber api_key when saving codev config", () => {
+		saveApiKey({ apiKey: "sk-merged" });
+		saveCodevConfig({
+			supabaseUrl: "https://x.supabase.co",
+			supabaseAnonKey: "anon-x",
+			supabaseProxyUrl: "https://api.test/api/codev",
+		});
+		expect(loadApiKey()?.apiKey).toBe("sk-merged");
+	});
+
+	test("file is written with mode 0600", () => {
+		saveCodevConfig({
+			supabaseUrl: "u",
+			supabaseAnonKey: "a",
+			supabaseProxyUrl: "p",
+		});
+		const stat = statSync(join(tempDir, ".codev", "auth.json"));
+		expect(stat.mode & 0o777).toBe(0o600);
+	});
 });
 
 describe("saveApiKey / loadApiKey", () => {
@@ -278,6 +370,74 @@ describe("login", () => {
 	});
 });
 
+describe("login refresh-token path", () => {
+	let fetchSpy: ReturnType<typeof spyOn>;
+
+	afterEach(() => {
+		fetchSpy?.mockRestore();
+	});
+
+	test("refreshes tokens and persists Supabase config from /config", async () => {
+		// Pre-seed an expired SSO session with a refresh_token so login() takes
+		// the silent-refresh branch instead of the browser flow.
+		const dir = join(tempDir, ".codev");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({
+				access_token: "stale",
+				id_token: "stale",
+				refresh_token: "rt-keep",
+				expires_at: Date.now() - 1000,
+				user: { sub: "u", email: "u@example.com", displayName: "U" },
+			}),
+		);
+
+		fetchSpy = mockAuthFetch({
+			"/token": async () =>
+				new Response(
+					JSON.stringify({
+						access_token: "refreshed-access",
+						id_token: "refreshed-id",
+						expires_in: 3600,
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				),
+			"/userinfo": async () =>
+				new Response(
+					JSON.stringify({
+						sub: "u",
+						email: "u@example.com",
+						displayName: "U",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				),
+			"/codev-proxy/config": async () =>
+				new Response(
+					JSON.stringify({
+						supabaseUrl: "https://refreshed.supabase.co",
+						supabaseAnonKey: "refreshed-anon",
+						supabaseProxyUrl: "https://api.test/api/codev",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				),
+		});
+
+		const result = await login(
+			() => {},
+			() => {},
+		);
+
+		expect(result.access_token).toBe("refreshed-access");
+		const saved = JSON.parse(
+			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
+		) as Record<string, unknown>;
+		expect(saved.supabase_url).toBe("https://refreshed.supabase.co");
+		expect(saved.supabase_anon_key).toBe("refreshed-anon");
+		expect(saved.supabase_proxy_url).toBe("https://api.test/api/codev");
+	});
+});
+
 function getAuthorizeUrl(spy: ReturnType<typeof spyOn>): URL | null {
 	const call = spy.mock.calls[0];
 	if (!call) return null;
@@ -304,7 +464,7 @@ describe("login full OAuth flow", () => {
 	let openBrowserSpy: ReturnType<typeof spyOn>;
 	const originalFetch = globalThis.fetch;
 
-	function mockSsoFetch() {
+	function mockSsoFetch(overrides: { config?: () => Promise<Response> } = {}) {
 		fetchSpy = mockAuthFetch({
 			"/token": async () =>
 				new Response(
@@ -324,6 +484,17 @@ describe("login full OAuth flow", () => {
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				),
+			"/codev-proxy/config":
+				overrides.config ??
+				(async () =>
+					new Response(
+						JSON.stringify({
+							supabaseUrl: "https://x.supabase.co",
+							supabaseAnonKey: "anon-x",
+							supabaseProxyUrl: "https://api.test/api/codev",
+						}),
+						{ headers: { "Content-Type": "application/json" } },
+					)),
 		});
 	}
 
@@ -366,6 +537,63 @@ describe("login full OAuth flow", () => {
 		expect(saved.access_token).toBe("flow-access-token");
 
 		expect(logs.some((l) => l.includes("Logged in as"))).toBe(true);
+	});
+
+	test("persists Supabase config from /config into auth.json", async () => {
+		mockSsoFetch();
+
+		await login(
+			() => {},
+			(openBrowserFn) => {
+				openBrowserFn();
+				const port = getCallbackPort(openBrowserSpy);
+				const state = getCallbackState(openBrowserSpy);
+				setTimeout(() => {
+					originalFetch(
+						`http://localhost:${port}/callback?code=c&state=${state}`,
+					);
+				}, 50);
+			},
+		);
+
+		const saved = JSON.parse(
+			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
+		) as Record<string, unknown>;
+		expect(saved.supabase_url).toBe("https://x.supabase.co");
+		expect(saved.supabase_anon_key).toBe("anon-x");
+		expect(saved.supabase_proxy_url).toBe("https://api.test/api/codev");
+		expect(saved.access_token).toBe("flow-access-token");
+	});
+
+	test("login still succeeds when /config fetch fails (warns via onLog)", async () => {
+		mockSsoFetch({
+			config: async () =>
+				new Response(JSON.stringify({ error: "boom" }), { status: 502 }),
+		});
+		const logs: string[] = [];
+
+		const result = await login(
+			(msg) => logs.push(msg),
+			(openBrowserFn) => {
+				openBrowserFn();
+				const port = getCallbackPort(openBrowserSpy);
+				const state = getCallbackState(openBrowserSpy);
+				setTimeout(() => {
+					originalFetch(
+						`http://localhost:${port}/callback?code=c&state=${state}`,
+					);
+				}, 50);
+			},
+		);
+
+		expect(result.access_token).toBe("flow-access-token");
+		const saved = JSON.parse(
+			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
+		) as Record<string, unknown>;
+		expect(saved.supabase_url).toBeUndefined();
+		expect(logs.some((l) => l.includes("could not refresh CoDev config"))).toBe(
+			true,
+		);
 	});
 
 	test("authorize URL includes nonce", async () => {
