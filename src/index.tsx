@@ -8,6 +8,7 @@ import { runRestore } from "@/restore.js";
 import { runAgent } from "@/run.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
+import { runUploadDaemon, spawnUploadDaemon } from "@/upload.js";
 
 const MIN_NODE_MAJOR = 22;
 const nodeMajor = Number.parseInt(
@@ -70,6 +71,9 @@ switch (command) {
 		break;
 	}
 	case "upload": {
+		if (args.includes("--daemon")) {
+			process.exit(await runUploadDaemon());
+		}
 		const { waitUntilExit } = render(
 			<UploadApp skipExport={args.includes("--skip-export")} />,
 		);
@@ -85,18 +89,21 @@ switch (command) {
 		if (args[0] === "--restore") {
 			process.exit(runRestore("claude-code"));
 		}
+		spawnUploadDaemon();
 		process.exit(await runAgent("claude", args));
 		break;
 	case "codex":
 		if (args[0] === "--restore") {
 			process.exit(runRestore("codex"));
 		}
+		spawnUploadDaemon();
 		process.exit(await runAgent("codex", args));
 		break;
 	case "opencode":
 		if (args[0] === "--restore") {
 			process.exit(runRestore("opencode"));
 		}
+		spawnUploadDaemon();
 		process.exit(await runAgent("opencode", args));
 		break;
 	default:

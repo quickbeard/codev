@@ -1,12 +1,20 @@
+import { spawn } from "node:child_process";
 import {
+	appendFileSync,
+	closeSync,
 	existsSync,
+	mkdirSync,
+	openSync,
 	readdirSync,
 	readFileSync,
 	realpathSync,
 	type Stats,
 	statSync,
+	unlinkSync,
+	writeFileSync,
 } from "node:fs";
-import { basename, join } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { loadAuth, login } from "@/auth.js";
 import { runExport } from "@/export.js";
 import { projectLogsDir } from "@/paths.js";
@@ -251,5 +259,198 @@ async function confirmUpload(
 		throw new Error(
 			`confirm-upload failed (${res.status}): ${await res.text()}`,
 		);
+	}
+}
+
+// Background-upload daemon: triggered before every `codev claude/codex/opencode`
+// invocation so prior sessions keep flowing to the backend without blocking the
+// user's workflow. The parent fire-and-forgets a detached `codev upload --daemon`
+// child whose stdio is wired to ~/.codev/upload.log; the child takes a lockfile
+// to prevent concurrent uploads and writes ~/.codev/last-upload.json with the
+// outcome so future runs can surface failures.
+
+const STALE_LOCK_MS = 60 * 60 * 1000;
+
+interface LockContents {
+	pid: number;
+	startedAt: string;
+}
+
+interface UploadStatus {
+	ok: boolean;
+	startedAt: string;
+	finishedAt: string;
+	summary?: {
+		outDir: string;
+		found: number;
+		uploaded: number;
+		skipped: number;
+		failed: number;
+	};
+	errors?: { file: string; message: string }[];
+	error?: string;
+}
+
+function codevHomeDir(): string {
+	return join(homedir(), ".codev");
+}
+
+function uploadLogPath(): string {
+	return join(codevHomeDir(), "upload.log");
+}
+
+function uploadLockPath(): string {
+	return join(codevHomeDir(), "upload.lock");
+}
+
+function lastUploadStatusPath(): string {
+	return join(codevHomeDir(), "last-upload.json");
+}
+
+function logLine(message: string): void {
+	try {
+		appendFileSync(
+			uploadLogPath(),
+			`[${new Date().toISOString()}] ${message}\n`,
+		);
+	} catch {
+		// Best-effort.
+	}
+}
+
+function isPidAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		return (err as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+function tryAcquireLock(): boolean {
+	const path = uploadLockPath();
+	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			const fd = openSync(path, "wx");
+			const lock: LockContents = {
+				pid: process.pid,
+				startedAt: new Date().toISOString(),
+			};
+			writeFileSync(fd, JSON.stringify(lock));
+			closeSync(fd);
+			return true;
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "EEXIST") return false;
+			let prior: LockContents | null = null;
+			try {
+				prior = JSON.parse(readFileSync(path, "utf-8")) as LockContents;
+			} catch {
+				prior = null;
+			}
+			const ageMs = prior
+				? Date.now() - new Date(prior.startedAt).getTime()
+				: Number.POSITIVE_INFINITY;
+			if (
+				prior &&
+				Number.isFinite(ageMs) &&
+				ageMs < STALE_LOCK_MS &&
+				isPidAlive(prior.pid)
+			) {
+				return false;
+			}
+			try {
+				unlinkSync(path);
+			} catch {
+				// Race with another release; loop and retry the create.
+			}
+		}
+	}
+	return false;
+}
+
+function releaseLock(): void {
+	try {
+		unlinkSync(uploadLockPath());
+	} catch {
+		// Already gone.
+	}
+}
+
+function writeStatusFile(status: UploadStatus): void {
+	try {
+		const path = lastUploadStatusPath();
+		mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+		writeFileSync(path, JSON.stringify(status, null, 2));
+	} catch {
+		// Best-effort.
+	}
+}
+
+export async function runUploadDaemon(): Promise<number> {
+	const startedAt = new Date().toISOString();
+	if (!loadAuth()) {
+		logLine("Skipped: not logged in.");
+		return 0;
+	}
+	if (!tryAcquireLock()) {
+		logLine("Skipped: another upload is in progress.");
+		return 0;
+	}
+	try {
+		logLine("Starting auto-upload.");
+		const summary = await runUpload({ onStatus: (m) => logLine(m) });
+		writeStatusFile({
+			ok: summary.failed === 0,
+			startedAt,
+			finishedAt: new Date().toISOString(),
+			summary: {
+				outDir: summary.outDir,
+				found: summary.found,
+				uploaded: summary.uploaded,
+				skipped: summary.skipped,
+				failed: summary.failed,
+			},
+			errors: summary.errors.length > 0 ? summary.errors : undefined,
+		});
+		logLine(
+			`Done: uploaded=${summary.uploaded} skipped=${summary.skipped} failed=${summary.failed}`,
+		);
+		return summary.failed > 0 ? 1 : 0;
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		logLine(`Failed: ${message}`);
+		writeStatusFile({
+			ok: false,
+			startedAt,
+			finishedAt: new Date().toISOString(),
+			error: message,
+		});
+		return 1;
+	} finally {
+		releaseLock();
+	}
+}
+
+export function spawnUploadDaemon(): void {
+	// Skip when not logged in: a detached child has no TTY, so the SSO browser
+	// flow inside ensureAuth would land in the log and never resolve.
+	if (!loadAuth()) return;
+	const selfPath = process.argv[1];
+	if (!selfPath) return;
+	try {
+		mkdirSync(codevHomeDir(), { recursive: true, mode: 0o700 });
+		const logFd = openSync(uploadLogPath(), "a");
+		try {
+			const child = spawn(process.execPath, [selfPath, "upload", "--daemon"], {
+				detached: true,
+				stdio: ["ignore", logFd, logFd],
+			});
+			child.unref();
+		} finally {
+			closeSync(logFd);
+		}
+	} catch {
+		// Never block the agent on a failed daemon launch.
 	}
 }
