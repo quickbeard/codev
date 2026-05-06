@@ -2,9 +2,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderMarkdown } from "@/markdown.js";
 import { buildFilename, projectLogsDir } from "@/paths.js";
-import { claudeCodeProvider } from "@/providers/claude-code.js";
-import { codexProvider } from "@/providers/codex.js";
-import { openCodeProvider } from "@/providers/opencode.js";
 import type { Agent, Provider } from "@/providers/types.js";
 import { computeSessionStatistics, StatisticsCollector } from "@/statistics.js";
 
@@ -18,10 +15,25 @@ export interface ExportSummary {
 
 export type StatusReporter = (message: string) => void;
 
-const PROVIDERS: Provider[] = [
-	claudeCodeProvider,
-	codexProvider,
-	openCodeProvider,
+// Each provider is loaded only when about to be used. Top-level imports would
+// pull every provider's runtime deps (e.g. better-sqlite3 for opencode) into
+// the link graph of any command — including `--version` — and a single broken
+// provider would take the whole CLI down at module-link time.
+const PROVIDER_LOADERS: { agent: Agent; load: () => Promise<Provider> }[] = [
+	{
+		agent: "claude-code",
+		load: async () =>
+			(await import("@/providers/claude-code.js")).claudeCodeProvider,
+	},
+	{
+		agent: "codex",
+		load: async () => (await import("@/providers/codex.js")).codexProvider,
+	},
+	{
+		agent: "opencode",
+		load: async () =>
+			(await import("@/providers/opencode.js")).openCodeProvider,
+	},
 ];
 
 export async function runExport(
@@ -40,8 +52,15 @@ export async function runExport(
 		errors: [],
 	};
 
-	for (const provider of PROVIDERS) {
-		onStatus(`Checking ${provider.agent}...`);
+	for (const { agent, load } of PROVIDER_LOADERS) {
+		onStatus(`Checking ${agent}...`);
+		let provider: Provider;
+		try {
+			provider = await load();
+		} catch (err) {
+			summary.errors.push({ agent, message: String(err) });
+			continue;
+		}
 		let active: boolean;
 		try {
 			active = await provider.detect(cwd);
