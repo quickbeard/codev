@@ -55,6 +55,28 @@ export interface AuthData {
 	};
 }
 
+export interface ApiKeyCreds {
+	apiKey: string;
+	baseUrl?: string;
+	model?: string;
+}
+
+// auth.json holds two independent blocks: SSO tokens (issued by the IdP) and
+// the gateway API key (issued by /auth/exchange or entered manually). They
+// share a file because they're written together on a fresh install, but each
+// is updated in isolation — saving SSO must not clobber the api_key block,
+// and `codev logout` strips SSO while preserving the api_key for reuse.
+interface AuthFileContents {
+	access_token?: string;
+	id_token?: string;
+	refresh_token?: string;
+	expires_at?: number;
+	user?: AuthData["user"];
+	api_key?: string;
+	base_url?: string;
+	model?: string;
+}
+
 interface TokenResponse {
 	access_token: string;
 	id_token: string;
@@ -62,22 +84,17 @@ interface TokenResponse {
 	expires_in: number;
 }
 
-function readAuthFile(): AuthData | null {
+function readAuthFile(): AuthFileContents | null {
 	try {
-		return JSON.parse(readFileSync(authFilePath(), "utf-8")) as AuthData;
+		return JSON.parse(
+			readFileSync(authFilePath(), "utf-8"),
+		) as AuthFileContents;
 	} catch {
 		return null;
 	}
 }
 
-export function loadAuth(): AuthData | null {
-	const data = readAuthFile();
-	if (!data) return null;
-	if (Date.now() > data.expires_at) return null;
-	return data;
-}
-
-function saveAuth(data: AuthData) {
+function writeAuthFile(data: AuthFileContents): void {
 	const path = authFilePath();
 	const dir = dirname(path);
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -89,10 +106,75 @@ function saveAuth(data: AuthData) {
 	chmodSync(path, 0o600);
 }
 
+export function loadAuth(): AuthData | null {
+	const raw = readAuthFile();
+	if (!raw) return null;
+	if (!raw.access_token || !raw.id_token || !raw.expires_at || !raw.user) {
+		return null;
+	}
+	if (Date.now() > raw.expires_at) return null;
+	return {
+		access_token: raw.access_token,
+		id_token: raw.id_token,
+		refresh_token: raw.refresh_token,
+		expires_at: raw.expires_at,
+		user: raw.user,
+	};
+}
+
+function saveAuth(data: AuthData): void {
+	const existing = readAuthFile() ?? {};
+	writeAuthFile({
+		api_key: existing.api_key,
+		base_url: existing.base_url,
+		model: existing.model,
+		access_token: data.access_token,
+		id_token: data.id_token,
+		refresh_token: data.refresh_token,
+		expires_at: data.expires_at,
+		user: data.user,
+	});
+}
+
+export function saveApiKey(creds: ApiKeyCreds): void {
+	const existing = readAuthFile() ?? {};
+	writeAuthFile({
+		access_token: existing.access_token,
+		id_token: existing.id_token,
+		refresh_token: existing.refresh_token,
+		expires_at: existing.expires_at,
+		user: existing.user,
+		api_key: creds.apiKey,
+		base_url: creds.baseUrl,
+		model: creds.model,
+	});
+}
+
+export function loadApiKey(): ApiKeyCreds | null {
+	const raw = readAuthFile();
+	if (!raw?.api_key) return null;
+	return {
+		apiKey: raw.api_key,
+		baseUrl: raw.base_url,
+		model: raw.model,
+	};
+}
+
 export async function logout(): Promise<boolean> {
-	const data = readAuthFile();
+	const raw = readAuthFile();
+	if (!raw) return false;
+	const hasSso = !!(raw.access_token || raw.refresh_token);
+	if (!hasSso) return false;
 	try {
-		unlinkSync(authFilePath());
+		if (raw.api_key) {
+			writeAuthFile({
+				api_key: raw.api_key,
+				base_url: raw.base_url,
+				model: raw.model,
+			});
+		} else {
+			unlinkSync(authFilePath());
+		}
 	} catch {
 		return false;
 	}
@@ -100,16 +182,16 @@ export async function logout(): Promise<boolean> {
 	// the next /authorize would otherwise silently return a new code. Mark the
 	// next login to force re-authentication via prompt=login.
 	markForceLogin();
-	if (data) {
-		await revokeTokens(data);
-	}
+	await revokeTokens(raw);
 	return true;
 }
 
-async function revokeTokens(data: AuthData): Promise<void> {
+async function revokeTokens(data: AuthFileContents): Promise<void> {
 	const endpoint = `${SSO_BASE_URL}/revoke`;
 	await Promise.all([
-		revokeToken(endpoint, data.access_token, "access_token"),
+		data.access_token
+			? revokeToken(endpoint, data.access_token, "access_token")
+			: Promise.resolve(),
 		data.refresh_token
 			? revokeToken(endpoint, data.refresh_token, "refresh_token")
 			: Promise.resolve(),

@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { login } from "@/auth.js";
+import { login, saveApiKey } from "@/auth.js";
 import { fetchApiKey } from "@/proxy.js";
 
 interface LoginProps {
@@ -43,6 +43,7 @@ export function Login({ onDone, onFallback }: LoginProps) {
 					setEmptyKey(true);
 					return;
 				}
+				saveApiKey({ apiKey: key });
 				onDone(key);
 			})
 			.catch((err: Error) => {
@@ -100,5 +101,5 @@ export function Login({ onDone, onFallback }: LoginProps) {
 }
 
 export function loginTitle() {
-	return <Text bold>{"Login to SSO"}</Text>;
+	return <Text bold>{"Login to SSO to get new API Key"}</Text>;
 }

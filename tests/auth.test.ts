@@ -13,6 +13,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import * as os from "node:os";
@@ -21,9 +22,11 @@ import { join } from "node:path";
 import {
 	type AuthData,
 	browserOpener,
+	loadApiKey,
 	loadAuth,
 	login,
 	logout,
+	saveApiKey,
 } from "@/auth.js";
 import { BASE_URL } from "@/const.js";
 
@@ -163,6 +166,80 @@ describe("logout", () => {
 	test("does not write marker when there was no auth file to remove", async () => {
 		expect(await logout()).toBe(false);
 		expect(existsSync(join(tempDir, ".codev", "force-login"))).toBe(false);
+	});
+
+	test("preserves api_key when stripping SSO fields", async () => {
+		const dir = join(tempDir, ".codev");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({
+				...VALID_AUTH,
+				refresh_token: "test-refresh",
+				api_key: "sk-keep-me",
+				base_url: "https://gw.example.com/v1",
+				model: "m1",
+			}),
+		);
+		expect(await logout()).toBe(true);
+		expect(loadAuth()).toBeNull();
+		expect(loadApiKey()).toEqual({
+			apiKey: "sk-keep-me",
+			baseUrl: "https://gw.example.com/v1",
+			model: "m1",
+		});
+	});
+
+	test("returns false when only api_key is present (already logged out)", async () => {
+		const dir = join(tempDir, ".codev");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({ api_key: "sk-orphan" }),
+		);
+		expect(await logout()).toBe(false);
+	});
+});
+
+describe("saveApiKey / loadApiKey", () => {
+	test("round-trips api_key with optional baseUrl and model", () => {
+		saveApiKey({
+			apiKey: "sk-1",
+			baseUrl: "https://x.example.com/v1",
+			model: "m",
+		});
+		expect(loadApiKey()).toEqual({
+			apiKey: "sk-1",
+			baseUrl: "https://x.example.com/v1",
+			model: "m",
+		});
+	});
+
+	test("returns null when no auth file exists", () => {
+		expect(loadApiKey()).toBeNull();
+	});
+
+	test("returns null when auth file has no api_key", () => {
+		writeAuthFile(VALID_AUTH);
+		expect(loadApiKey()).toBeNull();
+	});
+
+	test("does not clobber SSO fields when saving an api_key", () => {
+		writeAuthFile(VALID_AUTH);
+		saveApiKey({ apiKey: "sk-merged" });
+		const result = loadAuth();
+		expect(result?.access_token).toBe("test-access-token");
+		expect(loadApiKey()).toEqual({
+			apiKey: "sk-merged",
+			baseUrl: undefined,
+			model: undefined,
+		});
+	});
+
+	test("file is written with mode 0600", () => {
+		saveApiKey({ apiKey: "sk-perms" });
+		const stat = statSync(join(tempDir, ".codev", "auth.json"));
+		expect(stat.mode & 0o777).toBe(0o600);
 	});
 });
 
