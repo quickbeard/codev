@@ -3,7 +3,7 @@ import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
 import { HAPPY_CODING } from "@/const.js";
 import { type ExportSummary, runExport } from "@/export.js";
-import type { Agent } from "@/providers/types.js";
+import { AGENTS, type Agent } from "@/providers/types.js";
 
 type Phase = "running" | "done" | "error";
 
@@ -12,10 +12,6 @@ const AGENT_LABEL: Record<Agent, string> = {
 	codex: "Codex",
 	opencode: "OpenCode",
 };
-
-// Fixed display order for the per-agent breakdown so output is stable across
-// runs and unaffected by detection-loop ordering.
-const AGENT_ORDER: Agent[] = ["claude-code", "codex", "opencode"];
 
 export function ExportApp() {
 	const { exit } = useApp();
@@ -82,7 +78,7 @@ export function ExportApp() {
 				{result.exported === 1 ? "session" : "sessions"} to {result.outDir}
 			</Text>
 			<Box flexDirection="column" marginTop={1}>
-				{AGENT_ORDER.map((agent) => {
+				{AGENTS.map((agent) => {
 					const count = result.byAgent[agent] ?? 0;
 					const errorMsg = errorByAgent.get(agent);
 					if (errorMsg) {

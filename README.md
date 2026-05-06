@@ -18,20 +18,22 @@ codev install
 
 ## Commands
 
-| Command                    | What it does                                                                              |
-| -------------------------- | ----------------------------------------------------------------------------------------- |
-| `codev --help`, `-h`       | Show help                                                                                 |
-| `codev --version`, `-v`    | Show version                                                                              |
-| `codev install`            | Install and configure AI coding agents                                                    |
-| `codev update`             | Update installed AI coding agents                                                         |
-| `codev export`             | Export this directory's agent conversations to `~/.codev/logs/<project>/`                 |
-| `codev claude`             | Run the `claude` CLI (forwards remaining arguments)                                       |
-| `codev claude --restore`   | Restore `~/.claude/settings.json` from `~/.claude/settings.json.backup`                   |
-| `codev codex`              | Run the `codex` CLI (forwards remaining arguments)                                        |
-| `codev codex --restore`    | Restore `~/.codex/config.toml` from `~/.codex/config.toml.backup`                         |
-| `codev opencode`           | Run the `opencode` CLI (forwards remaining arguments)                                     |
-| `codev opencode --restore` | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup` |
-| `codev logout`             | Sign out of SSO                                                                           |
+| Command                      | What it does                                                                              |
+| ---------------------------- | ----------------------------------------------------------------------------------------- |
+| `codev --help`, `-h`         | Show help                                                                                 |
+| `codev --version`, `-v`      | Show version                                                                              |
+| `codev install`              | Install and configure AI coding agents                                                    |
+| `codev update`               | Update installed AI coding agents                                                         |
+| `codev export`               | Export this directory's agent conversations to `~/.codev/logs/<project>/`                 |
+| `codev upload`               | Export, then upload conversation logs to the backend                                      |
+| `codev upload --skip-export` | Upload existing Markdown logs without re-running `codev export`                           |
+| `codev claude`               | Run the `claude` CLI (forwards remaining arguments)                                       |
+| `codev claude --restore`     | Restore `~/.claude/settings.json` from `~/.claude/settings.json.backup`                   |
+| `codev codex`                | Run the `codex` CLI (forwards remaining arguments)                                        |
+| `codev codex --restore`      | Restore `~/.codex/config.toml` from `~/.codex/config.toml.backup`                         |
+| `codev opencode`             | Run the `opencode` CLI (forwards remaining arguments)                                     |
+| `codev opencode --restore`   | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup` |
+| `codev logout`               | Sign out of SSO                                                                           |
 
 ## Restoring a previous configuration
 
@@ -95,6 +97,16 @@ If you have a session running, you might need to restart it with `claude -c`, `c
 - Filenames are `<UTC-timestamp>-<slug>.md`, where the slug comes from the first user message in the session.
 - `statistics.json` records per-session metadata (message counts, byte size, provider, timestamps), keyed by session ID and merged across runs.
 - Existing files are overwritten on each run; sessions with no activity in the current directory are quietly skipped.
+
+## Uploading conversation history
+
+`codev upload` re-runs `codev export`, then ships any new or changed Markdown logs from `~/.codev/logs/<project>/` to the CoDev Supabase backend. Authentication uses the same SSO login as `codev install`; if you're not signed in, the browser flow runs first.
+
+- Files are SHA-256 hashed and compared against the server. Unchanged logs are skipped, so re-running is cheap.
+- Each upload records the previous version it replaces, so the backend keeps history rather than overwriting.
+- Payloads are gzipped over the wire.
+
+Pass `--skip-export` to upload whatever Markdown is already on disk in `~/.codev/logs/<project>/` without regenerating from the live agent session stores. Useful when you've just exported, or when you've curated the Markdown and want that exact content uploaded.
 
 ## Development
 

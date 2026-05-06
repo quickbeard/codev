@@ -7,6 +7,7 @@ import { InstallApp } from "@/InstallApp.js";
 import { runRestore } from "@/restore.js";
 import { runAgent } from "@/run.js";
 import { UpdateApp } from "@/UpdateApp.js";
+import { UploadApp } from "@/UploadApp.js";
 
 const MIN_NODE_MAJOR = 22;
 const nodeMajor = Number.parseInt(
@@ -60,6 +61,18 @@ switch (command) {
 	}
 	case "export": {
 		const { waitUntilExit } = render(<ExportApp />);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
+		break;
+	}
+	case "upload": {
+		const { waitUntilExit } = render(
+			<UploadApp skipExport={args.includes("--skip-export")} />,
+		);
 		try {
 			await waitUntilExit();
 			process.exit(0);

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { BASE_URL } from "@/const.js";
-import { fetchApiKey, validateApiKey } from "@/proxy.js";
+import { fetchApiKey, fetchSupabaseSession, validateApiKey } from "@/proxy.js";
 
 function jsonResponse(status: number, body: unknown): Response {
 	return new Response(JSON.stringify(body), {
@@ -140,5 +140,33 @@ describe("validateApiKey", () => {
 		await validateApiKey("sk-z", "https://gw.example.com/");
 		const [url] = fetchSpy.mock.calls[0] as [string];
 		expect(url).toBe("https://gw.example.com/key/info");
+	});
+});
+
+describe("fetchSupabaseSession", () => {
+	test("returns the Supabase session on a 2xx response", async () => {
+		spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, {
+				access_token: "supabase-token",
+				refresh_token: "refresh",
+				expires_at: 123,
+				user: { id: "uid", email: "x@y.z" },
+			}),
+		);
+		expect(await fetchSupabaseSession("sso-token")).toEqual({
+			access_token: "supabase-token",
+			refresh_token: "refresh",
+			expires_at: 123,
+			user: { id: "uid", email: "x@y.z" },
+		});
+	});
+
+	test("throws on a non-2xx response", async () => {
+		spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(401, { error: "invalid sso token" }),
+		);
+		await expect(fetchSupabaseSession("bad-token")).rejects.toThrow(
+			"Proxy /supabase/exchange failed (401): invalid sso token",
+		);
 	});
 });
