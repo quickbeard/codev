@@ -466,7 +466,7 @@ describe("InstallApp existing-key path", () => {
 		await new Promise((r) => setTimeout(r, 200));
 
 		const beforeChoice = allFrames(frames);
-		expect(beforeChoice).toContain("Use existing API Key");
+		expect(beforeChoice).toContain("Use saved API Key");
 		expect(beforeChoice).toContain("Login to SSO to get new API Key");
 
 		// Default cursor is on the existing option — Enter selects it directly.
@@ -501,7 +501,7 @@ describe("InstallApp existing-key path", () => {
 
 		const history = allFrames(frames);
 		expect(history).toContain("Saved API key is no longer valid");
-		expect(history).not.toContain("Use existing API Key");
+		expect(history).not.toContain("Use saved API Key");
 		expect(history).toContain("Login to SSO to get new API Key");
 	});
 
@@ -520,6 +520,6 @@ describe("InstallApp existing-key path", () => {
 		const history = allFrames(frames);
 		expect(history).toContain("Could not verify saved API key");
 		expect(history).toContain("ECONNREFUSED");
-		expect(history).not.toContain("Use existing API Key");
+		expect(history).not.toContain("Use saved API Key");
 	});
 });

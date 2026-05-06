@@ -17,7 +17,7 @@ const MANUAL_OPTION: Option = {
 	value: "manual",
 };
 const EXISTING_OPTION: Option = {
-	label: "Use existing API Key",
+	label: "Use saved API Key",
 	value: "existing",
 };
 
