@@ -167,7 +167,7 @@ describe("runUpload", () => {
 		}) as typeof fetch);
 
 		try {
-			const summary = await runUpload({ skipExport: true });
+			const summary = await runUpload();
 			expect(summary.uploaded).toBe(1);
 			expect(summary.failed).toBe(0);
 			expect(calls.some((c) => c.includes("presign-upload"))).toBe(true);

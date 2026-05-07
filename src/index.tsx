@@ -95,9 +95,7 @@ switch (command) {
 		if (args.includes("--daemon")) {
 			process.exit(await runUploadDaemon());
 		}
-		const { waitUntilExit } = render(
-			<UploadApp skipExport={args.includes("--skip-export")} />,
-		);
+		const { waitUntilExit } = render(<UploadApp />);
 		try {
 			await waitUntilExit();
 			process.exit(0);

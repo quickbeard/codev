@@ -19,7 +19,6 @@ Commands:
   update              Update installed AI coding agents
   export              Export agent conversations to ~/.codev/logs/<project>/
   upload              Export and upload conversations to the backend
-  upload --skip-export Upload existing exported conversations only
   claude              Run the Claude Code CLI (${link("https://code.claude.com/docs/en/cli-reference")})
   claude --restore    Restore ~/.claude/settings.json from ~/.claude/settings.json.backup
   codex               Run the Codex CLI (${link("https://developers.openai.com/codex/cli")})
