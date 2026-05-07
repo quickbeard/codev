@@ -26,7 +26,6 @@ codev install
 | `codev update`               | Update installed AI coding agents                                                         |
 | `codev export`               | Export this directory's agent conversations to `~/.codev/logs/<project>/`                 |
 | `codev upload`               | Export, then upload conversation logs to the backend                                      |
-| `codev upload --skip-export` | Upload existing Markdown logs without re-running `codev export`                           |
 | `codev claude`               | Run the `claude` CLI (forwards remaining arguments)                                       |
 | `codev claude --restore`     | Restore `~/.claude/settings.json` from `~/.claude/settings.json.backup`                   |
 | `codev codex`                | Run the `codex` CLI (forwards remaining arguments)                                        |
@@ -105,8 +104,6 @@ If you have a session running, you might need to restart it with `claude -c`, `c
 - Files are SHA-256 hashed and compared against the server. Unchanged logs are skipped, so re-running is cheap.
 - Each upload records the previous version it replaces, so the backend keeps history rather than overwriting.
 - Payloads are gzipped over the wire.
-
-Pass `--skip-export` to upload whatever Markdown is already on disk in `~/.codev/logs/<project>/` without regenerating from the live agent session stores. Useful when you've just exported, or when you've curated the Markdown and want that exact content uploaded.
 
 ## Development
 

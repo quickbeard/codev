@@ -23,7 +23,6 @@ import { fetchSupabaseSession } from "@/proxy.js";
 import { getSupabaseConfig, type SupabaseConfig } from "@/supabase.js";
 
 export interface UploadOptions {
-	skipExport?: boolean;
 	cwd?: string;
 	onStatus?: (message: string) => void;
 }
@@ -59,14 +58,11 @@ interface UploadCandidate {
 const UPLOAD_TIMEOUT_MS = 60_000;
 
 export async function runUpload({
-	skipExport = false,
 	cwd = process.cwd(),
 	onStatus = () => {},
 }: UploadOptions = {}): Promise<UploadSummary> {
-	if (!skipExport) {
-		onStatus("Exporting local conversations...");
-		await runExport(onStatus);
-	}
+	onStatus("Exporting local conversations...");
+	await runExport(onStatus);
 
 	const outDir = projectLogsDir(cwd);
 	const files = listMarkdownLogs(outDir);

@@ -5,11 +5,7 @@ import { runUpload, type UploadSummary } from "@/upload.js";
 
 type Phase = "running" | "done" | "error";
 
-interface UploadAppProps {
-	skipExport?: boolean;
-}
-
-export function UploadApp({ skipExport = false }: UploadAppProps) {
+export function UploadApp() {
 	const { exit } = useApp();
 	const [phase, setPhase] = useState<Phase>("running");
 	const [status, setStatus] = useState("Uploading logs...");
@@ -20,7 +16,7 @@ export function UploadApp({ skipExport = false }: UploadAppProps) {
 	useEffect(() => {
 		if (hasRun.current) return;
 		hasRun.current = true;
-		runUpload({ skipExport, onStatus: setStatus })
+		runUpload({ onStatus: setStatus })
 			.then((result) => {
 				setSummary(result);
 				setPhase("done");
@@ -29,7 +25,7 @@ export function UploadApp({ skipExport = false }: UploadAppProps) {
 				setError(String(err));
 				setPhase("error");
 			});
-	}, [skipExport]);
+	}, []);
 
 	useEffect(() => {
 		if (phase === "done" || phase === "error") {
