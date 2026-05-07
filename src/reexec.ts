@@ -18,6 +18,11 @@ export interface ReexecResult {
 // inherits stdio, so the user sees no difference; we just exit with whatever
 // exit code the child returns.
 //
+// Caller is responsible for short-circuiting this under Bun — Bun has no
+// `node:sqlite` specifier and `process.execPath` points at the bun binary, so
+// re-execing would just relaunch Bun with a flag it doesn't recognize.
+// `gateSqlite()` in `index.tsx` does that bypass.
+//
 // `node:sqlite` is stable from Node 23.5 onward and gated behind
 // `--experimental-sqlite` on Node 22.5–23.4. Node < 22.5 lacks the module
 // entirely and is rejected at startup by the `MIN_NODE_VERSION` check in
