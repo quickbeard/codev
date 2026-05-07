@@ -43,7 +43,7 @@ export async function ensureNodeSqliteOrReexec(): Promise<ReexecResult> {
 			action: "error",
 			error:
 				`OpenCode export needs node:sqlite, but it isn't loadable on Node ${process.versions.node} ` +
-				"even with --experimental-sqlite. Upgrade to Node 22.5+ or 24+.",
+				"even with --experimental-sqlite. Upgrade to Node 22.5+.",
 		};
 	}
 
