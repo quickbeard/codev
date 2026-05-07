@@ -26,9 +26,7 @@ const result = await Bun.build({
 	plugins: [shimDevtools],
 	// `open` ships platform-specific shell scripts that the bundler can't
 	// pull in as assets; keep it external so npm resolves it at install time.
-	// `better-sqlite3` is a native module — npm fetches the right prebuilt
-	// binary per platform at install time and the bundler can't inline it.
-	external: ["open", "better-sqlite3"],
+	external: ["open"],
 });
 
 if (!result.success) {
