@@ -2,7 +2,7 @@
 
 CoDev — AI Coding Agent Hub. Install, configure, and manage multiple AI coding agents.
 
-Requires Node.js ≥ 22.
+Requires Node.js ≥ 22.5 (Node 24+ recommended).
 
 ## Install
 

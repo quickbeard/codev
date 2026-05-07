@@ -3,11 +3,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
-// Driver picked at runtime. The shipped CLI runs under Node and uses
-// `better-sqlite3` (a native npm module). Tests run under `bun test`, where
-// `better-sqlite3` cannot be loaded (oven-sh/bun#4290), so we fall back to
-// `bun:sqlite`. Both branches use dynamic import so neither runtime tries to
-// resolve the other's specifier at module-link time.
+// Driver picked at runtime. Production runs under Node and uses the built-in
+// `node:sqlite`; tests run under `bun test` and use `bun:sqlite`. Both branches
+// use dynamic import so neither runtime tries to resolve the other's specifier
+// at module-link time — Node's ESM loader rejects `bun:` schemes, and Bun
+// can't load `node:sqlite`.
 interface Stmt<P extends unknown[], R> {
 	get(...args: P): R | undefined;
 	all(...args: P): R[];
@@ -36,14 +36,17 @@ async function openDb(path: string): Promise<DB> {
 			close: () => db.close(),
 		};
 	}
-	const { default: Database } = await import("better-sqlite3");
-	const db = new Database(path, { readonly: true });
+	const { DatabaseSync } = await import("node:sqlite");
+	const db = new DatabaseSync(path, { readOnly: true });
 	return {
 		prepare<P extends unknown[], R>(sql: string): Stmt<P, R> {
-			const stmt = db.prepare<P, R>(sql);
+			const stmt = db.prepare(sql);
 			return {
-				get: (...args: P) => stmt.get(...args),
-				all: (...args: P) => stmt.all(...args),
+				// node:sqlite's bind types accept SQLInputValue; our generic is wider.
+				// biome-ignore lint/suspicious/noExplicitAny: cross-driver shim
+				get: (...args: P) => stmt.get(...(args as any[])) as R | undefined,
+				// biome-ignore lint/suspicious/noExplicitAny: cross-driver shim
+				all: (...args: P) => stmt.all(...(args as any[])) as R[],
 			};
 		},
 		close: () => db.close(),

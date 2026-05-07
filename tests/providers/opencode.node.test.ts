@@ -1,9 +1,11 @@
-// Smoke test for the better-sqlite3 branch of openDb() in
-// src/providers/opencode.ts. `bun test` itself can't load better-sqlite3
-// (oven-sh/bun#4290), so this test shells out to `node dist/index.js export`
-// against a seeded OpenCode DB and asserts on the filesystem output. It is
-// the only coverage of the Node-runtime SQLite path — without it, a regression
-// would only surface for users running the published CLI.
+// Smoke test for the node:sqlite branch of openDb() in
+// src/providers/opencode.ts. `bun test` runs under Bun and exercises the
+// bun:sqlite branch via opencode.test.ts, so this test shells out to
+// `node dist/index.js export` against a seeded OpenCode DB and asserts on the
+// filesystem output. It is the only coverage of the Node-runtime SQLite path
+// — without it, a regression would only surface for users running the
+// published CLI. On Node < 23.5 the CLI re-execs itself with
+// --experimental-sqlite (see src/reexec.ts), which is also exercised here.
 //
 // The test runs whatever bundle currently sits in dist/index.js, and only
 // rebuilds when the bundle is missing. After changing src/, re-run
@@ -93,7 +95,7 @@ function seedDb(): void {
 	db.close();
 }
 
-test("`node dist/index.js export` reads opencode.db via better-sqlite3", () => {
+test("`node dist/index.js export` reads opencode.db via node:sqlite", () => {
 	seedDb();
 	const env: Record<string, string | undefined> = {
 		...process.env,

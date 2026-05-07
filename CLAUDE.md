@@ -71,7 +71,7 @@ Always run these commands after making changes and ensure they pass:
 ## APIs
 
 - `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- SQLite is runtime-split: the shipped CLI runs under Node and uses `better-sqlite3`; `bun test` can't load `better-sqlite3` (oven-sh/bun#4290), so test code uses `bun:sqlite`. Production modules that need SQLite (e.g. `src/providers/opencode.ts`) pick the driver at runtime via `typeof Bun !== "undefined"` and dynamic imports — never put a top-level `import ... from "bun:sqlite"` in any module reachable from `src/index.tsx`, because Node's ESM loader rejects the `bun:` scheme with `ERR_UNSUPPORTED_ESM_URL_SCHEME` at link time. Test files are free to import `bun:sqlite` directly.
+- SQLite is runtime-split: production runs under Node and uses the built-in `node:sqlite`; `bun test` uses `bun:sqlite`. Production modules that need SQLite (e.g. `src/providers/opencode.ts`) pick the driver at runtime via `typeof Bun !== "undefined"` and dynamic imports — never put a top-level `import ... from "bun:sqlite"` in any module reachable from `src/index.tsx`, because Node's ESM loader rejects the `bun:` scheme with `ERR_UNSUPPORTED_ESM_URL_SCHEME` at link time. `node:sqlite` is gated behind `--experimental-sqlite` on Node 22.5–23.4; `src/index.tsx` re-execs itself with that flag at the entry of `case "export"` and `case "upload"` (via `src/reexec.ts`) when the runtime probe fails, so the rest of the code can import `node:sqlite` unconditionally.
 - `Bun.redis` for Redis. Don't use `ioredis`.
 - `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
 - `WebSocket` is built-in. Don't use `ws`.

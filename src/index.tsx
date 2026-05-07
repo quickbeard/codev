@@ -4,22 +4,41 @@ import { logout } from "@/auth.js";
 import { ExportApp } from "@/ExportApp.js";
 import { printHelp, printVersion } from "@/help.js";
 import { InstallApp } from "@/InstallApp.js";
+import { ensureNodeSqliteOrReexec } from "@/reexec.js";
 import { runRestore } from "@/restore.js";
 import { runAgent } from "@/run.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/upload.js";
 
-const MIN_NODE_MAJOR = 22;
-const nodeMajor = Number.parseInt(
-	process.versions.node.split(".")[0] ?? "0",
-	10,
-);
-if (Number.isNaN(nodeMajor) || nodeMajor < MIN_NODE_MAJOR) {
+// `node:sqlite` (used by the OpenCode provider) was added in Node 22.5 and
+// stabilized in Node 23.5. Earlier 22.x patches don't expose the module even
+// with --experimental-sqlite.
+const MIN_NODE_VERSION = "22.5.0";
+const [nodeMajor = 0, nodeMinor = 0] = process.versions.node
+	.split(".")
+	.map((n) => Number.parseInt(n, 10) || 0);
+if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 5)) {
 	console.error(
-		`CoDev requires Node.js >= ${MIN_NODE_MAJOR}. Current version: ${process.versions.node}.`,
+		`CoDev requires Node.js >= ${MIN_NODE_VERSION}. Current version: ${process.versions.node}.`,
 	);
 	process.exit(1);
+}
+
+async function gateSqlite(): Promise<void> {
+	// Under Bun (e.g. `bun dev`, `bun src/index.tsx`), opencode.ts takes the
+	// bun:sqlite branch — node:sqlite isn't a real specifier in Bun and the
+	// re-exec would just relaunch Bun with a flag it doesn't honor. Note that
+	// Bun's `process.versions.node` reports a Node-compat version (e.g. 24.3.0
+	// on Bun 1.3.13), which is what made an earlier failure mode look like a
+	// genuine Node bug.
+	if (typeof Bun !== "undefined") return;
+	const result = await ensureNodeSqliteOrReexec();
+	if (result.action === "reexec") process.exit(result.exitCode ?? 1);
+	if (result.action === "error") {
+		console.error(result.error);
+		process.exit(1);
+	}
 }
 
 const [command, ...args] = process.argv.slice(2);
@@ -61,6 +80,7 @@ switch (command) {
 		break;
 	}
 	case "export": {
+		await gateSqlite();
 		const { waitUntilExit } = render(<ExportApp />);
 		try {
 			await waitUntilExit();
@@ -71,6 +91,7 @@ switch (command) {
 		break;
 	}
 	case "upload": {
+		await gateSqlite();
 		if (args.includes("--daemon")) {
 			process.exit(await runUploadDaemon());
 		}
