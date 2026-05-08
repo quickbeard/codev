@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
-import * as auth from "@/auth.js";
 import { Login } from "@/components/Login.js";
-import * as proxy from "@/proxy.js";
+import * as auth from "@/lib/auth.js";
+import * as proxy from "@/lib/proxy.js";
 
 afterEach(() => {
 	cleanup();

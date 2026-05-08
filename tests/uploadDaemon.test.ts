@@ -12,7 +12,7 @@ import {
 import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runUploadDaemon, spawner, spawnUploadDaemon } from "@/upload.js";
+import { runUploadDaemon, spawner, spawnUploadDaemon } from "@/lib/upload.js";
 
 let tempHome: string;
 let projectCwd: string;

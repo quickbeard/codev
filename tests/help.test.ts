@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { VERSION } from "@/const.js";
-import { printHelp, printVersion } from "@/help.js";
+import { VERSION } from "@/lib/const.js";
+import { printHelp, printVersion } from "@/lib/help.js";
 
 let logSpy: ReturnType<typeof spyOn>;
 

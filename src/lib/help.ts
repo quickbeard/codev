@@ -1,4 +1,4 @@
-import { VERSION } from "@/const.js";
+import { VERSION } from "@/lib/const.js";
 
 function link(url: string): string {
 	if (!process.stdout.isTTY) return url;
@@ -17,7 +17,6 @@ Usage: codev <command> [options]
 Commands:
   install             Install and configure AI coding agents
   update              Update installed AI coding agents
-  export              Export agent conversations to ~/.codev/logs/<project>/
   upload              Export and upload conversations to the backend
   claude              Run the Claude Code CLI (${link("https://code.claude.com/docs/en/cli-reference")})
   claude --restore    Restore ~/.claude/settings.json from ~/.claude/settings.json.backup

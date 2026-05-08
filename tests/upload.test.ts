@@ -14,7 +14,7 @@ import {
 	filterNewFiles,
 	listMarkdownLogs,
 	runUpload,
-} from "@/upload.js";
+} from "@/lib/upload.js";
 
 let tempHome: string;
 let projectCwd: string;

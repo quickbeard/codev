@@ -1,6 +1,6 @@
 import { TaskList } from "@/components/TaskList.js";
-import type { Tool } from "@/configure.js";
-import { installAndVerify, PKG } from "@/npm.js";
+import type { Tool } from "@/lib/configure.js";
+import { installAndVerify, PKG } from "@/lib/npm.js";
 
 interface InstallProps {
 	tools: Tool[];

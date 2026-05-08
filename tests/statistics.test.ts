@@ -8,8 +8,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+	computeSessionStatistics,
+	StatisticsCollector,
+} from "@/lib/statistics.js";
 import type { Session } from "@/providers/types.js";
-import { computeSessionStatistics, StatisticsCollector } from "@/statistics.js";
 
 let tempDir: string;
 let statsPath: string;

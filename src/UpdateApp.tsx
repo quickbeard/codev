@@ -4,7 +4,7 @@ import { Banner } from "@/components/Banner.js";
 import { Frame } from "@/components/Frame.js";
 import { Step } from "@/components/Step.js";
 import { Update } from "@/components/Update.js";
-import { HAPPY_CODING, HELP_HINT } from "@/const.js";
+import { HAPPY_CODING, HELP_HINT } from "@/lib/const.js";
 
 type Phase = "running" | "success" | "fail";
 

@@ -16,7 +16,7 @@ import {
 	generateSlug,
 	projectFolderName,
 	projectLogsDir,
-} from "@/paths.js";
+} from "@/lib/paths.js";
 
 let tempHome: string;
 let homedirSpy: ReturnType<typeof spyOn>;

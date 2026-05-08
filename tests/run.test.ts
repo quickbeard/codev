@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
-import { runAgent } from "@/run.js";
+import { runAgent } from "@/lib/run.js";
 
 let tempDir: string;
 let errorSpy: ReturnType<typeof spyOn>;

@@ -7,7 +7,7 @@ import {
 	installPackage,
 	npmGlobalRoot,
 	verifyInstall,
-} from "@/npm.js";
+} from "@/lib/npm.js";
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
 

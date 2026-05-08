@@ -11,8 +11,8 @@ import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import open from "open";
-import { BASE_URL } from "@/const.js";
-import { fetchCodevConfig } from "@/proxy.js";
+import { BASE_URL } from "@/lib/const.js";
+import { fetchCodevConfig } from "@/lib/proxy.js";
 
 const SSO_BASE_URL = `${BASE_URL}sso-wrapper`;
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");

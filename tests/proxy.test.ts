@@ -9,13 +9,13 @@ import {
 import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BASE_URL } from "@/const.js";
+import { BASE_URL } from "@/lib/const.js";
 import {
 	fetchApiKey,
 	fetchCodevConfig,
 	fetchSupabaseSession,
 	validateApiKey,
-} from "@/proxy.js";
+} from "@/lib/proxy.js";
 
 function jsonResponse(status: number, body: unknown): Response {
 	return new Response(JSON.stringify(body), {

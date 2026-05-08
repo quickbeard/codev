@@ -1,9 +1,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { renderMarkdown } from "@/markdown.js";
-import { buildFilename, projectLogsDir } from "@/paths.js";
+import { renderMarkdown } from "@/lib/markdown.js";
+import { buildFilename, projectLogsDir } from "@/lib/paths.js";
+import {
+	computeSessionStatistics,
+	StatisticsCollector,
+} from "@/lib/statistics.js";
 import type { Agent, Provider } from "@/providers/types.js";
-import { computeSessionStatistics, StatisticsCollector } from "@/statistics.js";
 
 export interface ExportSummary {
 	outDir: string;

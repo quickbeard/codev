@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
-import type { Tool } from "@/configure.js";
+import type { Tool } from "@/lib/configure.js";
 
 const TOOLS: { label: string; value: Tool }[] = [
 	{ label: "Claude Code", value: "claude-code" },

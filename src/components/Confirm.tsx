@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from "ink";
-import { getBackupStatus, type Tool } from "@/configure.js";
+import { getBackupStatus, type Tool } from "@/lib/configure.js";
 
 interface ConfirmProps {
 	tools: Tool[];

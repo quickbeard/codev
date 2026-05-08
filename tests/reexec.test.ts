@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import type * as childProcess from "node:child_process";
-import { ensureNodeSqliteOrReexec, spawner } from "@/reexec.js";
+import { ensureNodeSqliteOrReexec, spawner } from "@/lib/reexec.js";
 
 // `bun test` runs under Bun, which doesn't expose node:sqlite. That makes
 // the failure paths of ensureNodeSqliteOrReexec() trivially reachable here:
@@ -65,7 +65,7 @@ test("re-execs with --experimental-sqlite when node:sqlite is unloadable", async
 	process.argv = [
 		process.argv[0] ?? "node",
 		"/path/to/dist/index.js",
-		"export",
+		"upload",
 	];
 	spawnSyncSpy.mockImplementation(
 		() =>
@@ -86,5 +86,5 @@ test("re-execs with --experimental-sqlite when node:sqlite is unloadable", async
 	expect(args?.[0]).toBe("--experimental-sqlite");
 	expect(args).toContain("--no-warnings=ExperimentalWarning");
 	expect(args).toContain("/path/to/dist/index.js");
-	expect(args).toContain("export");
+	expect(args).toContain("upload");
 });

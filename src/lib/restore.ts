@@ -1,4 +1,4 @@
-import { restoreTool, type Tool } from "@/configure.js";
+import { restoreTool, type Tool } from "@/lib/configure.js";
 
 export function runRestore(tool: Tool): number {
 	const result = restoreTool(tool);

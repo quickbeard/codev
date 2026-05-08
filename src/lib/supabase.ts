@@ -1,4 +1,4 @@
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/const.js";
+import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/const.js";
 
 export interface SupabaseConfig {
 	url: string;

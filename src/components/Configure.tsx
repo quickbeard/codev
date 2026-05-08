@@ -8,8 +8,8 @@ import {
 	configureCodex,
 	configureOpenCode,
 	type Tool,
-} from "@/configure.js";
-import { HAPPY_CODING, HELP_HINT } from "@/const.js";
+} from "@/lib/configure.js";
+import { HAPPY_CODING, HELP_HINT } from "@/lib/const.js";
 
 interface ConfigureProps {
 	tools: Tool[];

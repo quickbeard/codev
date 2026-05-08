@@ -11,7 +11,7 @@ import {
 import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runExport } from "@/export.js";
+import { runExport } from "@/lib/export.js";
 
 let tempHome: string;
 let projectCwd: string;
