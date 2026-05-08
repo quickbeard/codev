@@ -14,6 +14,7 @@ export function FetchApiKey({ auth, onDone, onFallback }: FetchApiKeyProps) {
 	const [pending, setPending] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [emptyCount, setEmptyCount] = useState(0);
+	const [succeeded, setSucceeded] = useState(false);
 	const [attempt, setAttempt] = useState(0);
 
 	// `attempt` is the retry trigger — bumping it re-runs the effect.
@@ -30,6 +31,7 @@ export function FetchApiKey({ auth, onDone, onFallback }: FetchApiKeyProps) {
 					return;
 				}
 				saveApiKey({ apiKey: key });
+				setSucceeded(true);
 				onDone(key);
 			})
 			.catch((err: Error) => {
@@ -63,6 +65,9 @@ export function FetchApiKey({ auth, onDone, onFallback }: FetchApiKeyProps) {
 					</Text>
 					<Text> Fetching API key from gateway...</Text>
 				</Box>
+			)}
+			{succeeded && (
+				<Text color="green">{"✓ API key obtained successfully."}</Text>
 			)}
 			{error && (
 				<>

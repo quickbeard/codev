@@ -18,13 +18,13 @@ function fakeAuth(): auth.AuthData {
 }
 
 describe("FetchApiKey", () => {
-	test("calls onDone with the api key after a successful fetch", async () => {
+	test("calls onDone and renders a success line after a successful fetch", async () => {
 		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
 		const saveSpy = spyOn(auth, "saveApiKey").mockImplementation(() => {});
 
 		const onDone = mock();
 		const onFallback = mock();
-		render(
+		const { lastFrame } = render(
 			<FetchApiKey auth={fakeAuth()} onDone={onDone} onFallback={onFallback} />,
 		);
 
@@ -34,6 +34,7 @@ describe("FetchApiKey", () => {
 		expect(onDone).toHaveBeenCalledWith("sk-test-123");
 		expect(saveSpy).toHaveBeenCalledWith({ apiKey: "sk-test-123" });
 		expect(onFallback).not.toHaveBeenCalled();
+		expect(lastFrame() ?? "").toContain("API key obtained successfully.");
 	});
 
 	test("shows retry prompt on first empty key", async () => {
