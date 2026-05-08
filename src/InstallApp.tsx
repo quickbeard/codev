@@ -156,6 +156,11 @@ export function InstallApp() {
 				setStep("configuring");
 				return;
 			}
+			if (choice === "skip") {
+				setCreds(null);
+				setStep("configuring");
+				return;
+			}
 			setStep(choice === "new" ? "fetching-key" : "manual-creds");
 		},
 		[savedCreds],
@@ -284,8 +289,11 @@ export function InstallApp() {
 							/>
 						</Step>
 					)}
-				{POST_AUTH.includes(step) && creds && (
-					<Step active={step === "configuring"} title={configureTitle()}>
+				{POST_AUTH.includes(step) && (creds || authMethod === "skip") && (
+					<Step
+						active={step === "configuring"}
+						title={configureTitle(authMethod === "skip")}
+					>
 						<Configure
 							tools={tools}
 							creds={creds}

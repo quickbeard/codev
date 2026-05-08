@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
 	type BackupKind,
+	backupOnly,
 	type ConfigureResult,
 	type Credentials,
 	configureClaudeCode,
@@ -13,7 +14,8 @@ import { HAPPY_CODING, HELP_HINT } from "@/lib/const.js";
 
 interface ConfigureProps {
 	tools: Tool[];
-	creds: Credentials;
+	// `null` means skip writing CoDev's config; only create the backup.
+	creds: Credentials | null;
 	onDone: (success: boolean) => void;
 }
 
@@ -52,7 +54,14 @@ function resumeMessage(tools: Tool[]): ReactNode {
 	);
 }
 
-function describeResult(r: ConfigureResult): string[] {
+function describeResult(r: ConfigureResult, skipped: boolean): string[] {
+	if (skipped) {
+		return [
+			r.backupPath
+				? `Backed up ${LABEL[r.kind]} (config left unchanged)`
+				: `Skipped ${LABEL[r.kind]} (no existing config to back up)`,
+		];
+	}
 	return [`Configured ${LABEL[r.kind]}`];
 }
 
@@ -68,7 +77,9 @@ export function Configure({ tools, creds, onDone }: ConfigureProps) {
 		try {
 			const results: ConfigureResult[] = [];
 			for (const tool of tools) {
-				if (tool === "claude-code") {
+				if (creds === null) {
+					results.push(...backupOnly(tool));
+				} else if (tool === "claude-code") {
 					results.push(...configureClaudeCode(creds));
 				} else if (tool === "codex") {
 					results.push(...configureCodex(creds));
@@ -78,7 +89,7 @@ export function Configure({ tools, creds, onDone }: ConfigureProps) {
 			}
 			const next: string[] = [];
 			for (const r of results) {
-				next.push(...describeResult(r));
+				next.push(...describeResult(r, creds === null));
 			}
 			setLogs(next);
 			setPhase("done");
@@ -111,6 +122,8 @@ export function Configure({ tools, creds, onDone }: ConfigureProps) {
 	);
 }
 
-export function configureTitle() {
-	return <Text bold>{"Configure tools"}</Text>;
+export function configureTitle(skip = false) {
+	return (
+		<Text bold>{skip ? "Back up existing configs" : "Configure tools"}</Text>
+	);
 }

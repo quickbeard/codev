@@ -1,7 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 
-export type AuthMethodChoice = "existing" | "new" | "manual";
+export type AuthMethodChoice = "existing" | "new" | "manual" | "skip";
 
 interface Option {
 	label: string;
@@ -20,6 +20,10 @@ const EXISTING_OPTION: Option = {
 	label: "Reuse existing API Key",
 	value: "existing",
 };
+const SKIP_OPTION: Option = {
+	label: "Skip configuration",
+	value: "skip",
+};
 
 interface AuthMethodProps {
 	onSelect: (choice: AuthMethodChoice) => void;
@@ -35,8 +39,8 @@ export function AuthMethod({
 	hasExisting = false,
 }: AuthMethodProps) {
 	const options: Option[] = hasExisting
-		? [EXISTING_OPTION, NEW_OPTION, MANUAL_OPTION]
-		: [NEW_OPTION, MANUAL_OPTION];
+		? [EXISTING_OPTION, NEW_OPTION, MANUAL_OPTION, SKIP_OPTION]
+		: [NEW_OPTION, MANUAL_OPTION, SKIP_OPTION];
 	const [cursor, setCursor] = useState(0);
 
 	useInput(

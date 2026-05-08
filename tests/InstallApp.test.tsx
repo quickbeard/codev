@@ -91,6 +91,19 @@ async function pickManual(stdin: { write: (s: string) => void }) {
 	await new Promise((r) => setTimeout(r, 30));
 }
 
+async function pickSkip(stdin: { write: (s: string) => void }) {
+	// Wait for login + install + validation to settle, move cursor past
+	// "Get a new API Key" and "I have my own API Key" to land on
+	// "Skip configuration", Enter.
+	await new Promise((r) => setTimeout(r, 200));
+	stdin.write("\x1B[B");
+	await new Promise((r) => setTimeout(r, 30));
+	stdin.write("\x1B[B");
+	await new Promise((r) => setTimeout(r, 30));
+	stdin.write("\r");
+	await new Promise((r) => setTimeout(r, 30));
+}
+
 async function typeManualCreds(
 	stdin: { write: (s: string) => void },
 	baseUrl: string,
@@ -416,6 +429,40 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(fetchApiKeySpy).toHaveBeenCalledTimes(2);
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 		expect(configureSpy).toHaveBeenCalledWith({ apiKey: "sk-retry-ok" });
+	});
+
+	test("skip-configuration flow backs up but does not write configs", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+		const configureSpy = spyOn(configure, "configureClaudeCode");
+		const backupOnlySpy = spyOn(configure, "backupOnly").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.backup",
+			},
+		]);
+		fetchApiKeySpy.mockClear();
+		configureSpy.mockClear();
+		backupOnlySpy.mockClear();
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin);
+		await pickSkip(stdin);
+		await new Promise((r) => setTimeout(r, 1_300));
+
+		const history = allFrames(frames);
+		expect(history).toContain("Skip configuration");
+		expect(history).toContain("Back up existing configs");
+		expect(history).toContain("Backed up Claude Code");
+		expect(history).toContain("Happy coding");
+		expect(backupOnlySpy).toHaveBeenCalledTimes(1);
+		expect(backupOnlySpy).toHaveBeenCalledWith("claude-code");
+		expect(configureSpy).not.toHaveBeenCalled();
+		expect(fetchApiKeySpy).not.toHaveBeenCalled();
 	});
 
 	test("login retry after failure reaches the done screen", async () => {

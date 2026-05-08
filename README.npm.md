@@ -45,7 +45,8 @@ codev install
    - **Reuse existing API Key** — only offered if the saved key is still valid.
    - **Get a new API Key** — issues a fresh key from the CoDev gateway using your SSO session. If the gateway returns an empty key, you get one retry before falling back to the manual entry path.
    - **I have my own API Key** — type the gateway URL, key, and model manually.
-6. Writes the agent configs (replacing the live config; see [Restoring a previous configuration](#restoring-a-previous-configuration) below).
+   - **Skip configuration** — leave each selected agent's config untouched. CoDev still creates the `*.backup` snapshot of any existing config (see [Restoring a previous configuration](#restoring-a-previous-configuration) below) so you can revert later, but it does not write its own gateway settings.
+6. Writes the agent configs (replacing the live config; see [Restoring a previous configuration](#restoring-a-previous-configuration) below). Skipped if you chose **Skip configuration**.
 
 ## Restoring a previous configuration
 

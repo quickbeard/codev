@@ -98,6 +98,8 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 
 `configureClaudeCode` and `configureOpenCode` always replace the live config (`~/.claude/settings.json`, `~/.config/opencode/opencode.json`), but an existing `*.backup` is never overwritten. On the first run a backup is copied from the live config; every subsequent run skips the backup step and leaves the original `*.backup` in place. There is no prompt and no `overwriteBackups` option — preserving the user's pre-CoDev state is the whole point. `restoreTool` then renames `*.backup` back over the live file.
 
+The install flow's "Skip configuration" auth choice routes through `backupOnly(tool)` instead of the per-agent `configure*` functions: it runs the same `ensureBackup` logic (so any existing live config is snapshotted to `*.backup` exactly once) and then exits without writing CoDev's own config. It also does not call `bypassClaudeLogin` — skip means CoDev touches nothing the user didn't already have. `Configure` accepts `creds: Credentials | null`; `null` is the signal to take this backup-only path.
+
 ## Config refresh and upload self-healing
 
 Supabase coordinates (`supabase_url`, `supabase_anon_key`, `supabase_proxy_url`) are not baked into the source — they're fetched from `codev-proxy`'s `POST /config` endpoint and cached in `~/.codev/auth.json`. Two invariants keep that cache fresh:
