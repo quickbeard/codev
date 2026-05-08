@@ -18,12 +18,7 @@ export function Banner() {
 			<Text bold color="cyan">
 				{LOGO}
 			</Text>
-			<Box
-				marginTop={1}
-				marginBottom={1}
-				justifyContent="center"
-				width={LOGO_WIDTH}
-			>
+			<Box marginBottom={1} justifyContent="center" width={LOGO_WIDTH}>
 				<Text>{"AI Coding Agent Hub "}</Text>
 				<Text dimColor>v{VERSION}</Text>
 			</Box>
