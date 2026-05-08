@@ -132,6 +132,20 @@ export function getBackupStatus(tool: Tool): BackupStatus[] {
 	return [statusFor("opencode-config")];
 }
 
+function kindForTool(tool: Tool): BackupKind {
+	if (tool === "claude-code") return "claude-settings";
+	if (tool === "codex") return "codex-config";
+	return "opencode-config";
+}
+
+// Create the *.backup snapshot for `tool` without writing CoDev's config.
+// Used by the install flow's "Skip configuration" path.
+export function backupOnly(tool: Tool): ConfigureResult[] {
+	const kind = kindForTool(tool);
+	const backupPath = ensureBackup(kind);
+	return [{ kind, sourcePath: sourcePathOf(kind), backupPath }];
+}
+
 function ensureBackup(kind: BackupKind): string | null {
 	const sourcePath = sourcePathOf(kind);
 	const backupPath = `${sourcePath}.backup`;

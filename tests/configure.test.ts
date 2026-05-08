@@ -491,6 +491,68 @@ describe("restoreTool", () => {
 	});
 });
 
+describe("backupOnly", () => {
+	test("creates a backup of the live Claude settings.json without writing config", async () => {
+		const dir = join(tempDir, ".claude");
+		const livePath = join(dir, "settings.json");
+		const backupPath = `${livePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		const original = JSON.stringify({ env: { ANTHROPIC_API_KEY: "user-key" } });
+		writeFileSync(livePath, original);
+
+		const { backupOnly } = await import("@/lib/configure.js");
+		const results = backupOnly("claude-code");
+
+		const result = results[0];
+		expect(result?.kind).toBe("claude-settings");
+		expect(result?.backupPath).toBe(backupPath);
+		expect(existsSync(backupPath)).toBe(true);
+		expect(readFileSync(backupPath, "utf-8")).toBe(original);
+		// Live config is left untouched.
+		expect(readFileSync(livePath, "utf-8")).toBe(original);
+	});
+
+	test("preserves a pre-existing backup", async () => {
+		const dir = join(tempDir, ".codex");
+		const livePath = join(dir, "config.toml");
+		const backupPath = `${livePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(backupPath, 'marker = "original"\n');
+		writeFileSync(livePath, 'marker = "current"\n');
+
+		const { backupOnly } = await import("@/lib/configure.js");
+		const results = backupOnly("codex");
+
+		expect(results[0]?.backupPath).toBe(backupPath);
+		expect(readFileSync(backupPath, "utf-8")).toContain('marker = "original"');
+		expect(readFileSync(livePath, "utf-8")).toContain('marker = "current"');
+	});
+
+	test("returns null backupPath when neither live nor backup file exists", async () => {
+		const { backupOnly } = await import("@/lib/configure.js");
+		const results = backupOnly("opencode");
+
+		expect(results[0]?.kind).toBe("opencode-config");
+		expect(results[0]?.backupPath).toBeNull();
+		expect(
+			existsSync(join(tempDir, ".config", "opencode", "opencode.json.backup")),
+		).toBe(false);
+	});
+
+	test("does not create .claude.json (skips bypassClaudeLogin)", async () => {
+		const dir = join(tempDir, ".claude");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "settings.json"), "{}");
+
+		const { backupOnly } = await import("@/lib/configure.js");
+		backupOnly("claude-code");
+
+		// Skip path must not write the agent's onboarding bypass — the user
+		// explicitly asked CoDev not to touch their config.
+		expect(existsSync(join(tempDir, ".claude.json"))).toBe(false);
+	});
+});
+
 describe("configureClaudeCode with manual credentials", () => {
 	test("uses the supplied baseUrl and model verbatim when no v1 suffix", async () => {
 		const { configureClaudeCode } = await import("@/lib/configure.js");

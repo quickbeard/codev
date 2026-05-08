@@ -2,7 +2,10 @@ import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
 import { useCallback, useState } from "react";
 import type { AuthMethodChoice } from "@/components/AuthMethod.js";
-import { AuthMethod, authMethodTitle } from "@/components/AuthMethod.js";
+import {
+	AuthMethod,
+	configurationMethodTitle,
+} from "@/components/AuthMethod.js";
 import { Banner } from "@/components/Banner.js";
 import { Configure, configureTitle } from "@/components/Configure.js";
 import { Confirm, confirmTitle } from "@/components/Confirm.js";
@@ -156,6 +159,11 @@ export function InstallApp() {
 				setStep("configuring");
 				return;
 			}
+			if (choice === "skip") {
+				setCreds(null);
+				setStep("configuring");
+				return;
+			}
 			setStep(choice === "new" ? "fetching-key" : "manual-creds");
 		},
 		[savedCreds],
@@ -252,7 +260,7 @@ export function InstallApp() {
 				{POST_VALIDATE.includes(step) && (
 					<Step
 						active={step === "key-choice"}
-						title={authMethodTitle(step !== "key-choice")}
+						title={configurationMethodTitle(step !== "key-choice")}
 					>
 						<AuthMethod
 							onSelect={handleAuthMethod}
@@ -284,8 +292,11 @@ export function InstallApp() {
 							/>
 						</Step>
 					)}
-				{POST_AUTH.includes(step) && creds && (
-					<Step active={step === "configuring"} title={configureTitle()}>
+				{POST_AUTH.includes(step) && (creds || authMethod === "skip") && (
+					<Step
+						active={step === "configuring"}
+						title={configureTitle(authMethod === "skip")}
+					>
 						<Configure
 							tools={tools}
 							creds={creds}

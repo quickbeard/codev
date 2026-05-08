@@ -10,12 +10,13 @@ afterEach(() => {
 });
 
 describe("AuthMethod", () => {
-	test("renders both options", () => {
+	test("renders all options", () => {
 		const onSelect = mock();
 		const { lastFrame } = render(<AuthMethod onSelect={onSelect} />);
 		const output = lastFrame() ?? "";
 		expect(output).toContain("Get a new API Key");
 		expect(output).toContain("I have my own API Key");
+		expect(output).toContain("Skip configuration");
 	});
 
 	test("Enter picks 'new' (default cursor at index 0)", async () => {
@@ -60,7 +61,7 @@ describe("AuthMethod", () => {
 		const onSelect = mock();
 		const { stdin } = render(<AuthMethod onSelect={onSelect} />);
 
-		// Press down many times — cursor should clamp at the last option.
+		// Press down many times — cursor should clamp at the last option ("skip").
 		for (let i = 0; i < 5; i++) {
 			stdin.write(DOWN);
 			await new Promise((r) => setTimeout(r, 10));
@@ -68,7 +69,21 @@ describe("AuthMethod", () => {
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 30));
 
-		expect(onSelect).toHaveBeenCalledWith("manual");
+		expect(onSelect).toHaveBeenCalledWith("skip");
+	});
+
+	test("down twice + Enter picks 'skip'", async () => {
+		const onSelect = mock();
+		const { stdin } = render(<AuthMethod onSelect={onSelect} />);
+
+		stdin.write(DOWN);
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write(DOWN);
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 30));
+
+		expect(onSelect).toHaveBeenCalledWith("skip");
 	});
 
 	test("readOnly ignores keyboard input", async () => {
