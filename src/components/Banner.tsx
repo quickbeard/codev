@@ -10,19 +10,23 @@ const LOGO = [
 	" ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝  ╚═══╝  ",
 ].join("\n");
 
-const LOGO_WIDTH = 45;
+const LOGO_WIDTH = 42;
 
 export function Banner() {
 	return (
-		<Box alignItems="center" justifyContent="center" flexDirection="column">
+		<Box alignItems="flex-start" flexDirection="column">
 			<Text bold color="cyan">
 				{LOGO}
 			</Text>
-			<Box marginTop={1} justifyContent="center" width={LOGO_WIDTH}>
-				<Text>{"⚡ AI Coding Agent Hub "}</Text>
+			<Box
+				marginTop={1}
+				marginBottom={1}
+				justifyContent="center"
+				width={LOGO_WIDTH}
+			>
+				<Text>{"AI Coding Agent Hub "}</Text>
 				<Text dimColor>v{VERSION}</Text>
 			</Box>
-			<Text dimColor>{"─".repeat(LOGO_WIDTH)}</Text>
 		</Box>
 	);
 }
