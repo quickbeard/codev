@@ -15,7 +15,12 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { loadAuth, login } from "@/lib/auth.js";
+import {
+	type AuthData,
+	loadAuth,
+	login,
+	refreshCodevConfig,
+} from "@/lib/auth.js";
 import { runExport } from "@/lib/export.js";
 import { projectLogsDir } from "@/lib/paths.js";
 import { fetchSupabaseSession } from "@/lib/proxy.js";
@@ -66,6 +71,40 @@ export async function runUpload({
 
 	const outDir = projectLogsDir(cwd);
 	const files = listMarkdownLogs(outDir);
+	if (files.length === 0) {
+		return {
+			outDir,
+			found: 0,
+			uploaded: 0,
+			skipped: 0,
+			failed: 0,
+			errors: [],
+		};
+	}
+
+	const auth = await ensureAuth(onStatus);
+
+	// Try the Supabase block once. If it trips a refreshable failure (cache
+	// missing, or Supabase rejected our credentials), refresh the cached
+	// CoDev config from codev-proxy and retry exactly once. ensureAuth above
+	// guarantees auth.access_token is fresh, so refreshCodevConfig will
+	// authenticate against the proxy with a valid bearer.
+	try {
+		return await runSupabaseUpload(outDir, files, auth, onStatus);
+	} catch (err) {
+		if (!isRefreshableError(err)) throw err;
+		onStatus("Refreshing CoDev config and retrying...");
+		await refreshCodevConfig(auth.access_token, onStatus);
+		return await runSupabaseUpload(outDir, files, auth, onStatus);
+	}
+}
+
+async function runSupabaseUpload(
+	outDir: string,
+	files: string[],
+	auth: AuthData,
+	onStatus: (message: string) => void,
+): Promise<UploadSummary> {
 	const summary: UploadSummary = {
 		outDir,
 		found: files.length,
@@ -74,10 +113,8 @@ export async function runUpload({
 		failed: 0,
 		errors: [],
 	};
-	if (files.length === 0) return summary;
 
 	const config = getSupabaseConfig();
-	const auth = await ensureAuth(onStatus);
 	onStatus("Exchanging SSO session for Supabase upload session...");
 	const supabaseSession = await fetchSupabaseSession(auth.access_token);
 	const uploadToken = supabaseSession.access_token;
@@ -97,6 +134,18 @@ export async function runUpload({
 		}
 	}
 	return summary;
+}
+
+// Narrow refresh trigger: empty cache, or Supabase/proxy returning 401/403.
+// 5xx, network errors, and timeouts are NOT retried — refreshing config won't
+// help and we'd just amplify the outage.
+export function isRefreshableError(err: unknown): boolean {
+	const msg = err instanceof Error ? err.message : String(err);
+	if (msg.includes("Missing supabase_")) return true;
+	const match = msg.match(/\((\d{3})\)/);
+	if (!match?.[1]) return false;
+	const status = Number.parseInt(match[1], 10);
+	return status === 401 || status === 403;
 }
 
 export function listMarkdownLogs(outDir: string): string[] {

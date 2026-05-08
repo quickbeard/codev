@@ -341,13 +341,40 @@ describe("login", () => {
 		const logs: string[] = [];
 		const onReady = mock();
 
-		const result = await login((msg) => logs.push(msg), onReady);
+		// Cached-login path also refreshes the CoDev config — mock /config so
+		// the test stays hermetic and we can assert the refresh actually ran.
+		const fetchSpy = mockAuthFetch({
+			"/codev-proxy/config": async () =>
+				new Response(
+					JSON.stringify({
+						supabaseUrl: "https://refreshed-on-cached.supabase.co",
+						supabaseAnonKey: "refreshed-anon",
+						supabaseProxyUrl: "https://api.test/api/codev",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				),
+		});
 
-		expect(result.access_token).toBe("test-access-token");
-		expect(result.user.email).toBe("test@example.com");
-		expect(logs).toContain("Starting SSO login...");
-		expect(logs.some((l) => l.includes("Already logged in"))).toBe(true);
-		expect(onReady).not.toHaveBeenCalled();
+		try {
+			const result = await login((msg) => logs.push(msg), onReady);
+
+			expect(result.access_token).toBe("test-access-token");
+			expect(result.user.email).toBe("test@example.com");
+			expect(logs).toContain("Starting SSO login...");
+			expect(logs.some((l) => l.includes("Already logged in"))).toBe(true);
+			expect(onReady).not.toHaveBeenCalled();
+
+			// Cache should now hold the freshly fetched Supabase coords.
+			const saved = JSON.parse(
+				readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
+			) as Record<string, unknown>;
+			expect(saved.supabase_url).toBe(
+				"https://refreshed-on-cached.supabase.co",
+			);
+			expect(saved.supabase_anon_key).toBe("refreshed-anon");
+		} finally {
+			fetchSpy.mockRestore();
+		}
 	});
 
 	test("calls onReady when no existing auth", async () => {
