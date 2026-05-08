@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Tool } from "@/configure.js";
+import type { Tool } from "@/lib/configure.js";
 
 export const PKG: Record<Tool, string> = {
 	"claude-code": "@anthropic-ai/claude-code",

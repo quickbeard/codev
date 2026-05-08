@@ -1,7 +1,6 @@
 import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
 import { useCallback, useState } from "react";
-import { type ApiKeyCreds, loadApiKey, saveApiKey } from "@/auth.js";
 import type { AuthMethodChoice } from "@/components/AuthMethod.js";
 import { AuthMethod, authMethodTitle } from "@/components/AuthMethod.js";
 import { Banner } from "@/components/Banner.js";
@@ -17,8 +16,9 @@ import {
 } from "@/components/ManualCredentials.js";
 import { Step } from "@/components/Step.js";
 import { ToolSelect, toolSelectTitle } from "@/components/ToolSelect.js";
-import type { Credentials, Tool } from "@/configure.js";
-import { validateApiKey } from "@/proxy.js";
+import { type ApiKeyCreds, loadApiKey, saveApiKey } from "@/lib/auth.js";
+import type { Credentials, Tool } from "@/lib/configure.js";
+import { validateApiKey } from "@/lib/proxy.js";
 
 type Phase =
 	| "select"

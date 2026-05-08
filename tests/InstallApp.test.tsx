@@ -9,10 +9,10 @@ import {
 } from "bun:test";
 import * as child_process from "node:child_process";
 import { cleanup, render } from "ink-testing-library";
-import * as auth from "@/auth.js";
-import * as configure from "@/configure.js";
 import { InstallApp } from "@/InstallApp.js";
-import * as proxy from "@/proxy.js";
+import * as auth from "@/lib/auth.js";
+import * as configure from "@/lib/configure.js";
+import * as proxy from "@/lib/proxy.js";
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
 

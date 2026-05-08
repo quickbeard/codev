@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 import { render } from "ink";
-import { logout } from "@/auth.js";
-import { ExportApp } from "@/ExportApp.js";
-import { printHelp, printVersion } from "@/help.js";
 import { InstallApp } from "@/InstallApp.js";
-import { ensureNodeSqliteOrReexec } from "@/reexec.js";
-import { runRestore } from "@/restore.js";
-import { runAgent } from "@/run.js";
+import { logout } from "@/lib/auth.js";
+import { printHelp, printVersion } from "@/lib/help.js";
+import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
+import { runRestore } from "@/lib/restore.js";
+import { runAgent } from "@/lib/run.js";
+import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
-import { runUploadDaemon, spawnUploadDaemon } from "@/upload.js";
 
 // `node:sqlite` (used by the OpenCode provider) was added in Node 22.5 and
 // stabilized in Node 23.5. Earlier 22.x patches don't expose the module even
@@ -77,17 +76,6 @@ switch (command) {
 		const ok = await logout();
 		console.log(ok ? "Logged out." : "Not logged in.");
 		process.exit(0);
-		break;
-	}
-	case "export": {
-		await gateSqlite();
-		const { waitUntilExit } = render(<ExportApp />);
-		try {
-			await waitUntilExit();
-			process.exit(0);
-		} catch {
-			process.exit(1);
-		}
 		break;
 	}
 	case "upload": {

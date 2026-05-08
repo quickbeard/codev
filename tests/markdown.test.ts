@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { renderMarkdown } from "@/markdown.js";
+import { renderMarkdown } from "@/lib/markdown.js";
 import type { Session } from "@/providers/types.js";
 
 function fixture(overrides: Partial<Session> = {}): Session {

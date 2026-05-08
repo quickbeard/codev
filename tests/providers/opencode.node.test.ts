@@ -1,11 +1,16 @@
 // Smoke test for the node:sqlite branch of openDb() in
 // src/providers/opencode.ts. `bun test` runs under Bun and exercises the
 // bun:sqlite branch via opencode.test.ts, so this test shells out to
-// `node dist/index.js export` against a seeded OpenCode DB and asserts on the
-// filesystem output. It is the only coverage of the Node-runtime SQLite path
-// — without it, a regression would only surface for users running the
-// published CLI. On Node < 23.5 the CLI re-execs itself with
-// --experimental-sqlite (see src/reexec.ts), which is also exercised here.
+// `node dist/index.js upload` against a seeded OpenCode DB and asserts on the
+// filesystem output written by the export half of the upload pipeline. It is
+// the only coverage of the Node-runtime SQLite path — without it, a regression
+// would only surface for users running the published CLI. On Node < 23.5 the
+// CLI re-execs itself with --experimental-sqlite (see src/lib/reexec.ts), which
+// is also exercised here.
+//
+// `upload` will fail when its network half tries to reach the fake Supabase
+// URL we seed, but the export half runs first and writes the markdown files we
+// assert on, so the non-zero exit is expected and tolerated.
 //
 // The test runs whatever bundle currently sits in dist/index.js, and only
 // rebuilds when the bundle is missing. After changing src/, re-run
@@ -21,6 +26,7 @@ import {
 	readdirSync,
 	realpathSync,
 	rmSync,
+	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -95,23 +101,38 @@ function seedDb(): void {
 	db.close();
 }
 
-test("`node dist/index.js export` reads opencode.db via node:sqlite", () => {
+function seedAuth(): void {
+	const codevDir = join(tempHome, ".codev");
+	mkdirSync(codevDir, { recursive: true });
+	writeFileSync(
+		join(codevDir, "auth.json"),
+		JSON.stringify({
+			access_token: "token",
+			id_token: "token",
+			expires_at: Date.now() + 3600_000,
+			user: { sub: "u", email: "u@example.com", displayName: "User" },
+			supabase_url: "http://127.0.0.1:1",
+			supabase_anon_key: "anon",
+			supabase_proxy_url: "http://127.0.0.1:1/api/codev",
+		}),
+	);
+}
+
+test("`node dist/index.js upload` reads opencode.db via node:sqlite", () => {
 	seedDb();
+	seedAuth();
 	const env: Record<string, string | undefined> = {
 		...process.env,
 		HOME: tempHome,
 	};
 	delete env.XDG_DATA_HOME;
-	const result = spawnSync("node", [DIST_PATH, "export"], {
+	// `upload` fails on the network half (fake Supabase URL) but the export
+	// half runs first and writes the markdown files we check below.
+	spawnSync("node", [DIST_PATH, "upload"], {
 		cwd: projectCwd,
 		env,
 		encoding: "utf8",
 	});
-	if (result.status !== 0) {
-		throw new Error(
-			`exit ${result.status}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
-		);
-	}
 
 	const logsDir = join(tempHome, ".codev", "logs");
 	expect(existsSync(logsDir)).toBe(true);

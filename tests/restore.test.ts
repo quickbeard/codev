@@ -10,7 +10,7 @@ import {
 import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runRestore } from "@/restore.js";
+import { runRestore } from "@/lib/restore.js";
 
 let tempDir: string;
 let homedirSpy: ReturnType<typeof spyOn>;

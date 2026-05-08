@@ -11,7 +11,7 @@ import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import TOML from "@iarna/toml";
-import { BASE_URL } from "@/const.js";
+import { BASE_URL } from "@/lib/const.js";
 
 let tempDir: string;
 let homedirSpy: ReturnType<typeof spyOn>;
@@ -28,7 +28,7 @@ afterEach(() => {
 
 describe("bypassClaudeLogin", () => {
 	test("creates .claude.json with hasCompletedOnboarding when file does not exist", async () => {
-		const { bypassClaudeLogin } = await import("@/configure.js");
+		const { bypassClaudeLogin } = await import("@/lib/configure.js");
 		bypassClaudeLogin();
 
 		const filePath = join(tempDir, ".claude.json");
@@ -42,7 +42,7 @@ describe("bypassClaudeLogin", () => {
 		const filePath = join(tempDir, ".claude.json");
 		writeFileSync(filePath, JSON.stringify({ someKey: "someValue" }, null, 2));
 
-		const { bypassClaudeLogin } = await import("@/configure.js");
+		const { bypassClaudeLogin } = await import("@/lib/configure.js");
 		bypassClaudeLogin();
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
@@ -55,7 +55,7 @@ describe("bypassClaudeLogin", () => {
 		const original = { hasCompletedOnboarding: true, other: "data" };
 		writeFileSync(filePath, JSON.stringify(original, null, 2));
 
-		const { bypassClaudeLogin } = await import("@/configure.js");
+		const { bypassClaudeLogin } = await import("@/lib/configure.js");
 		bypassClaudeLogin();
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
@@ -66,7 +66,7 @@ describe("bypassClaudeLogin", () => {
 		const filePath = join(tempDir, ".claude.json");
 		writeFileSync(filePath, "not valid json{{{");
 
-		const { bypassClaudeLogin } = await import("@/configure.js");
+		const { bypassClaudeLogin } = await import("@/lib/configure.js");
 		bypassClaudeLogin();
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
@@ -77,7 +77,7 @@ describe("bypassClaudeLogin", () => {
 		const filePath = join(tempDir, ".claude.json");
 		writeFileSync(filePath, JSON.stringify({ someKey: "someValue" }));
 
-		const { bypassClaudeLogin } = await import("@/configure.js");
+		const { bypassClaudeLogin } = await import("@/lib/configure.js");
 		bypassClaudeLogin();
 
 		expect(existsSync(`${filePath}.backup`)).toBe(false);
@@ -86,7 +86,7 @@ describe("bypassClaudeLogin", () => {
 
 describe("configureClaudeCode", () => {
 	test("creates ~/.claude/settings.json with env block when file does not exist", async () => {
-		const { configureClaudeCode } = await import("@/configure.js");
+		const { configureClaudeCode } = await import("@/lib/configure.js");
 		configureClaudeCode({ apiKey: "sk-abc" });
 
 		const filePath = join(tempDir, ".claude", "settings.json");
@@ -108,7 +108,7 @@ describe("configureClaudeCode", () => {
 	});
 
 	test("also runs bypassClaudeLogin (creates .claude.json)", async () => {
-		const { configureClaudeCode } = await import("@/configure.js");
+		const { configureClaudeCode } = await import("@/lib/configure.js");
 		configureClaudeCode({ apiKey: "sk-abc" });
 
 		const claudeJson = join(tempDir, ".claude.json");
@@ -130,7 +130,7 @@ describe("configureClaudeCode", () => {
 			}),
 		);
 
-		const { configureClaudeCode } = await import("@/configure.js");
+		const { configureClaudeCode } = await import("@/lib/configure.js");
 		const results = configureClaudeCode({ apiKey: "sk-new" });
 
 		const result = results.find((r) => r.kind === "claude-settings");
@@ -153,7 +153,7 @@ describe("configureClaudeCode", () => {
 		writeFileSync(join(dir, "settings.json"), JSON.stringify({ env: {} }));
 		writeFileSync(join(dir, "CLAUDE.md"), "user notes");
 
-		const { configureClaudeCode } = await import("@/configure.js");
+		const { configureClaudeCode } = await import("@/lib/configure.js");
 		configureClaudeCode({ apiKey: "sk-new" });
 
 		expect(readFileSync(join(dir, "CLAUDE.md"), "utf-8")).toBe("user notes");
@@ -171,7 +171,7 @@ describe("configureClaudeCode", () => {
 			JSON.stringify({ env: { ANTHROPIC_API_KEY: "prev-codev-run" } }),
 		);
 
-		const { configureClaudeCode } = await import("@/configure.js");
+		const { configureClaudeCode } = await import("@/lib/configure.js");
 		configureClaudeCode({ apiKey: "sk-new" });
 
 		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
@@ -181,7 +181,7 @@ describe("configureClaudeCode", () => {
 
 describe("configureOpenCode", () => {
 	test("creates ~/.config/opencode/opencode.json with aigateway provider when file does not exist", async () => {
-		const { configureOpenCode } = await import("@/configure.js");
+		const { configureOpenCode } = await import("@/lib/configure.js");
 		configureOpenCode({ apiKey: "sk-xyz" });
 
 		const filePath = join(tempDir, ".config", "opencode", "opencode.json");
@@ -198,7 +198,7 @@ describe("configureOpenCode", () => {
 	});
 
 	test("does not touch ~/.claude.json (OpenCode-only install)", async () => {
-		const { configureOpenCode } = await import("@/configure.js");
+		const { configureOpenCode } = await import("@/lib/configure.js");
 		configureOpenCode({ apiKey: "sk-xyz" });
 
 		expect(existsSync(join(tempDir, ".claude.json"))).toBe(false);
@@ -217,7 +217,7 @@ describe("configureOpenCode", () => {
 			}),
 		);
 
-		const { configureOpenCode } = await import("@/configure.js");
+		const { configureOpenCode } = await import("@/lib/configure.js");
 		const results = configureOpenCode({ apiKey: "sk-new" });
 
 		expect(results[0]?.backupPath).toBe(backupPath);
@@ -244,7 +244,7 @@ describe("configureOpenCode", () => {
 			}),
 		);
 
-		const { configureOpenCode } = await import("@/configure.js");
+		const { configureOpenCode } = await import("@/lib/configure.js");
 		const results = configureOpenCode({ apiKey: "sk-new" });
 
 		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
@@ -276,7 +276,7 @@ describe("configureCodex", () => {
 	}
 
 	test("creates ~/.codex/config.toml with aigateway provider when file does not exist", async () => {
-		const { configureCodex } = await import("@/configure.js");
+		const { configureCodex } = await import("@/lib/configure.js");
 		configureCodex({ apiKey: "sk-codex" });
 
 		const filePath = join(tempDir, ".codex", "config.toml");
@@ -297,7 +297,7 @@ describe("configureCodex", () => {
 	});
 
 	test("does not touch ~/.claude.json (Codex-only install)", async () => {
-		const { configureCodex } = await import("@/configure.js");
+		const { configureCodex } = await import("@/lib/configure.js");
 		configureCodex({ apiKey: "sk-codex" });
 
 		expect(existsSync(join(tempDir, ".claude.json"))).toBe(false);
@@ -310,7 +310,7 @@ describe("configureCodex", () => {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(filePath, 'model = "old"\nother = "keep"\n');
 
-		const { configureCodex } = await import("@/configure.js");
+		const { configureCodex } = await import("@/lib/configure.js");
 		const results = configureCodex({ apiKey: "sk-new" });
 
 		expect(results[0]?.backupPath).toBe(backupPath);
@@ -334,7 +334,7 @@ describe("configureCodex", () => {
 		writeFileSync(backupPath, 'marker = "original"\n');
 		writeFileSync(filePath, 'marker = "prev-codev-run"\n');
 
-		const { configureCodex } = await import("@/configure.js");
+		const { configureCodex } = await import("@/lib/configure.js");
 		configureCodex({ apiKey: "sk-new" });
 
 		const backup = readFileSync(backupPath, "utf-8");
@@ -342,7 +342,7 @@ describe("configureCodex", () => {
 	});
 
 	test("uses supplied baseUrl with /v1 already present", async () => {
-		const { configureCodex } = await import("@/configure.js");
+		const { configureCodex } = await import("@/lib/configure.js");
 		configureCodex({
 			apiKey: "k",
 			baseUrl: "https://example.com/v1",
@@ -357,7 +357,7 @@ describe("configureCodex", () => {
 	});
 
 	test("appends /v1 when baseUrl has no trailing slash", async () => {
-		const { configureCodex } = await import("@/configure.js");
+		const { configureCodex } = await import("@/lib/configure.js");
 		configureCodex({
 			apiKey: "k",
 			baseUrl: "https://example.com",
@@ -371,7 +371,7 @@ describe("configureCodex", () => {
 	});
 
 	test("appends v1 when baseUrl ends with a trailing slash", async () => {
-		const { configureCodex } = await import("@/configure.js");
+		const { configureCodex } = await import("@/lib/configure.js");
 		configureCodex({
 			apiKey: "k",
 			baseUrl: "https://example.com/",
@@ -387,19 +387,19 @@ describe("configureCodex", () => {
 
 describe("getBackupStatus", () => {
 	test("returns claude-settings for claude-code", async () => {
-		const { getBackupStatus } = await import("@/configure.js");
+		const { getBackupStatus } = await import("@/lib/configure.js");
 		const statuses = getBackupStatus("claude-code");
 		expect(statuses.map((s) => s.kind)).toEqual(["claude-settings"]);
 	});
 
 	test("returns opencode-config for opencode", async () => {
-		const { getBackupStatus } = await import("@/configure.js");
+		const { getBackupStatus } = await import("@/lib/configure.js");
 		const statuses = getBackupStatus("opencode");
 		expect(statuses.map((s) => s.kind)).toEqual(["opencode-config"]);
 	});
 
 	test("returns codex-config for codex", async () => {
-		const { getBackupStatus } = await import("@/configure.js");
+		const { getBackupStatus } = await import("@/lib/configure.js");
 		const statuses = getBackupStatus("codex");
 		expect(statuses.map((s) => s.kind)).toEqual(["codex-config"]);
 	});
@@ -408,7 +408,7 @@ describe("getBackupStatus", () => {
 		mkdirSync(join(tempDir, ".config", "opencode"), { recursive: true });
 		writeFileSync(join(tempDir, ".config", "opencode", "opencode.json"), "{}");
 
-		const { getBackupStatus } = await import("@/configure.js");
+		const { getBackupStatus } = await import("@/lib/configure.js");
 		const [status] = getBackupStatus("opencode");
 		expect(status?.hasSource).toBe(true);
 		expect(status?.hasBackup).toBe(false);
@@ -424,7 +424,7 @@ describe("restoreTool", () => {
 		writeFileSync(livePath, '{"marker":"live"}');
 		writeFileSync(backupPath, '{"marker":"backup"}');
 
-		const { restoreTool } = await import("@/configure.js");
+		const { restoreTool } = await import("@/lib/configure.js");
 		const result = restoreTool("claude-code");
 
 		expect(result.status).toBe("restored");
@@ -443,7 +443,7 @@ describe("restoreTool", () => {
 		writeFileSync(backupPath, '{"marker":"backup"}');
 		writeFileSync(join(dir, "CLAUDE.md"), "user notes");
 
-		const { restoreTool } = await import("@/configure.js");
+		const { restoreTool } = await import("@/lib/configure.js");
 		restoreTool("claude-code");
 
 		expect(readFileSync(join(dir, "CLAUDE.md"), "utf-8")).toBe("user notes");
@@ -456,7 +456,7 @@ describe("restoreTool", () => {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(backupPath, '{"marker":"backup"}');
 
-		const { restoreTool } = await import("@/configure.js");
+		const { restoreTool } = await import("@/lib/configure.js");
 		const result = restoreTool("opencode");
 
 		expect(result.status).toBe("restored");
@@ -465,7 +465,7 @@ describe("restoreTool", () => {
 	});
 
 	test("returns no-backup status when backup missing", async () => {
-		const { restoreTool } = await import("@/configure.js");
+		const { restoreTool } = await import("@/lib/configure.js");
 		const result = restoreTool("claude-code");
 
 		expect(result.status).toBe("no-backup");
@@ -482,7 +482,7 @@ describe("restoreTool", () => {
 		writeFileSync(livePath, 'marker = "live"\n');
 		writeFileSync(backupPath, 'marker = "backup"\n');
 
-		const { restoreTool } = await import("@/configure.js");
+		const { restoreTool } = await import("@/lib/configure.js");
 		const result = restoreTool("codex");
 
 		expect(result.status).toBe("restored");
@@ -493,7 +493,7 @@ describe("restoreTool", () => {
 
 describe("configureClaudeCode with manual credentials", () => {
 	test("uses the supplied baseUrl and model verbatim when no v1 suffix", async () => {
-		const { configureClaudeCode } = await import("@/configure.js");
+		const { configureClaudeCode } = await import("@/lib/configure.js");
 		configureClaudeCode({
 			apiKey: "sk-user",
 			baseUrl: "https://example.com/api",
@@ -512,7 +512,7 @@ describe("configureClaudeCode with manual credentials", () => {
 	});
 
 	test("strips trailing v1 from baseUrl", async () => {
-		const { configureClaudeCode } = await import("@/configure.js");
+		const { configureClaudeCode } = await import("@/lib/configure.js");
 		configureClaudeCode({
 			apiKey: "k",
 			baseUrl: "https://example.com/v1",
@@ -526,7 +526,7 @@ describe("configureClaudeCode with manual credentials", () => {
 	});
 
 	test("strips trailing v1/ from baseUrl", async () => {
-		const { configureClaudeCode } = await import("@/configure.js");
+		const { configureClaudeCode } = await import("@/lib/configure.js");
 		configureClaudeCode({
 			apiKey: "k",
 			baseUrl: "https://example.com/v1/",
@@ -540,7 +540,7 @@ describe("configureClaudeCode with manual credentials", () => {
 	});
 
 	test("only strips the trailing v1 segment", async () => {
-		const { configureClaudeCode } = await import("@/configure.js");
+		const { configureClaudeCode } = await import("@/lib/configure.js");
 		configureClaudeCode({
 			apiKey: "k",
 			baseUrl: "https://example.com/api/v1",
@@ -556,7 +556,7 @@ describe("configureClaudeCode with manual credentials", () => {
 
 describe("configureOpenCode with manual credentials", () => {
 	test("uses the supplied baseUrl and model when v1 already present", async () => {
-		const { configureOpenCode } = await import("@/configure.js");
+		const { configureOpenCode } = await import("@/lib/configure.js");
 		configureOpenCode({
 			apiKey: "sk-user",
 			baseUrl: "https://example.com/v1",
@@ -577,7 +577,7 @@ describe("configureOpenCode with manual credentials", () => {
 	});
 
 	test("preserves trailing v1/", async () => {
-		const { configureOpenCode } = await import("@/configure.js");
+		const { configureOpenCode } = await import("@/lib/configure.js");
 		configureOpenCode({
 			apiKey: "k",
 			baseUrl: "https://example.com/v1/",
@@ -596,7 +596,7 @@ describe("configureOpenCode with manual credentials", () => {
 	});
 
 	test("appends /v1 when URL has no trailing slash", async () => {
-		const { configureOpenCode } = await import("@/configure.js");
+		const { configureOpenCode } = await import("@/lib/configure.js");
 		configureOpenCode({
 			apiKey: "k",
 			baseUrl: "https://example.com",
@@ -615,7 +615,7 @@ describe("configureOpenCode with manual credentials", () => {
 	});
 
 	test("appends v1 when URL ends with a trailing slash", async () => {
-		const { configureOpenCode } = await import("@/configure.js");
+		const { configureOpenCode } = await import("@/lib/configure.js");
 		configureOpenCode({
 			apiKey: "k",
 			baseUrl: "https://example.com/",

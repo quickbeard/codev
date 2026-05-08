@@ -1,7 +1,7 @@
 import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
-import { runUpload, type UploadSummary } from "@/upload.js";
+import { runUpload, type UploadSummary } from "@/lib/upload.js";
 
 type Phase = "running" | "done" | "error";
 

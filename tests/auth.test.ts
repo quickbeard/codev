@@ -28,8 +28,8 @@ import {
 	logout,
 	saveApiKey,
 	saveCodevConfig,
-} from "@/auth.js";
-import { BASE_URL } from "@/const.js";
+} from "@/lib/auth.js";
+import { BASE_URL } from "@/lib/const.js";
 
 const SSO_BASE_URL = `${BASE_URL}sso-wrapper`;
 const REVOCATION_ENDPOINT = `${SSO_BASE_URL}/revoke`;

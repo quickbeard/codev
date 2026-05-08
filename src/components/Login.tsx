@@ -1,7 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { login, saveApiKey } from "@/auth.js";
-import { fetchApiKey } from "@/proxy.js";
+import { login, saveApiKey } from "@/lib/auth.js";
+import { fetchApiKey } from "@/lib/proxy.js";
 
 interface LoginProps {
 	onDone: (apiKey: string) => void;

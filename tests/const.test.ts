@@ -7,7 +7,7 @@ import {
 	SUPABASE_ANON_KEY,
 	SUPABASE_PROXY_URL,
 	SUPABASE_URL,
-} from "@/const.js";
+} from "@/lib/const.js";
 
 let tempDir: string;
 let homedirSpy: ReturnType<typeof spyOn>;

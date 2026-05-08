@@ -11,7 +11,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import TOML from "@iarna/toml";
-import { BASE_URL } from "@/const.js";
+import { BASE_URL } from "@/lib/const.js";
 
 export type Tool = "claude-code" | "codex" | "opencode";
 export type BackupKind = "claude-settings" | "codex-config" | "opencode-config";

@@ -15,12 +15,12 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { loadAuth, login } from "@/auth.js";
-import { runExport } from "@/export.js";
-import { projectLogsDir } from "@/paths.js";
+import { loadAuth, login } from "@/lib/auth.js";
+import { runExport } from "@/lib/export.js";
+import { projectLogsDir } from "@/lib/paths.js";
+import { fetchSupabaseSession } from "@/lib/proxy.js";
+import { getSupabaseConfig, type SupabaseConfig } from "@/lib/supabase.js";
 import { AGENTS } from "@/providers/types.js";
-import { fetchSupabaseSession } from "@/proxy.js";
-import { getSupabaseConfig, type SupabaseConfig } from "@/supabase.js";
 
 export interface UploadOptions {
 	cwd?: string;

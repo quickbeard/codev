@@ -2,8 +2,8 @@ import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
 import { TaskList } from "@/components/TaskList.js";
-import type { Tool } from "@/configure.js";
-import { detectInstalledViaNpm, installAndVerify, PKG } from "@/npm.js";
+import type { Tool } from "@/lib/configure.js";
+import { detectInstalledViaNpm, installAndVerify, PKG } from "@/lib/npm.js";
 
 const ALL_TOOLS: Tool[] = ["claude-code", "codex", "opencode"];
 

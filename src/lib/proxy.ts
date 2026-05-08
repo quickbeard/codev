@@ -1,5 +1,5 @@
-import type { CodevConfig } from "@/auth.js";
-import { BASE_URL, SUPABASE_PROXY_URL } from "@/const.js";
+import type { CodevConfig } from "@/lib/auth.js";
+import { BASE_URL, SUPABASE_PROXY_URL } from "@/lib/const.js";
 
 interface ExchangeResponse {
 	api_key: string;

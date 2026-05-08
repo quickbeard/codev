@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import { VERSION } from "@/const.js";
+import { VERSION } from "@/lib/const.js";
 
 const LOGO = [
 	" ██████╗ ██████╗ ██████╗ ███████╗██╗   ██╗",
