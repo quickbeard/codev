@@ -40,14 +40,16 @@ export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
 				return (
 					<Box key={tool} flexDirection="column">
 						<Text>{`• ${TOOL_LABEL[tool]}`}</Text>
-						<Text>
-							{`  Replaces: ${status.sourcePath}${status.hasSource ? " (exists)" : " (new)"}`}
-						</Text>
-						{status.hasSource && (
+						<Text>{`  Path: ${status.sourcePath}`}</Text>
+						{status.hasBackup ? (
 							<Text>
-								{`  Backup:   ${status.sourcePath} → ${status.backupPath}`}
+								{`  Backup: ${status.backupPath} already exists and will not be overwritten.`}
 							</Text>
-						)}
+						) : status.hasSource ? (
+							<Text>
+								{`  Backup: ${status.sourcePath} → ${status.backupPath}`}
+							</Text>
+						) : null}
 						<Text>
 							{"  You can revert to your previous settings by running "}
 							<Text color="cyan">{RESTORE_CMD[tool]}</Text>
