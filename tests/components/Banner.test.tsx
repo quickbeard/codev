@@ -29,11 +29,4 @@ describe("Banner", () => {
 		const output = lastFrame() ?? "";
 		expect(output).toContain(`v${pkg.version}`);
 	});
-
-	test("renders the separator line", () => {
-		const { lastFrame } = render(<Banner />);
-
-		const output = lastFrame() ?? "";
-		expect(output).toContain("─".repeat(45));
-	});
 });

@@ -82,7 +82,7 @@ export function configurationMethodTitle(readOnly = false) {
 	return (
 		<Text bold>
 			{"Choose configuration method "}
-			{!readOnly && <Text dimColor>(↑/↓ to move, press Enter to confirm)</Text>}
+			{!readOnly && <Text dimColor>(↑/↓ to move, Enter to confirm)</Text>}
 		</Text>
 	);
 }
