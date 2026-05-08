@@ -375,6 +375,63 @@ describe("runUpload", () => {
 		}
 	});
 
+	test("per-file 401 stays in summary.errors and does not trigger refresh-and-retry", async () => {
+		writeAuth();
+		writeLog("a.md", "hello");
+
+		let configCalls = 0;
+		let presignCalls = 0;
+		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+			input: string | URL | Request,
+		) => {
+			const url =
+				typeof input === "string" || input instanceof URL
+					? String(input)
+					: input.url;
+			if (url.includes("/codev-proxy/config")) {
+				configCalls++;
+				return new Response("{}", {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (url.includes("/api/codev/supabase/exchange")) {
+				return new Response(
+					JSON.stringify({
+						access_token: "supabase-upload-token",
+						user: { id: "u", email: "u@example.com" },
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/rest/v1/conversations")) {
+				return new Response("[]", {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (url.includes("/functions/v1/presign-upload")) {
+				presignCalls++;
+				return new Response("denied", { status: 401 });
+			}
+			return new Response("not found", { status: 404 });
+		}) as typeof fetch);
+
+		try {
+			const summary = await runUpload();
+			// The 401 was caught inside the per-file try/catch — recorded as a
+			// failure on the candidate, not bubbled out to trigger a refresh.
+			expect(summary.uploaded).toBe(0);
+			expect(summary.failed).toBe(1);
+			expect(summary.errors).toHaveLength(1);
+			expect(summary.errors[0]?.message).toMatch(
+				/presign-upload failed \(401\)/,
+			);
+			expect(presignCalls).toBe(1);
+			expect(configCalls).toBe(0);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
 	test("propagates the second error if refresh-and-retry also fails", async () => {
 		writeAuth();
 		writeLog("doomed.md", "hello");
