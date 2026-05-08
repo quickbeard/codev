@@ -6,6 +6,7 @@ import { AuthMethod, authMethodTitle } from "@/components/AuthMethod.js";
 import { Banner } from "@/components/Banner.js";
 import { Configure, configureTitle } from "@/components/Configure.js";
 import { Confirm, confirmTitle } from "@/components/Confirm.js";
+import { FetchApiKey, fetchApiKeyTitle } from "@/components/FetchApiKey.js";
 import { Frame } from "@/components/Frame.js";
 import { Install } from "@/components/Install.js";
 import { Login, loginTitle } from "@/components/Login.js";
@@ -16,33 +17,59 @@ import {
 } from "@/components/ManualCredentials.js";
 import { Step } from "@/components/Step.js";
 import { ToolSelect, toolSelectTitle } from "@/components/ToolSelect.js";
-import { type ApiKeyCreds, loadApiKey, saveApiKey } from "@/lib/auth.js";
+import {
+	type ApiKeyCreds,
+	type AuthData,
+	loadApiKey,
+	saveApiKey,
+} from "@/lib/auth.js";
 import type { Credentials, Tool } from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
 
 type Phase =
 	| "select"
 	| "confirm"
+	| "login"
 	| "installing"
 	| "install-failed"
 	| "validating-existing"
-	| "auth-method"
-	| "login"
+	| "key-choice"
+	| "fetching-key"
 	| "manual-creds"
 	| "configuring"
 	| "configure-failed"
 	| "done";
 
-const POST_VALIDATE: Phase[] = [
-	"auth-method",
-	"login",
+const POST_LOGIN: Phase[] = [
+	"installing",
+	"install-failed",
+	"validating-existing",
+	"key-choice",
+	"fetching-key",
 	"manual-creds",
 	"configuring",
 	"configure-failed",
 	"done",
 ];
-const POST_AUTH_METHOD: Phase[] = [
-	"login",
+const POST_INSTALL: Phase[] = [
+	"validating-existing",
+	"key-choice",
+	"fetching-key",
+	"manual-creds",
+	"configuring",
+	"configure-failed",
+	"done",
+];
+const POST_VALIDATE: Phase[] = [
+	"key-choice",
+	"fetching-key",
+	"manual-creds",
+	"configuring",
+	"configure-failed",
+	"done",
+];
+const POST_KEY_CHOICE: Phase[] = [
+	"fetching-key",
 	"manual-creds",
 	"configuring",
 	"configure-failed",
@@ -54,9 +81,9 @@ export function InstallApp() {
 	const { exit } = useApp();
 	const [step, setStep] = useState<Phase>("select");
 	const [tools, setTools] = useState<Tool[]>([]);
+	const [auth, setAuth] = useState<AuthData | null>(null);
 	const [authMethod, setAuthMethod] = useState<AuthMethodChoice | null>(null);
 	const [creds, setCreds] = useState<Credentials | null>(null);
-	const [fallenBack, setFallenBack] = useState(false);
 	const [savedCreds, setSavedCreds] = useState<ApiKeyCreds | null>(null);
 	const [existingValid, setExistingValid] = useState(false);
 	const [existingMessage, setExistingMessage] = useState<string | null>(null);
@@ -72,10 +99,15 @@ export function InstallApp() {
 				exit();
 				return;
 			}
-			setStep("installing");
+			setStep("login");
 		},
 		[exit],
 	);
+
+	const handleLoginDone = useCallback((authData: AuthData) => {
+		setAuth(authData);
+		setStep("installing");
+	}, []);
 
 	// On failure we set a terminal `*-failed` phase and stop advancing. The
 	// step's error frame stays rendered so the user can read it; exiting the
@@ -88,7 +120,7 @@ export function InstallApp() {
 		}
 		const saved = loadApiKey();
 		if (!saved) {
-			setStep("auth-method");
+			setStep("key-choice");
 			return;
 		}
 		setSavedCreds(saved);
@@ -107,7 +139,7 @@ export function InstallApp() {
 				setExistingMessage(`Could not verify saved API key: ${err.message}`);
 			})
 			.finally(() => {
-				setStep("auth-method");
+				setStep("key-choice");
 			});
 	}, []);
 
@@ -124,18 +156,17 @@ export function InstallApp() {
 				setStep("configuring");
 				return;
 			}
-			setStep(choice === "sso" ? "login" : "manual-creds");
+			setStep(choice === "new" ? "fetching-key" : "manual-creds");
 		},
 		[savedCreds],
 	);
 
-	const handleLoginDone = useCallback((key: string) => {
+	const handleFetchKeyDone = useCallback((key: string) => {
 		setCreds({ apiKey: key });
 		setStep("configuring");
 	}, []);
 
-	const handleLoginFallback = useCallback(() => {
-		setFallenBack(true);
+	const handleFetchKeyFallback = useCallback(() => {
 		setStep("manual-creds");
 	}, []);
 
@@ -185,6 +216,11 @@ export function InstallApp() {
 					</Step>
 				)}
 				{step !== "select" && step !== "confirm" && (
+					<Step active={step === "login"} title={loginTitle()}>
+						<Login onDone={handleLoginDone} />
+					</Step>
+				)}
+				{POST_LOGIN.includes(step) && (
 					<Step
 						active={step === "installing"}
 						title={<Text bold>Installing packages</Text>}
@@ -192,48 +228,52 @@ export function InstallApp() {
 						<Install tools={tools} onDone={handleInstallDone} />
 					</Step>
 				)}
-				{(step === "validating-existing" || POST_VALIDATE.includes(step)) &&
-					savedCreds && (
-						<Step
-							active={step === "validating-existing"}
-							title={<Text bold>Checking saved API key</Text>}
-						>
-							{step === "validating-existing" ? (
-								<Box>
-									<Text color="cyan">
-										<Spinner />
-									</Text>
-									<Text> Verifying with gateway...</Text>
-								</Box>
-							) : (
-								<Text dimColor>
-									{existingValid
-										? "Saved API key is valid."
-										: (existingMessage ?? "")}
+				{POST_INSTALL.includes(step) && savedCreds && (
+					<Step
+						active={step === "validating-existing"}
+						title={<Text bold>Checking saved API key</Text>}
+					>
+						{step === "validating-existing" ? (
+							<Box>
+								<Text color="cyan">
+									<Spinner />
 								</Text>
-							)}
-						</Step>
-					)}
+								<Text> Verifying with gateway...</Text>
+							</Box>
+						) : (
+							<Text dimColor>
+								{existingValid
+									? "Saved API key is valid."
+									: (existingMessage ?? "")}
+							</Text>
+						)}
+					</Step>
+				)}
 				{POST_VALIDATE.includes(step) && (
 					<Step
-						active={step === "auth-method"}
-						title={authMethodTitle(step !== "auth-method")}
+						active={step === "key-choice"}
+						title={authMethodTitle(step !== "key-choice")}
 					>
 						<AuthMethod
 							onSelect={handleAuthMethod}
-							readOnly={step !== "auth-method"}
+							readOnly={step !== "key-choice"}
 							selected={authMethod}
 							hasExisting={existingValid}
 						/>
 					</Step>
 				)}
-				{POST_AUTH_METHOD.includes(step) && authMethod === "sso" && (
-					<Step active={step === "login"} title={loginTitle()}>
-						<Login onDone={handleLoginDone} onFallback={handleLoginFallback} />
+				{POST_KEY_CHOICE.includes(step) && authMethod === "new" && auth && (
+					<Step active={step === "fetching-key"} title={fetchApiKeyTitle()}>
+						<FetchApiKey
+							auth={auth}
+							onDone={handleFetchKeyDone}
+							onFallback={handleFetchKeyFallback}
+						/>
 					</Step>
 				)}
-				{POST_AUTH_METHOD.includes(step) &&
-					(authMethod === "manual" || fallenBack) && (
+				{POST_KEY_CHOICE.includes(step) &&
+					(authMethod === "manual" ||
+						(authMethod === "new" && step === "manual-creds")) && (
 						<Step
 							active={step === "manual-creds"}
 							title={manualCredentialsTitle()}

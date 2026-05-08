@@ -38,10 +38,18 @@ function stubExecFile(
 	}) as unknown as typeof child_process.execFile);
 }
 
-async function advanceFromSelectToInstalling(stdin: {
-	write: (s: string) => void;
-}) {
+function fakeAuth(): auth.AuthData {
+	return {
+		access_token: "access-xyz",
+		id_token: "id-xyz",
+		expires_at: Date.now() + 3_600_000,
+		user: { sub: "u", email: "test@example.com", displayName: "Test" },
+	};
+}
+
+async function advanceThroughConfirm(stdin: { write: (s: string) => void }) {
 	// Select Claude Code, confirm selection, accept backup-warning confirm.
+	// In the new flow this lands on LOGIN, not Install.
 	stdin.write(" ");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
@@ -50,7 +58,7 @@ async function advanceFromSelectToInstalling(stdin: {
 	await new Promise((r) => setTimeout(r, 30));
 }
 
-async function advanceFromSelectToInstallingCodex(stdin: {
+async function advanceThroughConfirmCodex(stdin: {
 	write: (s: string) => void;
 }) {
 	// Move cursor to the second option (Codex), select, confirm, accept warning.
@@ -64,18 +72,20 @@ async function advanceFromSelectToInstallingCodex(stdin: {
 	await new Promise((r) => setTimeout(r, 30));
 }
 
-async function pickSso(stdin: { write: (s: string) => void }) {
-	// Wait for install to settle and the auth-method screen to appear, then
-	// press Enter to pick the default "Login to SSO" option.
-	await new Promise((r) => setTimeout(r, 100));
+async function pickNewKey(stdin: { write: (s: string) => void }) {
+	// Wait for login + install + validation to settle and the key-choice screen
+	// to appear, then press Enter on the default first option ("Get a new API Key"
+	// when no saved key exists).
+	await new Promise((r) => setTimeout(r, 200));
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
 
 async function pickManual(stdin: { write: (s: string) => void }) {
-	// Wait for install to settle, move cursor to "I have my own API Key", Enter.
-	await new Promise((r) => setTimeout(r, 100));
-	stdin.write("[B"); // down arrow
+	// Wait for login + install + validation to settle, move cursor to "I have my
+	// own API Key", Enter.
+	await new Promise((r) => setTimeout(r, 200));
+	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
@@ -114,7 +124,7 @@ afterEach(() => {
 	mock.restore();
 });
 
-// Default to "no saved API key" for tests that exercise the SSO/manual path —
+// Default to "no saved API key" for tests that exercise the new/manual paths —
 // otherwise InstallApp would discover whatever is in the dev's real
 // ~/.codev/auth.json and route through the validating-existing branch.
 function stubNoSavedKey() {
@@ -126,7 +136,24 @@ describe("InstallApp fail-stop invariant", () => {
 		stubNoSavedKey();
 	});
 
-	test("install failure does not advance to Login step", async () => {
+	test("login failure halts the flow before install runs", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		spyOn(auth, "login").mockImplementation(() =>
+			Promise.reject(new Error("Connection refused")),
+		);
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin);
+		await new Promise((r) => setTimeout(r, 200));
+
+		const history = allFrames(frames);
+		expect(history).toContain("Login failed: Connection refused");
+		expect(history).not.toContain("Installing packages");
+		expect(history).not.toContain("Configure tools");
+	});
+
+	test("install failure does not advance to key-choice", async () => {
+		spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		stubExecFile((file, args) => {
 			if (file === "npm" && args[0] === "install") {
 				const err = Object.assign(new Error("spawn npm ENOENT"), {
@@ -138,51 +165,46 @@ describe("InstallApp fail-stop invariant", () => {
 		});
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstalling(stdin);
-		await new Promise((r) => setTimeout(r, 200));
+		await advanceThroughConfirm(stdin);
+		await new Promise((r) => setTimeout(r, 300));
 
 		const history = allFrames(frames);
 		expect(history).toContain("Failed to install");
-		expect(history).not.toContain("Login to SSO");
+		expect(history).not.toContain("Get a new API Key");
 		expect(history).not.toContain("Configure tools");
 	});
 
-	test("login failure does not advance to Configure step", async () => {
+	test("fetch-key failure halts the flow before configure", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockImplementation(() =>
-			Promise.reject(new Error("Connection refused")),
+		spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		spyOn(proxy, "fetchApiKey").mockImplementation(() =>
+			Promise.reject(new Error("Proxy /auth/exchange failed (502): boom")),
 		);
+		const configureSpy = spyOn(configure, "configureClaudeCode");
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstalling(stdin);
-		await pickSso(stdin);
+		await advanceThroughConfirm(stdin);
+		await pickNewKey(stdin);
 		await new Promise((r) => setTimeout(r, 200));
 
 		const history = allFrames(frames);
-		expect(history).toContain("Login to SSO");
-		expect(history).toContain("Login failed: Connection refused");
+		expect(history).toContain("Failed to fetch API key");
+		expect(history).toContain("Press Enter to retry, Ctrl-C to quit");
 		expect(history).not.toContain("Configure tools");
-		expect(history).not.toContain("Happy coding");
+		expect(configureSpy).not.toHaveBeenCalled();
 	});
 
 	test("configure failure does not reach the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3_600_000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
+		spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
 		spyOn(configure, "configureClaudeCode").mockImplementation(() => {
 			throw new Error("disk full");
 		});
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstalling(stdin);
-		await pickSso(stdin);
+		await advanceThroughConfirm(stdin);
+		await pickNewKey(stdin);
 		await new Promise((r) => setTimeout(r, 300));
 
 		const history = allFrames(frames);
@@ -193,14 +215,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("successful flow reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3_600_000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
+		spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
 		const configureSpy = spyOn(
 			configure,
@@ -214,8 +229,8 @@ describe("InstallApp fail-stop invariant", () => {
 		]);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstalling(stdin);
-		await pickSso(stdin);
+		await advanceThroughConfirm(stdin);
+		await pickNewKey(stdin);
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);
@@ -225,14 +240,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("Codex selection routes to configureCodex and reaches done", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3_600_000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
+		spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-codex-123");
 		const configureCodexSpy = spyOn(
 			configure,
@@ -248,8 +256,8 @@ describe("InstallApp fail-stop invariant", () => {
 		configureCodexSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstallingCodex(stdin);
-		await pickSso(stdin);
+		await advanceThroughConfirmCodex(stdin);
+		await pickNewKey(stdin);
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);
@@ -261,11 +269,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("manual-credentials flow reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		// bun's spyOn keeps call counts across tests in the same file, so re-
-		// stub the SSO deps and then reset their counters before asserting.
-		const loginSpy = spyOn(auth, "login").mockImplementation(
-			() => new Promise(() => {}),
-		);
+		const loginSpy = spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey").mockImplementation(
 			() => new Promise(() => {}),
 		);
@@ -284,7 +288,7 @@ describe("InstallApp fail-stop invariant", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstalling(stdin);
+		await advanceThroughConfirm(stdin);
 		await pickManual(stdin);
 		await typeManualCreds(
 			stdin,
@@ -297,7 +301,7 @@ describe("InstallApp fail-stop invariant", () => {
 		const history = allFrames(frames);
 		expect(history).toContain("Enter API credentials");
 		expect(history).toContain("Happy coding");
-		expect(loginSpy).not.toHaveBeenCalled();
+		expect(loginSpy).toHaveBeenCalledTimes(1);
 		expect(fetchApiKeySpy).not.toHaveBeenCalled();
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-manual-123",
@@ -306,16 +310,9 @@ describe("InstallApp fail-stop invariant", () => {
 		});
 	});
 
-	test("SSO empty-key fallback into manual credentials reaches the done screen", async () => {
+	test("empty-key retry then second empty falls back into manual creds", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		const loginSpy = spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3_600_000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
+		spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey").mockResolvedValue("");
 		const configureSpy = spyOn(
 			configure,
@@ -327,28 +324,33 @@ describe("InstallApp fail-stop invariant", () => {
 				backupPath: "/tmp/x.b",
 			},
 		]);
-		// bun's spyOn keeps call counts across tests in the same file.
-		loginSpy.mockClear();
 		fetchApiKeySpy.mockClear();
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstalling(stdin);
-		await pickSso(stdin);
+		await advanceThroughConfirm(stdin);
+		await pickNewKey(stdin);
 
-		// Wait for SSO to "succeed" but with an empty api_key — Login should
-		// render the fallback notice and prompt instead of advancing to Configure.
-		await new Promise((r) => setTimeout(r, 150));
+		// First empty result — retry prompt should render, no fallback yet.
+		await new Promise((r) => setTimeout(r, 200));
+		expect(allFrames(frames)).toContain("Gateway returned an empty API key.");
+		expect(allFrames(frames)).toContain("Press Enter to retry");
+		expect(allFrames(frames)).not.toContain(
+			"Press Enter to enter credentials manually",
+		);
+
+		// Press Enter to retry; second attempt also returns empty.
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 200));
 		expect(allFrames(frames)).toContain(
-			"SSO succeeded but the gateway returned an empty API key.",
+			"Gateway returned an empty API key again.",
 		);
 		expect(allFrames(frames)).toContain(
 			"Press Enter to enter credentials manually",
 		);
 		expect(configureSpy).not.toHaveBeenCalled();
 
-		// Press Enter to acknowledge the fallback; the manual-credentials Step
-		// should mount (without the user needing to revisit auth-method).
+		// Press Enter to drop into manual creds.
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 100));
 		expect(allFrames(frames)).toContain("Enter API credentials");
@@ -363,8 +365,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
-		expect(loginSpy).toHaveBeenCalledTimes(1);
-		expect(fetchApiKeySpy).toHaveBeenCalledTimes(1);
+		expect(fetchApiKeySpy).toHaveBeenCalledTimes(2);
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-fallback-123",
@@ -373,16 +374,9 @@ describe("InstallApp fail-stop invariant", () => {
 		});
 	});
 
-	test("SSO retry after failure reaches the done screen", async () => {
+	test("fetch-key retry after failure reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		const loginSpy = spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3_600_000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
+		spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey")
 			.mockImplementationOnce(() =>
 				Promise.reject(new Error("Proxy /auth/exchange failed (502): boom")),
@@ -398,33 +392,69 @@ describe("InstallApp fail-stop invariant", () => {
 				backupPath: "/tmp/x.b",
 			},
 		]);
-		// bun's spyOn keeps call counts across tests in the same file.
-		loginSpy.mockClear();
 		fetchApiKeySpy.mockClear();
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstalling(stdin);
-		await pickSso(stdin);
+		await advanceThroughConfirm(stdin);
+		await pickNewKey(stdin);
 
-		// Wait for the first attempt to reject and the retry prompt to render.
-		await new Promise((r) => setTimeout(r, 150));
+		// First attempt rejects — retry prompt renders.
+		await new Promise((r) => setTimeout(r, 200));
 		expect(allFrames(frames)).toContain(
-			"Login failed: Proxy /auth/exchange failed",
+			"Failed to fetch API key: Proxy /auth/exchange failed",
 		);
 		expect(allFrames(frames)).toContain("Press Enter to retry, Ctrl-C to quit");
 		expect(configureSpy).not.toHaveBeenCalled();
 
-		// Press Enter to retry; the second attempt resolves with sk-retry-ok.
+		// Press Enter to retry; second attempt resolves.
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
-		expect(loginSpy).toHaveBeenCalledTimes(2);
 		expect(fetchApiKeySpy).toHaveBeenCalledTimes(2);
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 		expect(configureSpy).toHaveBeenCalledWith({ apiKey: "sk-retry-ok" });
+	});
+
+	test("login retry after failure reaches the done screen", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		const loginSpy = spyOn(auth, "login")
+			.mockImplementationOnce(() => Promise.reject(new Error("network down")))
+			.mockImplementationOnce(() => Promise.resolve(fakeAuth()));
+		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		const configureSpy = spyOn(
+			configure,
+			"configureClaudeCode",
+		).mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.b",
+			},
+		]);
+		loginSpy.mockClear();
+		configureSpy.mockClear();
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin);
+
+		// Wait for the first login attempt to reject.
+		await new Promise((r) => setTimeout(r, 200));
+		expect(allFrames(frames)).toContain("Login failed: network down");
+		expect(allFrames(frames)).toContain("Press Enter to retry, Ctrl-C to quit");
+		expect(configureSpy).not.toHaveBeenCalled();
+
+		// Press Enter to retry login.
+		stdin.write("\r");
+		await pickNewKey(stdin);
+		await new Promise((r) => setTimeout(r, 1_300));
+
+		const history = allFrames(frames);
+		expect(history).toContain("Happy coding");
+		expect(loginSpy).toHaveBeenCalledTimes(2);
+		expect(configureSpy).toHaveBeenCalledTimes(1);
 	});
 });
 
@@ -437,9 +467,7 @@ describe("InstallApp existing-key path", () => {
 			model: "saved-model",
 		});
 		const validateSpy = spyOn(proxy, "validateApiKey").mockResolvedValue(true);
-		const loginSpy = spyOn(auth, "login").mockImplementation(
-			() => new Promise(() => {}),
-		);
+		const loginSpy = spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey").mockImplementation(
 			() => new Promise(() => {}),
 		);
@@ -460,14 +488,14 @@ describe("InstallApp existing-key path", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstalling(stdin);
-		// Wait for install to settle, validation to resolve, and auth-method
-		// to render with the new option as the default cursor.
-		await new Promise((r) => setTimeout(r, 200));
+		await advanceThroughConfirm(stdin);
+		// Wait for login + install + validation to settle and key-choice to render
+		// with the new option as the default cursor.
+		await new Promise((r) => setTimeout(r, 300));
 
 		const beforeChoice = allFrames(frames);
-		expect(beforeChoice).toContain("Use saved API Key");
-		expect(beforeChoice).toContain("Login to SSO to get new API Key");
+		expect(beforeChoice).toContain("Reuse existing API Key");
+		expect(beforeChoice).toContain("Get a new API Key");
 
 		// Default cursor is on the existing option — Enter selects it directly.
 		stdin.write("\r");
@@ -475,7 +503,7 @@ describe("InstallApp existing-key path", () => {
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
-		expect(loginSpy).not.toHaveBeenCalled();
+		expect(loginSpy).toHaveBeenCalledTimes(1);
 		expect(fetchApiKeySpy).not.toHaveBeenCalled();
 		expect(validateSpy).toHaveBeenCalledTimes(1);
 		expect(validateSpy).toHaveBeenCalledWith(
@@ -493,16 +521,17 @@ describe("InstallApp existing-key path", () => {
 		stubExecFile(() => ({ stdout: "ok" }));
 		spyOn(auth, "loadApiKey").mockReturnValue({ apiKey: "sk-stale" });
 		spyOn(proxy, "validateApiKey").mockResolvedValue(false);
-		spyOn(auth, "login").mockImplementation(() => new Promise(() => {}));
+		spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		spyOn(proxy, "fetchApiKey").mockImplementation(() => new Promise(() => {}));
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstalling(stdin);
-		await new Promise((r) => setTimeout(r, 200));
+		await advanceThroughConfirm(stdin);
+		await new Promise((r) => setTimeout(r, 300));
 
 		const history = allFrames(frames);
 		expect(history).toContain("Saved API key is no longer valid");
-		expect(history).not.toContain("Use saved API Key");
-		expect(history).toContain("Login to SSO to get new API Key");
+		expect(history).not.toContain("Reuse existing API Key");
+		expect(history).toContain("Get a new API Key");
 	});
 
 	test("validation network error is reported and option is hidden", async () => {
@@ -511,15 +540,16 @@ describe("InstallApp existing-key path", () => {
 		spyOn(proxy, "validateApiKey").mockRejectedValue(
 			new Error("fetch failed: ECONNREFUSED"),
 		);
-		spyOn(auth, "login").mockImplementation(() => new Promise(() => {}));
+		spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		spyOn(proxy, "fetchApiKey").mockImplementation(() => new Promise(() => {}));
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceFromSelectToInstalling(stdin);
-		await new Promise((r) => setTimeout(r, 200));
+		await advanceThroughConfirm(stdin);
+		await new Promise((r) => setTimeout(r, 300));
 
 		const history = allFrames(frames);
 		expect(history).toContain("Could not verify saved API key");
 		expect(history).toContain("ECONNREFUSED");
-		expect(history).not.toContain("Use saved API Key");
+		expect(history).not.toContain("Reuse existing API Key");
 	});
 });

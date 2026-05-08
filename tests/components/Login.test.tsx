@@ -2,11 +2,19 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
 import { Login } from "@/components/Login.js";
 import * as auth from "@/lib/auth.js";
-import * as proxy from "@/lib/proxy.js";
 
 afterEach(() => {
 	cleanup();
 });
+
+function fakeAuth(): auth.AuthData {
+	return {
+		access_token: "access-xyz",
+		id_token: "id-xyz",
+		expires_at: Date.now() + 3_600_000,
+		user: { sub: "u", email: "test@example.com", displayName: "Test" },
+	};
+}
 
 describe("Login", () => {
 	test("shows 'Press Enter' when onReady is called", async () => {
@@ -16,7 +24,7 @@ describe("Login", () => {
 		});
 
 		const onDone = mock();
-		const { lastFrame } = render(<Login onDone={onDone} onFallback={mock()} />);
+		const { lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
 
@@ -28,16 +36,11 @@ describe("Login", () => {
 		spyOn(auth, "login").mockImplementation((onLog) => {
 			onLog("Starting SSO login...");
 			onLog("Already logged in as test@example.com");
-			return Promise.resolve({
-				access_token: "t",
-				id_token: "i",
-				expires_at: Date.now() + 3600000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			});
+			return Promise.resolve(fakeAuth());
 		});
 
 		const onDone = mock();
-		const { lastFrame } = render(<Login onDone={onDone} onFallback={mock()} />);
+		const { lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
 
@@ -52,7 +55,7 @@ describe("Login", () => {
 		});
 
 		const onDone = mock();
-		const { lastFrame } = render(<Login onDone={onDone} onFallback={mock()} />);
+		const { lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
 
@@ -70,7 +73,7 @@ describe("Login", () => {
 		});
 
 		const onDone = mock();
-		const { stdin } = render(<Login onDone={onDone} onFallback={mock()} />);
+		const { stdin } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
 
@@ -88,78 +91,59 @@ describe("Login", () => {
 		});
 
 		const onDone = mock();
-		render(<Login onDone={onDone} onFallback={mock()} />);
+		render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
 
 		expect(openBrowserFn).not.toHaveBeenCalled();
 	});
 
-	test("calls onDone with the api key after successful exchange", async () => {
-		spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3600000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-key-123");
+	test("calls onDone with the auth data after a successful login", async () => {
+		const authData = fakeAuth();
+		spyOn(auth, "login").mockImplementation(() => Promise.resolve(authData));
 
 		const onDone = mock();
-		render(<Login onDone={onDone} onFallback={mock()} />);
+		render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 100));
 
 		expect(onDone).toHaveBeenCalledTimes(1);
-		expect(onDone).toHaveBeenCalledWith("sk-test-key-123");
+		expect(onDone).toHaveBeenCalledWith(authData);
 	});
 
-	test("shows error and retry prompt if proxy key exchange fails", async () => {
-		spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3600000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
-		spyOn(proxy, "fetchApiKey").mockRejectedValue(
-			new Error("Proxy /auth/exchange failed (502): boom"),
-		);
+	test("auto-completes silently when login resolves without calling onReady", async () => {
+		// Mirrors the real behavior of auth.login() when loadAuth() returns a
+		// valid cached session: it short-circuits and resolves without invoking
+		// the onReady callback, so no browser prompt should appear.
+		const authData = fakeAuth();
+		spyOn(auth, "login").mockImplementation((onLog) => {
+			onLog(`Already logged in as ${authData.user.email}`);
+			return Promise.resolve(authData);
+		});
 
 		const onDone = mock();
-		const { lastFrame } = render(<Login onDone={onDone} onFallback={mock()} />);
+		const { lastFrame } = render(<Login onDone={onDone} />);
 
-		await new Promise((r) => setTimeout(r, 100));
+		await new Promise((r) => setTimeout(r, 50));
 
 		const output = lastFrame() ?? "";
-		expect(output).toContain("Login failed: Proxy /auth/exchange failed");
-		expect(output).toContain("Press Enter to retry, Ctrl-C to quit");
-		expect(onDone).not.toHaveBeenCalled();
+		expect(output).toContain("Already logged in as test@example.com");
+		expect(output).not.toContain("Press Enter to open the browser");
+		expect(onDone).toHaveBeenCalledTimes(1);
+		expect(onDone).toHaveBeenCalledWith(authData);
 	});
 
 	test("retries on Enter after a failure and succeeds on the second attempt", async () => {
-		const loginSpy = spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3600000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
-		const fetchSpy = spyOn(proxy, "fetchApiKey")
+		const authData = fakeAuth();
+		const loginSpy = spyOn(auth, "login")
 			.mockImplementationOnce(() => Promise.reject(new Error("transient")))
-			.mockImplementationOnce(() => Promise.resolve("sk-retry-ok"));
+			.mockImplementationOnce(() => Promise.resolve(authData));
 		// bun's spyOn retains call counts across tests in the same file; clear
 		// them so the per-test "called twice" assertion counts only this test.
 		loginSpy.mockClear();
-		fetchSpy.mockClear();
 
 		const onDone = mock();
-		const { stdin, lastFrame } = render(
-			<Login onDone={onDone} onFallback={mock()} />,
-		);
+		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 100));
 		expect(lastFrame() ?? "").toContain("Login failed: transient");
@@ -168,46 +152,8 @@ describe("Login", () => {
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 100));
 
-		expect(fetchSpy).toHaveBeenCalledTimes(2);
 		expect(loginSpy).toHaveBeenCalledTimes(2);
-		expect(onDone).toHaveBeenCalledWith("sk-retry-ok");
-	});
-
-	test("shows fallback prompt and calls onFallback on Enter when proxy returns empty key", async () => {
-		spyOn(auth, "login").mockImplementation(() =>
-			Promise.resolve({
-				access_token: "access-xyz",
-				id_token: "id-xyz",
-				expires_at: Date.now() + 3600000,
-				user: { sub: "u", email: "test@example.com", displayName: "Test" },
-			}),
-		);
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("");
-
-		const onDone = mock();
-		const onFallback = mock();
-		const { stdin, lastFrame } = render(
-			<Login onDone={onDone} onFallback={onFallback} />,
-		);
-
-		await new Promise((r) => setTimeout(r, 100));
-
-		const output = lastFrame() ?? "";
-		expect(output).toContain(
-			"SSO succeeded but the gateway returned an empty API key.",
-		);
-		expect(output).toContain(
-			"Press Enter to enter credentials manually, Ctrl-C to quit",
-		);
-		expect(onDone).not.toHaveBeenCalled();
-		expect(onFallback).not.toHaveBeenCalled();
-
-		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 50));
-
-		expect(onFallback).toHaveBeenCalledTimes(1);
-		expect(onDone).not.toHaveBeenCalled();
-		expect(lastFrame() ?? "").not.toContain("Press Enter to enter credentials");
+		expect(onDone).toHaveBeenCalledWith(authData);
 	});
 
 	test("clears the previous error and logs when retrying", async () => {
@@ -222,9 +168,7 @@ describe("Login", () => {
 			});
 
 		const onDone = mock();
-		const { stdin, lastFrame } = render(
-			<Login onDone={onDone} onFallback={mock()} />,
-		);
+		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
 		expect(lastFrame() ?? "").toContain("first attempt log");
