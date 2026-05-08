@@ -78,10 +78,10 @@ export function AuthMethod({
 	);
 }
 
-export function authMethodTitle(readOnly = false) {
+export function configurationMethodTitle(readOnly = false) {
 	return (
 		<Text bold>
-			{"Choose authentication method "}
+			{"Choose configuration method "}
 			{!readOnly && <Text dimColor>(↑/↓ to move, press Enter to confirm)</Text>}
 		</Text>
 	);

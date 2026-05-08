@@ -8,11 +8,25 @@ import {
 	test,
 } from "bun:test";
 import * as child_process from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import * as os from "node:os";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
 import { InstallApp } from "@/InstallApp.js";
 import * as auth from "@/lib/auth.js";
 import * as configure from "@/lib/configure.js";
 import * as proxy from "@/lib/proxy.js";
+
+// InstallApp's manual-creds path calls saveApiKey(), which writes to
+// ~/.codev/auth.json. Without this redirect, every test run would clobber the
+// developer's real auth.json with fixture keys like "sk-manual-123".
+let installAppTempHome: string;
+
+beforeEach(() => {
+	installAppTempHome = mkdtempSync(join(tmpdir(), "codev-installapp-test-"));
+	spyOn(os, "homedir").mockReturnValue(installAppTempHome);
+});
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
 
@@ -135,6 +149,7 @@ afterEach(() => {
 	// Restore any spyOn mocks created during a test so they don't leak across
 	// test files (bun's spyOn-on-imported-modules patches the live binding).
 	mock.restore();
+	rmSync(installAppTempHome, { recursive: true, force: true });
 });
 
 // Default to "no saved API key" for tests that exercise the new/manual paths —
