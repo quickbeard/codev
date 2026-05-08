@@ -35,7 +35,7 @@ The CLI is layered. Each layer has one job and only depends on the layer below i
 
 - `src/index.tsx` — argv dispatcher. Maps each command to its app component or logic function and exits.
 - `src/<Name>App.tsx` — command-root Ink components, one per command (`InstallApp`, `UpdateApp`, `UploadApp`). Each is a state machine that wires together components from `src/components/` and orchestrates the command's flow. `index.tsx` mounts these via `render(<XApp />)`.
-- `src/components/*.tsx` — reusable Ink components (Banner, Frame, Step, TaskList) and command-phase components (Install, Configure, Login, Update). Apps and other components import these; they never import apps.
+- `src/components/*.tsx` — reusable Ink components (Banner, Frame, Step, TaskList) and command-phase components (Install, Configure, Login, FetchApiKey, Update). Apps and other components import these; they never import apps.
 - `src/lib/*.ts` — non-UI logic modules (`auth`, `configure`, `npm`, `paths`, `markdown`, `statistics`, `export`, `upload`, `run`, `restore`, `proxy`, `help`, `const`, `reexec`, `supabase`). Components and apps import logic; logic never imports UI.
 - `src/providers/*.ts` — agent-specific reader implementations used by `src/lib/export.ts` (one file per agent).
 

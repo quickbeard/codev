@@ -14,11 +14,11 @@ describe("AuthMethod", () => {
 		const onSelect = mock();
 		const { lastFrame } = render(<AuthMethod onSelect={onSelect} />);
 		const output = lastFrame() ?? "";
-		expect(output).toContain("Login to SSO");
+		expect(output).toContain("Get a new API Key");
 		expect(output).toContain("I have my own API Key");
 	});
 
-	test("Enter picks SSO (default cursor at index 0)", async () => {
+	test("Enter picks 'new' (default cursor at index 0)", async () => {
 		const onSelect = mock();
 		const { stdin } = render(<AuthMethod onSelect={onSelect} />);
 
@@ -26,7 +26,7 @@ describe("AuthMethod", () => {
 		await new Promise((r) => setTimeout(r, 30));
 
 		expect(onSelect).toHaveBeenCalledTimes(1);
-		expect(onSelect).toHaveBeenCalledWith("sso");
+		expect(onSelect).toHaveBeenCalledWith("new");
 	});
 
 	test("down arrow + Enter picks manual", async () => {
@@ -42,7 +42,7 @@ describe("AuthMethod", () => {
 		expect(onSelect).toHaveBeenCalledWith("manual");
 	});
 
-	test("down then up returns cursor to SSO", async () => {
+	test("down then up returns cursor to 'new'", async () => {
 		const onSelect = mock();
 		const { stdin } = render(<AuthMethod onSelect={onSelect} />);
 
@@ -53,7 +53,7 @@ describe("AuthMethod", () => {
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 30));
 
-		expect(onSelect).toHaveBeenCalledWith("sso");
+		expect(onSelect).toHaveBeenCalledWith("new");
 	});
 
 	test("down arrow does not move past the last option", async () => {
@@ -96,5 +96,68 @@ describe("AuthMethod", () => {
 			.split("\n")
 			.some((line) => line.includes("●") && line.includes("I have my own"));
 		expect(manualLineHasFilled).toBe(true);
+	});
+
+	test("hasExisting=true renders three options with 'existing' first", () => {
+		const onSelect = mock();
+		const { lastFrame } = render(
+			<AuthMethod onSelect={onSelect} hasExisting={true} />,
+		);
+		const output = lastFrame() ?? "";
+		expect(output).toContain("Reuse existing API Key");
+		expect(output).toContain("Get a new API Key");
+		expect(output).toContain("I have my own API Key");
+
+		const lines = output.split("\n");
+		const existingIdx = lines.findIndex((l) =>
+			l.includes("Reuse existing API Key"),
+		);
+		const newIdx = lines.findIndex((l) => l.includes("Get a new API Key"));
+		const manualIdx = lines.findIndex((l) => l.includes("I have my own"));
+		expect(existingIdx).toBeLessThan(newIdx);
+		expect(newIdx).toBeLessThan(manualIdx);
+	});
+
+	test("hasExisting=true: Enter picks 'existing' (default cursor at index 0)", async () => {
+		const onSelect = mock();
+		const { stdin } = render(
+			<AuthMethod onSelect={onSelect} hasExisting={true} />,
+		);
+
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 30));
+
+		expect(onSelect).toHaveBeenCalledTimes(1);
+		expect(onSelect).toHaveBeenCalledWith("existing");
+	});
+
+	test("hasExisting=true: down + Enter picks 'new'", async () => {
+		const onSelect = mock();
+		const { stdin } = render(
+			<AuthMethod onSelect={onSelect} hasExisting={true} />,
+		);
+
+		stdin.write(DOWN);
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 30));
+
+		expect(onSelect).toHaveBeenCalledWith("new");
+	});
+
+	test("hasExisting=true: down twice + Enter picks 'manual'", async () => {
+		const onSelect = mock();
+		const { stdin } = render(
+			<AuthMethod onSelect={onSelect} hasExisting={true} />,
+		);
+
+		stdin.write(DOWN);
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write(DOWN);
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 30));
+
+		expect(onSelect).toHaveBeenCalledWith("manual");
 	});
 });

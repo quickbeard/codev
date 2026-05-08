@@ -1,19 +1,15 @@
 import { Box, Text, useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { login, saveApiKey } from "@/lib/auth.js";
-import { fetchApiKey } from "@/lib/proxy.js";
+import { type AuthData, login } from "@/lib/auth.js";
 
 interface LoginProps {
-	onDone: (apiKey: string) => void;
-	onFallback: () => void;
+	onDone: (auth: AuthData) => void;
 }
 
-export function Login({ onDone, onFallback }: LoginProps) {
+export function Login({ onDone }: LoginProps) {
 	const [logs, setLogs] = useState<string[]>([]);
 	const [error, setError] = useState<string | null>(null);
 	const [waitingForEnter, setWaitingForEnter] = useState(false);
-	const [emptyKey, setEmptyKey] = useState(false);
-	const [fellBack, setFellBack] = useState(false);
 	const [attempt, setAttempt] = useState(0);
 	const openBrowserRef = useRef<(() => void) | null>(null);
 
@@ -25,26 +21,17 @@ export function Login({ onDone, onFallback }: LoginProps) {
 	// fresh login() kicks off. It's intentionally unread inside the body.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: retry trigger
 	useEffect(() => {
-		// Reset per-attempt UI state so a retry doesn't leave stale logs or
-		// a lingering "Press Enter" prompt visible while the new flow runs.
 		setLogs([]);
 		setError(null);
 		setWaitingForEnter(false);
-		setEmptyKey(false);
 		openBrowserRef.current = null;
 
 		login(addLog, (openBrowserFn) => {
 			openBrowserRef.current = openBrowserFn;
 			setWaitingForEnter(true);
 		})
-			.then(async (auth) => {
-				const key = await fetchApiKey(auth.access_token);
-				if (!key) {
-					setEmptyKey(true);
-					return;
-				}
-				saveApiKey({ apiKey: key });
-				onDone(key);
+			.then((auth) => {
+				onDone(auth);
 			})
 			.catch((err: Error) => {
 				setError(err.message);
@@ -56,11 +43,6 @@ export function Login({ onDone, onFallback }: LoginProps) {
 			setWaitingForEnter(false);
 			openBrowserRef.current();
 			openBrowserRef.current = null;
-			return;
-		}
-		if (emptyKey && !fellBack && key.return) {
-			setFellBack(true);
-			onFallback();
 			return;
 		}
 		if (error && key.return) {
@@ -84,22 +66,10 @@ export function Login({ onDone, onFallback }: LoginProps) {
 					<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
 				</>
 			)}
-			{emptyKey && (
-				<>
-					<Text color="yellow">
-						{"SSO succeeded but the gateway returned an empty API key."}
-					</Text>
-					{!fellBack && (
-						<Text dimColor>
-							{"Press Enter to enter credentials manually, Ctrl-C to quit"}
-						</Text>
-					)}
-				</>
-			)}
 		</Box>
 	);
 }
 
 export function loginTitle() {
-	return <Text bold>{"Login to SSO to get new API Key"}</Text>;
+	return <Text bold>{"Login"}</Text>;
 }

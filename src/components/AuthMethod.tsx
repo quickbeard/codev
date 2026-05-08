@@ -1,23 +1,23 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 
-export type AuthMethodChoice = "existing" | "sso" | "manual";
+export type AuthMethodChoice = "existing" | "new" | "manual";
 
 interface Option {
 	label: string;
 	value: AuthMethodChoice;
 }
 
-const SSO_OPTION: Option = {
-	label: "Login to SSO to get new API Key",
-	value: "sso",
+const NEW_OPTION: Option = {
+	label: "Get a new API Key",
+	value: "new",
 };
 const MANUAL_OPTION: Option = {
 	label: "I have my own API Key",
 	value: "manual",
 };
 const EXISTING_OPTION: Option = {
-	label: "Use saved API Key",
+	label: "Reuse existing API Key",
 	value: "existing",
 };
 
@@ -35,8 +35,8 @@ export function AuthMethod({
 	hasExisting = false,
 }: AuthMethodProps) {
 	const options: Option[] = hasExisting
-		? [EXISTING_OPTION, SSO_OPTION, MANUAL_OPTION]
-		: [SSO_OPTION, MANUAL_OPTION];
+		? [EXISTING_OPTION, NEW_OPTION, MANUAL_OPTION]
+		: [NEW_OPTION, MANUAL_OPTION];
 	const [cursor, setCursor] = useState(0);
 
 	useInput(

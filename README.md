@@ -33,6 +33,20 @@ codev install
 | `codev opencode --restore`   | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup` |
 | `codev logout`               | Sign out of SSO                                                                           |
 
+## What `codev install` does
+
+`codev install` runs an interactive setup that:
+
+1. Prompts you to select which agents to install (Claude Code, Codex, OpenCode).
+2. **Signs you in via SSO.** Login is mandatory — the browser flow opens and CoDev waits for the callback. If you're already signed in (`~/.codev/auth.json` has a valid session), this step auto-completes.
+3. Installs the selected agent packages via `npm`.
+4. If you have a saved API key from a previous run, validates it against the gateway.
+5. Asks how you want to authenticate the agents:
+   - **Reuse existing API Key** — only offered if the saved key is still valid.
+   - **Get a new API Key** — issues a fresh key from the CoDev gateway using your SSO session. If the gateway returns an empty key, you get one retry before falling back to the manual entry path.
+   - **I have my own API Key** — type the gateway URL, key, and model manually.
+6. Writes the agent configs (replacing the live config; see [Restoring a previous configuration](#restoring-a-previous-configuration) below).
+
 ## Restoring a previous configuration
 
 CoDev will replace `~/.claude/settings.json`, `~/.codex/config.toml`, and `~/.config/opencode/opencode.json` with new configs. Before writing its own config, CoDev backs up the specific file it would replace — other files in those directories are left untouched.
