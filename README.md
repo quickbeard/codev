@@ -112,6 +112,7 @@ If you have a session running, you might need to restart it with `claude -c`, `c
 - Files are SHA-256 hashed and compared against the server. Unchanged logs are skipped, so re-running is cheap.
 - Each upload records the previous version it replaces, so the backend keeps history rather than overwriting.
 - Payloads are gzipped over the wire.
+- If Supabase rejects the request with `401`/`403`, or the cached Supabase coordinates are missing from `~/.codev/auth.json`, CoDev refreshes the cache from `codev-proxy` and retries the upload exactly once before surfacing the error. Transient `5xx`/network failures are not retried.
 
 ## Development
 

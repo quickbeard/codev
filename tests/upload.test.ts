@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
 	fileSha256,
 	filterNewFiles,
+	isRefreshableError,
 	listMarkdownLogs,
 	runUpload,
 } from "@/lib/upload.js";
@@ -175,5 +176,359 @@ describe("runUpload", () => {
 		} finally {
 			fetchSpy.mockRestore();
 		}
+	});
+
+	test("refreshes config and retries when Supabase returns 401", async () => {
+		writeAuth();
+		writeLog("retry.md", "hello");
+
+		let configCalls = 0;
+		let conversationCalls = 0;
+		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+			input: string | URL | Request,
+		) => {
+			const url =
+				typeof input === "string" || input instanceof URL
+					? String(input)
+					: input.url;
+
+			// codev-proxy /config: hand back fresh Supabase coords on refresh.
+			if (url.includes("/codev-proxy/config")) {
+				configCalls++;
+				return new Response(
+					JSON.stringify({
+						supabaseUrl: "https://test.supabase.co",
+						supabaseAnonKey: "anon",
+						supabaseProxyUrl: "https://api.test/api/codev",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/api/codev/supabase/exchange")) {
+				return new Response(
+					JSON.stringify({
+						access_token: "supabase-upload-token",
+						user: { id: "u", email: "u@example.com" },
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/rest/v1/conversations")) {
+				conversationCalls++;
+				if (conversationCalls === 1) {
+					return new Response("unauthorized", { status: 401 });
+				}
+				return new Response("[]", {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (url.includes("/functions/v1/presign-upload")) {
+				return new Response(
+					JSON.stringify({
+						uploadUrl: "https://upload.example.com/file",
+						conversationId: "cid",
+						storagePath: "u/cid/retry.md",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url === "https://upload.example.com/file") {
+				return new Response("", { status: 200 });
+			}
+			if (url.includes("/functions/v1/confirm-upload")) {
+				return new Response(JSON.stringify({ ok: true }));
+			}
+			return new Response("not found", { status: 404 });
+		}) as typeof fetch);
+
+		try {
+			const summary = await runUpload();
+			expect(summary.uploaded).toBe(1);
+			expect(summary.failed).toBe(0);
+			expect(conversationCalls).toBe(2);
+			expect(configCalls).toBe(1);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	test("does not retry on Supabase 5xx errors", async () => {
+		writeAuth();
+		writeLog("nope.md", "hello");
+
+		let configCalls = 0;
+		let conversationCalls = 0;
+		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+			input: string | URL | Request,
+		) => {
+			const url =
+				typeof input === "string" || input instanceof URL
+					? String(input)
+					: input.url;
+			if (url.includes("/codev-proxy/config")) {
+				configCalls++;
+				return new Response("{}", {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (url.includes("/api/codev/supabase/exchange")) {
+				return new Response(
+					JSON.stringify({
+						access_token: "supabase-upload-token",
+						user: { id: "u", email: "u@example.com" },
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/rest/v1/conversations")) {
+				conversationCalls++;
+				return new Response("internal error", { status: 503 });
+			}
+			return new Response("not found", { status: 404 });
+		}) as typeof fetch);
+
+		try {
+			await expect(runUpload()).rejects.toThrow(/conversations API failed/);
+			expect(conversationCalls).toBe(1);
+			expect(configCalls).toBe(0);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	test("refreshes config when Supabase coords are missing from cache", async () => {
+		// Auth file with SSO tokens but no supabase_* fields.
+		mkdirSync(join(tempHome, ".codev"), { recursive: true });
+		writeFileSync(
+			join(tempHome, ".codev", "auth.json"),
+			JSON.stringify({
+				access_token: "token",
+				id_token: "token",
+				expires_at: Date.now() + 3600000,
+				user: { sub: "u", email: "u@example.com", displayName: "User" },
+			}),
+		);
+		writeLog("first.md", "hello");
+
+		let configCalls = 0;
+		let conversationCalls = 0;
+		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+			input: string | URL | Request,
+		) => {
+			const url =
+				typeof input === "string" || input instanceof URL
+					? String(input)
+					: input.url;
+			if (url.includes("/codev-proxy/config")) {
+				configCalls++;
+				return new Response(
+					JSON.stringify({
+						supabaseUrl: "https://fresh.supabase.co",
+						supabaseAnonKey: "fresh-anon",
+						supabaseProxyUrl: "https://api.test/api/codev",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/api/codev/supabase/exchange")) {
+				return new Response(
+					JSON.stringify({
+						access_token: "supabase-upload-token",
+						user: { id: "u", email: "u@example.com" },
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/rest/v1/conversations")) {
+				conversationCalls++;
+				return new Response("[]", {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (url.includes("/functions/v1/presign-upload")) {
+				return new Response(
+					JSON.stringify({
+						uploadUrl: "https://upload.example.com/file",
+						conversationId: "cid",
+						storagePath: "u/cid/first.md",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url === "https://upload.example.com/file") {
+				return new Response("", { status: 200 });
+			}
+			if (url.includes("/functions/v1/confirm-upload")) {
+				return new Response(JSON.stringify({ ok: true }));
+			}
+			return new Response("not found", { status: 404 });
+		}) as typeof fetch);
+
+		try {
+			const summary = await runUpload();
+			expect(summary.uploaded).toBe(1);
+			expect(summary.failed).toBe(0);
+			expect(configCalls).toBe(1);
+			expect(conversationCalls).toBe(1);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	test("per-file 401 stays in summary.errors and does not trigger refresh-and-retry", async () => {
+		writeAuth();
+		writeLog("a.md", "hello");
+
+		let configCalls = 0;
+		let presignCalls = 0;
+		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+			input: string | URL | Request,
+		) => {
+			const url =
+				typeof input === "string" || input instanceof URL
+					? String(input)
+					: input.url;
+			if (url.includes("/codev-proxy/config")) {
+				configCalls++;
+				return new Response("{}", {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (url.includes("/api/codev/supabase/exchange")) {
+				return new Response(
+					JSON.stringify({
+						access_token: "supabase-upload-token",
+						user: { id: "u", email: "u@example.com" },
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/rest/v1/conversations")) {
+				return new Response("[]", {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (url.includes("/functions/v1/presign-upload")) {
+				presignCalls++;
+				return new Response("denied", { status: 401 });
+			}
+			return new Response("not found", { status: 404 });
+		}) as typeof fetch);
+
+		try {
+			const summary = await runUpload();
+			// The 401 was caught inside the per-file try/catch — recorded as a
+			// failure on the candidate, not bubbled out to trigger a refresh.
+			expect(summary.uploaded).toBe(0);
+			expect(summary.failed).toBe(1);
+			expect(summary.errors).toHaveLength(1);
+			expect(summary.errors[0]?.message).toMatch(
+				/presign-upload failed \(401\)/,
+			);
+			expect(presignCalls).toBe(1);
+			expect(configCalls).toBe(0);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	test("propagates the second error if refresh-and-retry also fails", async () => {
+		writeAuth();
+		writeLog("doomed.md", "hello");
+
+		let configCalls = 0;
+		let conversationCalls = 0;
+		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+			input: string | URL | Request,
+		) => {
+			const url =
+				typeof input === "string" || input instanceof URL
+					? String(input)
+					: input.url;
+			if (url.includes("/codev-proxy/config")) {
+				configCalls++;
+				return new Response(
+					JSON.stringify({
+						supabaseUrl: "https://test.supabase.co",
+						supabaseAnonKey: "anon",
+						supabaseProxyUrl: "https://api.test/api/codev",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/api/codev/supabase/exchange")) {
+				return new Response(
+					JSON.stringify({
+						access_token: "supabase-upload-token",
+						user: { id: "u", email: "u@example.com" },
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/rest/v1/conversations")) {
+				conversationCalls++;
+				return new Response("still-bad", { status: 401 });
+			}
+			return new Response("not found", { status: 404 });
+		}) as typeof fetch);
+
+		try {
+			await expect(runUpload()).rejects.toThrow(/conversations API failed/);
+			expect(conversationCalls).toBe(2);
+			expect(configCalls).toBe(1);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+});
+
+describe("isRefreshableError", () => {
+	test("true when supabase coords are missing from auth.json", () => {
+		expect(
+			isRefreshableError(
+				new Error(
+					"Missing supabase_url in ~/.codev/auth.json. Run `codev install`...",
+				),
+			),
+		).toBe(true);
+	});
+
+	test("true on HTTP 401", () => {
+		expect(
+			isRefreshableError(
+				new Error("conversations API failed (401): unauthorized"),
+			),
+		).toBe(true);
+	});
+
+	test("true on HTTP 403", () => {
+		expect(
+			isRefreshableError(new Error("presign-upload failed (403): forbidden")),
+		).toBe(true);
+	});
+
+	test("false on HTTP 500", () => {
+		expect(
+			isRefreshableError(new Error("conversations API failed (500): boom")),
+		).toBe(false);
+	});
+
+	test("false on HTTP 404", () => {
+		expect(
+			isRefreshableError(
+				new Error("Proxy /supabase/exchange failed (404): Not found"),
+			),
+		).toBe(false);
+	});
+
+	test("false on network errors", () => {
+		expect(isRefreshableError(new Error("fetch failed: ECONNREFUSED"))).toBe(
+			false,
+		);
+	});
+
+	test("false on non-Error values", () => {
+		expect(isRefreshableError("random string")).toBe(false);
+		expect(isRefreshableError(null)).toBe(false);
 	});
 });

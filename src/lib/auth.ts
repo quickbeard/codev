@@ -277,6 +277,7 @@ export async function login(
 	const existing = loadAuth();
 	if (existing) {
 		onLog(`Already logged in as ${existing.user.email}`);
+		await refreshCodevConfig(existing.access_token, onLog);
 		return existing;
 	}
 
@@ -349,7 +350,10 @@ export async function login(
 // downstream accessors (SUPABASE_URL/ANON_KEY/PROXY_URL in const.ts) will
 // hard-fail later if no values were ever fetched, with a "run codev install"
 // message that's actionable for the user.
-async function refreshCodevConfig(
+//
+// Exported so the upload retry path can re-fetch the cache after a 401/403
+// from Supabase (config may have rotated since the last login).
+export async function refreshCodevConfig(
 	accessToken: string,
 	onLog: (msg: string) => void,
 ): Promise<void> {
