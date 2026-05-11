@@ -11,7 +11,7 @@ import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import TOML from "@iarna/toml";
-import { BASE_URL } from "@/lib/const.js";
+import { AI_GATEWAY_OPENAI_URL, AI_GATEWAY_URL } from "@/lib/const.js";
 
 let tempDir: string;
 let homedirSpy: ReturnType<typeof spyOn>;
@@ -97,7 +97,7 @@ describe("configureClaudeCode", () => {
 			"https://json.schemastore.org/claude-code-settings.json",
 		);
 		expect(config.env).toEqual({
-			ANTHROPIC_BASE_URL: `${BASE_URL}gateway/`,
+			ANTHROPIC_BASE_URL: AI_GATEWAY_URL,
 			ANTHROPIC_API_KEY: "sk-abc",
 			ANTHROPIC_MODEL: "MiniMax",
 			ANTHROPIC_DEFAULT_OPUS_MODEL: "MiniMax",
@@ -191,7 +191,7 @@ describe("configureOpenCode", () => {
 		expect(config.$schema).toBe("https://opencode.ai/config.json");
 		expect(config.provider.aigateway.npm).toBe("@ai-sdk/openai-compatible");
 		expect(config.provider.aigateway.options.baseURL).toBe(
-			`${BASE_URL}gateway/v1`,
+			AI_GATEWAY_OPENAI_URL,
 		);
 		expect(config.provider.aigateway.options.apiKey).toBe("sk-xyz");
 		expect(config.provider.aigateway.models.MiniMax.name).toBe("MiniMax");
@@ -288,7 +288,7 @@ describe("configureCodex", () => {
 		expect(config.model_providers.aigateway).toBeDefined();
 		expect(config.model_providers.aigateway?.name).toBe("AI Gateway");
 		expect(config.model_providers.aigateway?.base_url).toBe(
-			`${BASE_URL}gateway/v1`,
+			AI_GATEWAY_OPENAI_URL,
 		);
 		expect(config.model_providers.aigateway?.wire_api).toBe("responses");
 		expect(config.model_providers.aigateway?.experimental_bearer_token).toBe(

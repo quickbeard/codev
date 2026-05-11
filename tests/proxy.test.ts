@@ -9,7 +9,7 @@ import {
 import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BASE_URL } from "@/lib/const.js";
+import { AI_GATEWAY_URL, PROXY_URL } from "@/lib/const.js";
 import {
 	fetchApiKey,
 	fetchCodevConfig,
@@ -104,7 +104,7 @@ describe("validateApiKey", () => {
 			string,
 			{ method?: string; headers?: Record<string, string> },
 		];
-		expect(url).toBe(`${BASE_URL}gateway/key/info`);
+		expect(url).toBe(`${AI_GATEWAY_URL}key/info`);
 		expect(init.method).toBe("GET");
 		expect(init.headers?.Authorization).toBe("Bearer sk-abc");
 	});
@@ -256,7 +256,7 @@ describe("fetchCodevConfig", () => {
 			string,
 			{ method?: string; headers?: Record<string, string> },
 		];
-		expect(url).toBe(`${BASE_URL}codev-proxy/config`);
+		expect(url).toBe(`${PROXY_URL}/config`);
 		expect(init.method).toBe("POST");
 		expect(init.headers?.Authorization).toBe("Bearer my-token");
 	});

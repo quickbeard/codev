@@ -1,5 +1,5 @@
 import type { CodevConfig } from "@/lib/auth.js";
-import { BASE_URL, SUPABASE_PROXY_URL } from "@/lib/const.js";
+import { AI_GATEWAY_URL, PROXY_URL, SUPABASE_PROXY_URL } from "@/lib/const.js";
 
 interface ExchangeResponse {
 	api_key: string;
@@ -20,8 +20,6 @@ interface ErrorResponse {
 	error?: string;
 }
 
-const PROXY_URL = `${BASE_URL}codev-proxy`;
-const GATEWAY_BASE_URL = `${BASE_URL}gateway/`;
 const VALIDATE_TIMEOUT_MS = 5_000;
 
 export interface SupabaseSession {
@@ -85,7 +83,7 @@ export async function fetchCodevConfig(
 // Manual creds may include a `/v1` suffix (OpenAI-style); /key/info lives at
 // the gateway root, so strip a trailing v1 segment before joining.
 function keyInfoUrl(baseUrl?: string): string {
-	if (!baseUrl) return `${GATEWAY_BASE_URL}key/info`;
+	if (!baseUrl) return `${AI_GATEWAY_URL}key/info`;
 	const stripped = baseUrl.replace(/\/?v1\/?$/, "");
 	const trailing = stripped.endsWith("/") ? stripped : `${stripped}/`;
 	return `${trailing}key/info`;
