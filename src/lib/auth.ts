@@ -11,10 +11,9 @@ import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import open from "open";
-import { BASE_URL } from "@/lib/const.js";
+import { SSO_URL } from "@/lib/const.js";
 import { fetchCodevConfig } from "@/lib/proxy.js";
 
-const SSO_BASE_URL = `${BASE_URL}sso-wrapper`;
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
 const REVOKE_TIMEOUT_MS = 3_000;
 
@@ -208,7 +207,7 @@ export async function logout(): Promise<boolean> {
 }
 
 async function revokeTokens(data: AuthFileContents): Promise<void> {
-	const endpoint = `${SSO_BASE_URL}/revoke`;
+	const endpoint = `${SSO_URL}/revoke`;
 	await Promise.all([
 		data.access_token
 			? revokeToken(endpoint, data.access_token, "access_token")
@@ -391,7 +390,7 @@ async function getAuthCode(
 		let boundPort = 0;
 
 		const buildAuthorizeUrl = (port: number) =>
-			`${SSO_BASE_URL}/authorize?` +
+			`${SSO_URL}/authorize?` +
 			`response_type=code` +
 			`&client_id=${encodeURIComponent(CLIENT_ID)}` +
 			`&redirect_uri=${encodeURIComponent(`http://127.0.0.1:${port}/callback`)}` +
@@ -467,7 +466,7 @@ async function getAuthCode(
 		server.listen(0, "127.0.0.1", () => {
 			boundPort = (server.address() as AddressInfo).port;
 			const initialUrl = forceLogin
-				? `${SSO_BASE_URL}/logout?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${boundPort}/logout-done`)}`
+				? `${SSO_URL}/logout?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${boundPort}/logout-done`)}`
 				: buildAuthorizeUrl(boundPort);
 
 			onReady(() => {
@@ -493,7 +492,7 @@ async function exchangeCode(
 	redirectUri: string,
 	codeVerifier: string,
 ): Promise<TokenResponse> {
-	const res = await fetch(`${SSO_BASE_URL}/token`, {
+	const res = await fetch(`${SSO_URL}/token`, {
 		method: "POST",
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({
@@ -514,7 +513,7 @@ async function exchangeCode(
 }
 
 async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
-	const res = await fetch(`${SSO_BASE_URL}/token`, {
+	const res = await fetch(`${SSO_URL}/token`, {
 		method: "POST",
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({
@@ -532,7 +531,7 @@ async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
 }
 
 async function fetchUserInfo(accessToken: string) {
-	const res = await fetch(`${SSO_BASE_URL}/userinfo`, {
+	const res = await fetch(`${SSO_URL}/userinfo`, {
 		headers: { Authorization: `Bearer ${accessToken}` },
 	});
 

@@ -29,10 +29,9 @@ import {
 	saveApiKey,
 	saveCodevConfig,
 } from "@/lib/auth.js";
-import { BASE_URL } from "@/lib/const.js";
+import { SSO_URL } from "@/lib/const.js";
 
-const SSO_BASE_URL = `${BASE_URL}sso-wrapper`;
-const REVOCATION_ENDPOINT = `${SSO_BASE_URL}/revoke`;
+const REVOCATION_ENDPOINT = `${SSO_URL}/revoke`;
 
 let tempDir: string;
 let homedirSpy: ReturnType<typeof spyOn>;

@@ -11,7 +11,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import TOML from "@iarna/toml";
-import { BASE_URL } from "@/lib/const.js";
+import { AI_GATEWAY_OPENAI_URL, AI_GATEWAY_URL } from "@/lib/const.js";
 
 export type Tool = "claude-code" | "codex" | "opencode";
 export type BackupKind = "claude-settings" | "codex-config" | "opencode-config";
@@ -49,8 +49,6 @@ function normalizeOpenCodeBaseUrl(url: string): string {
 	return url.endsWith("/") ? `${url}v1` : `${url}/v1`;
 }
 
-const GATEWAY_BASE_URL = `${BASE_URL}gateway/`;
-const GATEWAY_OPENAI_BASE_URL = `${GATEWAY_BASE_URL}v1`;
 const MODEL1 = atob("TWluaU1heA==");
 const MODEL2 = atob("UXdlbi9Rd2VuMy41LTEyMkItQTEwQi1GUDg=");
 
@@ -198,7 +196,7 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 
 	const baseUrl = creds.baseUrl
 		? normalizeClaudeBaseUrl(creds.baseUrl)
-		: GATEWAY_BASE_URL;
+		: AI_GATEWAY_URL;
 	const model = creds.model ?? MODEL1;
 
 	writeJson(sourcePath, {
@@ -251,7 +249,7 @@ export function configureCodex(creds: Credentials): ConfigureResult[] {
 
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
-		: GATEWAY_OPENAI_BASE_URL;
+		: AI_GATEWAY_OPENAI_URL;
 	const model = creds.model ?? MODEL2;
 
 	writeToml(sourcePath, {
@@ -277,7 +275,7 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
-		: GATEWAY_OPENAI_BASE_URL;
+		: AI_GATEWAY_OPENAI_URL;
 	const model = creds.model ?? MODEL1;
 
 	writeJson(sourcePath, {

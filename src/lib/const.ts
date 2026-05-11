@@ -3,20 +3,16 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
 
-export const BASE_URL = atob("aHR0cHM6Ly9uZXRtaW5kLnZpZXR0ZWwudm4v");
+const BASE_URL = atob("aHR0cHM6Ly9uZXRtaW5kLnZpZXR0ZWwudm4=");
+export const PROXY_URL = `${BASE_URL}/codev-proxy`;
+export const SSO_URL = `${BASE_URL}/sso-wrapper`;
+export const AI_GATEWAY_URL = `${BASE_URL}/gateway`;
+export const AI_GATEWAY_OPENAI_URL = `${AI_GATEWAY_URL}/v1`;
 
 export const VERSION: string = pkg.version;
 
 export const HELP_HINT = "Run `codev --help` to see all commands.";
 export const HAPPY_CODING = "Happy coding! 🎉";
-
-// Supabase coordinates are no longer baked into the source. They are
-// provisioned by codev-proxy's POST /config endpoint on every successful SSO
-// login and persisted into ~/.codev/auth.json. The accessors below read the
-// live values; missing values hard-fail with a "run codev install" message.
-//
-// Inline file read (rather than importing from auth.ts) avoids a circular
-// import: auth.ts depends on BASE_URL above.
 
 interface CodevAuthFile {
 	supabase_url?: string;
