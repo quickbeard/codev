@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { renderMarkdown } from "@/lib/markdown.js";
 import type { Session } from "@/providers/types.js";
 

@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
 	existsSync,
 	mkdirSync,
@@ -7,25 +6,25 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { runRestore } from "@/lib/restore.js";
 
 let tempDir: string;
-let homedirSpy: ReturnType<typeof spyOn>;
-let logSpy: ReturnType<typeof spyOn>;
-let errorSpy: ReturnType<typeof spyOn>;
+let logSpy: MockInstance;
+let errorSpy: MockInstance;
 
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-restore-test-"));
-	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempDir);
-	logSpy = spyOn(console, "log").mockImplementation(() => {});
-	errorSpy = spyOn(console, "error").mockImplementation(() => {});
+	vi.stubEnv("HOME", tempDir);
+	logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+	errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
-	homedirSpy.mockRestore();
+	vi.unstubAllEnvs();
 	logSpy.mockRestore();
 	errorSpy.mockRestore();
 	rmSync(tempDir, { recursive: true, force: true });

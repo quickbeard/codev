@@ -1,22 +1,18 @@
-import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	mock,
-	spyOn,
-	test,
-} from "bun:test";
 import * as child_process from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { InstallApp } from "@/InstallApp.js";
 import * as auth from "@/lib/auth.js";
 import * as configure from "@/lib/configure.js";
 import * as proxy from "@/lib/proxy.js";
+
+vi.mock("node:child_process", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:child_process")>();
+	return { ...actual, execFile: vi.fn() };
+});
 
 // InstallApp's manual-creds path calls saveApiKey(), which writes to
 // ~/.codev/auth.json. Without this redirect, every test run would clobber the
@@ -25,7 +21,7 @@ let installAppTempHome: string;
 
 beforeEach(() => {
 	installAppTempHome = mkdtempSync(join(tmpdir(), "codev-installapp-test-"));
-	spyOn(os, "homedir").mockReturnValue(installAppTempHome);
+	vi.stubEnv("HOME", installAppTempHome);
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
@@ -40,7 +36,7 @@ function stubExecFile(
 		stderr?: string;
 	},
 ) {
-	spyOn(child_process, "execFile").mockImplementation(((
+	vi.mocked(child_process.execFile).mockImplementation(((
 		file: string,
 		args: string[],
 		...rest: unknown[]
@@ -148,7 +144,7 @@ afterEach(() => {
 	cleanup();
 	// Restore any spyOn mocks created during a test so they don't leak across
 	// test files (bun's spyOn-on-imported-modules patches the live binding).
-	mock.restore();
+	vi.restoreAllMocks();
 	rmSync(installAppTempHome, { recursive: true, force: true });
 });
 
@@ -156,7 +152,7 @@ afterEach(() => {
 // otherwise InstallApp would discover whatever is in the dev's real
 // ~/.codev/auth.json and route through the validating-existing branch.
 function stubNoSavedKey() {
-	spyOn(auth, "loadApiKey").mockReturnValue(null);
+	vi.spyOn(auth, "loadApiKey").mockReturnValue(null);
 }
 
 describe("InstallApp fail-stop invariant", () => {
@@ -166,7 +162,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("login failure halts the flow before install runs", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockImplementation(() =>
+		vi.spyOn(auth, "login").mockImplementation(() =>
 			Promise.reject(new Error("Connection refused")),
 		);
 
@@ -181,7 +177,7 @@ describe("InstallApp fail-stop invariant", () => {
 	});
 
 	test("install failure does not advance to key-choice", async () => {
-		spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		stubExecFile((file, args) => {
 			if (file === "npm" && args[0] === "install") {
 				const err = Object.assign(new Error("spawn npm ENOENT"), {
@@ -204,11 +200,11 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("fetch-key failure halts the flow before configure", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		spyOn(proxy, "fetchApiKey").mockImplementation(() =>
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(() =>
 			Promise.reject(new Error("Proxy /auth/exchange failed (502): boom")),
 		);
-		const configureSpy = spyOn(configure, "configureClaudeCode");
+		const configureSpy = vi.spyOn(configure, "configureClaudeCode");
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin);
@@ -224,9 +220,9 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("configure failure does not reach the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
-		spyOn(configure, "configureClaudeCode").mockImplementation(() => {
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		vi.spyOn(configure, "configureClaudeCode").mockImplementation(() => {
 			throw new Error("disk full");
 		});
 
@@ -243,18 +239,17 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("successful flow reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
-		const configureSpy = spyOn(
-			configure,
-			"configureClaudeCode",
-		).mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: "/tmp/x.b",
-			},
-		]);
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		const configureSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/x",
+					backupPath: "/tmp/x.b",
+				},
+			]);
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin);
@@ -268,18 +263,17 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("Codex selection routes to configureCodex and reaches done", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-codex-123");
-		const configureCodexSpy = spyOn(
-			configure,
-			"configureCodex",
-		).mockReturnValue([
-			{
-				kind: "codex-config",
-				sourcePath: "/tmp/codex.toml",
-				backupPath: "/tmp/codex.toml.backup",
-			},
-		]);
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-codex-123");
+		const configureCodexSpy = vi
+			.spyOn(configure, "configureCodex")
+			.mockReturnValue([
+				{
+					kind: "codex-config",
+					sourcePath: "/tmp/codex.toml",
+					backupPath: "/tmp/codex.toml.backup",
+				},
+			]);
 		// bun's spyOn keeps call counts across tests in the same file.
 		configureCodexSpy.mockClear();
 
@@ -297,20 +291,19 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("manual-credentials flow reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		const loginSpy = spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey").mockImplementation(
-			() => new Promise(() => {}),
-		);
-		const configureSpy = spyOn(
-			configure,
-			"configureClaudeCode",
-		).mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: "/tmp/x.b",
-			},
-		]);
+		const loginSpy = vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		const fetchApiKeySpy = vi
+			.spyOn(proxy, "fetchApiKey")
+			.mockImplementation(() => new Promise(() => {}));
+		const configureSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/x",
+					backupPath: "/tmp/x.b",
+				},
+			]);
 		loginSpy.mockClear();
 		fetchApiKeySpy.mockClear();
 		configureSpy.mockClear();
@@ -340,18 +333,17 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("empty-key retry then second empty falls back into manual creds", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey").mockResolvedValue("");
-		const configureSpy = spyOn(
-			configure,
-			"configureClaudeCode",
-		).mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: "/tmp/x.b",
-			},
-		]);
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		const fetchApiKeySpy = vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("");
+		const configureSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/x",
+					backupPath: "/tmp/x.b",
+				},
+			]);
 		fetchApiKeySpy.mockClear();
 		configureSpy.mockClear();
 
@@ -404,22 +396,22 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("fetch-key retry after failure reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey")
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		const fetchApiKeySpy = vi
+			.spyOn(proxy, "fetchApiKey")
 			.mockImplementationOnce(() =>
 				Promise.reject(new Error("Proxy /auth/exchange failed (502): boom")),
 			)
 			.mockImplementationOnce(() => Promise.resolve("sk-retry-ok"));
-		const configureSpy = spyOn(
-			configure,
-			"configureClaudeCode",
-		).mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: "/tmp/x.b",
-			},
-		]);
+		const configureSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/x",
+					backupPath: "/tmp/x.b",
+				},
+			]);
 		fetchApiKeySpy.mockClear();
 		configureSpy.mockClear();
 
@@ -448,12 +440,12 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("skip-configuration flow backs up but does not write configs", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey").mockImplementation(
-			() => new Promise(() => {}),
-		);
-		const configureSpy = spyOn(configure, "configureClaudeCode");
-		const backupOnlySpy = spyOn(configure, "backupOnly").mockReturnValue([
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		const fetchApiKeySpy = vi
+			.spyOn(proxy, "fetchApiKey")
+			.mockImplementation(() => new Promise(() => {}));
+		const configureSpy = vi.spyOn(configure, "configureClaudeCode");
+		const backupOnlySpy = vi.spyOn(configure, "backupOnly").mockReturnValue([
 			{
 				kind: "claude-settings",
 				sourcePath: "/tmp/x",
@@ -482,20 +474,20 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("login retry after failure reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		const loginSpy = spyOn(auth, "login")
+		const loginSpy = vi
+			.spyOn(auth, "login")
 			.mockImplementationOnce(() => Promise.reject(new Error("network down")))
 			.mockImplementationOnce(() => Promise.resolve(fakeAuth()));
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
-		const configureSpy = spyOn(
-			configure,
-			"configureClaudeCode",
-		).mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: "/tmp/x.b",
-			},
-		]);
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		const configureSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/x",
+					backupPath: "/tmp/x.b",
+				},
+			]);
 		loginSpy.mockClear();
 		configureSpy.mockClear();
 
@@ -523,26 +515,27 @@ describe("InstallApp fail-stop invariant", () => {
 describe("InstallApp existing-key path", () => {
 	test("validating an existing key shows it, surfaces the option, and reuses saved creds", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		const loadSpy = spyOn(auth, "loadApiKey").mockReturnValue({
+		const loadSpy = vi.spyOn(auth, "loadApiKey").mockReturnValue({
 			apiKey: "sk-existing-123",
 			baseUrl: "https://my-gateway.example.com/v1",
 			model: "saved-model",
 		});
-		const validateSpy = spyOn(proxy, "validateApiKey").mockResolvedValue(true);
-		const loginSpy = spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		const fetchApiKeySpy = spyOn(proxy, "fetchApiKey").mockImplementation(
-			() => new Promise(() => {}),
-		);
-		const configureSpy = spyOn(
-			configure,
-			"configureClaudeCode",
-		).mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: "/tmp/x.b",
-			},
-		]);
+		const validateSpy = vi
+			.spyOn(proxy, "validateApiKey")
+			.mockResolvedValue(true);
+		const loginSpy = vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		const fetchApiKeySpy = vi
+			.spyOn(proxy, "fetchApiKey")
+			.mockImplementation(() => new Promise(() => {}));
+		const configureSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/x",
+					backupPath: "/tmp/x.b",
+				},
+			]);
 		loadSpy.mockClear();
 		validateSpy.mockClear();
 		loginSpy.mockClear();
@@ -581,10 +574,12 @@ describe("InstallApp existing-key path", () => {
 
 	test("invalid saved key surfaces an error and does not show the existing option", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "loadApiKey").mockReturnValue({ apiKey: "sk-stale" });
-		spyOn(proxy, "validateApiKey").mockResolvedValue(false);
-		spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		spyOn(proxy, "fetchApiKey").mockImplementation(() => new Promise(() => {}));
+		vi.spyOn(auth, "loadApiKey").mockReturnValue({ apiKey: "sk-stale" });
+		vi.spyOn(proxy, "validateApiKey").mockResolvedValue(false);
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin);
@@ -598,12 +593,14 @@ describe("InstallApp existing-key path", () => {
 
 	test("validation network error is reported and option is hidden", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
-		spyOn(auth, "loadApiKey").mockReturnValue({ apiKey: "sk-x" });
-		spyOn(proxy, "validateApiKey").mockRejectedValue(
+		vi.spyOn(auth, "loadApiKey").mockReturnValue({ apiKey: "sk-x" });
+		vi.spyOn(proxy, "validateApiKey").mockRejectedValue(
 			new Error("fetch failed: ECONNREFUSED"),
 		);
-		spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		spyOn(proxy, "fetchApiKey").mockImplementation(() => new Promise(() => {}));
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin);

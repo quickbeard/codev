@@ -1,11 +1,12 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import type { MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { VERSION } from "@/lib/const.js";
 import { printHelp, printVersion } from "@/lib/help.js";
 
-let logSpy: ReturnType<typeof spyOn>;
+let logSpy: MockInstance;
 
 beforeEach(() => {
-	logSpy = spyOn(console, "log").mockImplementation(() => {});
+	logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 });
 
 afterEach(() => {

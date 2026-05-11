@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
+import { afterEach, describe, expect, test } from "vitest";
 import { Banner } from "@/components/Banner.js";
 import pkg from "../../package.json" with { type: "json" };
 

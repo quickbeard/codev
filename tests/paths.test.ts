@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -6,9 +5,9 @@ import {
 	rmSync,
 	symlinkSync,
 } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	buildFilename,
 	codevLogsDir,
@@ -19,17 +18,15 @@ import {
 } from "@/lib/paths.js";
 
 let tempHome: string;
-let homedirSpy: ReturnType<typeof spyOn>;
-
 beforeEach(() => {
 	// Canonicalize so realpathSync calls inside the module match the tempHome
 	// we hand to homedir() — on macOS /var → /private/var.
 	tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-paths-")));
-	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
+	vi.stubEnv("HOME", tempHome);
 });
 
 afterEach(() => {
-	homedirSpy.mockRestore();
+	vi.unstubAllEnvs();
 	rmSync(tempHome, { recursive: true, force: true });
 });
 

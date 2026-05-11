@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { Login } from "@/components/Login.js";
 import * as auth from "@/lib/auth.js";
 
@@ -18,12 +18,12 @@ function fakeAuth(): auth.AuthData {
 
 describe("Login", () => {
 	test("shows 'Press Enter' when onReady is called", async () => {
-		spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
 			onReady(() => {});
 			return new Promise(() => {});
 		});
 
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
@@ -33,13 +33,13 @@ describe("Login", () => {
 	});
 
 	test("shows log messages from login", async () => {
-		spyOn(auth, "login").mockImplementation((onLog) => {
+		vi.spyOn(auth, "login").mockImplementation((onLog) => {
 			onLog("Starting SSO login...");
 			onLog("Already logged in as test@example.com");
 			return Promise.resolve(fakeAuth());
 		});
 
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
@@ -50,11 +50,11 @@ describe("Login", () => {
 	});
 
 	test("shows error and retry prompt on login failure", async () => {
-		spyOn(auth, "login").mockImplementation(() => {
+		vi.spyOn(auth, "login").mockImplementation(() => {
 			return Promise.reject(new Error("Connection refused"));
 		});
 
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
@@ -66,13 +66,13 @@ describe("Login", () => {
 	});
 
 	test("opens browser when Enter is pressed", async () => {
-		const openBrowserFn = mock();
-		spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+		const openBrowserFn = vi.fn();
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
 			onReady(openBrowserFn);
 			return new Promise(() => {});
 		});
 
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { stdin } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
@@ -84,13 +84,13 @@ describe("Login", () => {
 	});
 
 	test("does not open browser before Enter is pressed", async () => {
-		const openBrowserFn = mock();
-		spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+		const openBrowserFn = vi.fn();
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
 			onReady(openBrowserFn);
 			return new Promise(() => {});
 		});
 
-		const onDone = mock();
+		const onDone = vi.fn();
 		render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
@@ -100,9 +100,9 @@ describe("Login", () => {
 
 	test("calls onDone with the auth data after a successful login", async () => {
 		const authData = fakeAuth();
-		spyOn(auth, "login").mockImplementation(() => Promise.resolve(authData));
+		vi.spyOn(auth, "login").mockImplementation(() => Promise.resolve(authData));
 
-		const onDone = mock();
+		const onDone = vi.fn();
 		render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 100));
@@ -116,12 +116,12 @@ describe("Login", () => {
 		// valid cached session: it short-circuits and resolves without invoking
 		// the onReady callback, so no browser prompt should appear.
 		const authData = fakeAuth();
-		spyOn(auth, "login").mockImplementation((onLog) => {
+		vi.spyOn(auth, "login").mockImplementation((onLog) => {
 			onLog(`Already logged in as ${authData.user.email}`);
 			return Promise.resolve(authData);
 		});
 
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
@@ -135,14 +135,15 @@ describe("Login", () => {
 
 	test("retries on Enter after a failure and succeeds on the second attempt", async () => {
 		const authData = fakeAuth();
-		const loginSpy = spyOn(auth, "login")
+		const loginSpy = vi
+			.spyOn(auth, "login")
 			.mockImplementationOnce(() => Promise.reject(new Error("transient")))
 			.mockImplementationOnce(() => Promise.resolve(authData));
 		// bun's spyOn retains call counts across tests in the same file; clear
 		// them so the per-test "called twice" assertion counts only this test.
 		loginSpy.mockClear();
 
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 100));
@@ -157,7 +158,7 @@ describe("Login", () => {
 	});
 
 	test("clears the previous error and logs when retrying", async () => {
-		spyOn(auth, "login")
+		vi.spyOn(auth, "login")
 			.mockImplementationOnce((onLog) => {
 				onLog("first attempt log");
 				return Promise.reject(new Error("boom"));
@@ -167,7 +168,7 @@ describe("Login", () => {
 				return new Promise(() => {});
 			});
 
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));

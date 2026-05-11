@@ -1,6 +1,6 @@
 ---
-description: Project conventions (Bun, layout, validation, APIs, refresh/retry invariants)
+description: Project conventions (toolchain, layout, validation, APIs, refresh/retry invariants)
 alwaysApply: true
 ---
 
-The full project conventions live in @AGENTS.md at the repo root. Read it before making changes — it covers the layered architecture, import alias, validation commands, Bun-vs-Node runtime split, backup behavior, and the login/upload self-healing invariants.
+The full project conventions live in @AGENTS.md at the repo root. Read it before making changes — it covers the layered architecture, import alias, validation commands, the Node toolchain (pnpm + tsx + vitest + esbuild), backup behavior, and the login/upload self-healing invariants.

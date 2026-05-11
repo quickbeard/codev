@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -6,9 +5,9 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AI_GATEWAY_URL, PROXY_URL } from "@/lib/const.js";
 import {
 	fetchApiKey,
@@ -30,7 +29,7 @@ afterEach(() => {
 
 describe("fetchApiKey", () => {
 	test("returns the api_key on a 2xx response", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				api_key: "sk-abc",
 				user: { sub: "u", email: "x@y.z", displayName: "X" },
@@ -40,7 +39,7 @@ describe("fetchApiKey", () => {
 	});
 
 	test("returns an empty string when api_key is empty", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				api_key: "",
 				user: { sub: "u", email: "x@y.z", displayName: "X" },
@@ -50,7 +49,7 @@ describe("fetchApiKey", () => {
 	});
 
 	test("returns an empty string when api_key is missing", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				user: { sub: "u", email: "x@y.z", displayName: "X" },
 			}),
@@ -59,7 +58,7 @@ describe("fetchApiKey", () => {
 	});
 
 	test("throws on a non-2xx response with the proxy-supplied error", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(502, { error: "upstream timeout" }),
 		);
 		await expect(fetchApiKey("token")).rejects.toThrow(
@@ -68,7 +67,7 @@ describe("fetchApiKey", () => {
 	});
 
 	test("throws on a non-2xx response with no JSON body, using statusText", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			new Response("not json", { status: 500, statusText: "Server Error" }),
 		);
 		await expect(fetchApiKey("token")).rejects.toThrow(
@@ -77,7 +76,7 @@ describe("fetchApiKey", () => {
 	});
 
 	test("sends the access token as a Bearer Authorization header", async () => {
-		const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				api_key: "sk-abc",
 				user: { sub: "u", email: "x@y.z", displayName: "X" },
@@ -95,9 +94,9 @@ describe("fetchApiKey", () => {
 
 describe("validateApiKey", () => {
 	test("returns true on a 2xx response from /key/info", async () => {
-		const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
-			jsonResponse(200, { key: "sk-abc", spend: 0 }),
-		);
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, { key: "sk-abc", spend: 0 }));
 		await expect(validateApiKey("sk-abc")).resolves.toBe(true);
 
 		const [url, init] = fetchSpy.mock.calls[0] as [
@@ -110,21 +109,21 @@ describe("validateApiKey", () => {
 	});
 
 	test("returns false on 401", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			new Response("Authentication Error", { status: 401 }),
 		);
 		await expect(validateApiKey("sk-bad")).resolves.toBe(false);
 	});
 
 	test("returns false on 403", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			new Response("Forbidden", { status: 403 }),
 		);
 		await expect(validateApiKey("sk-bad")).resolves.toBe(false);
 	});
 
 	test("throws on a 5xx response", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			new Response("oops", { status: 500, statusText: "Server Error" }),
 		);
 		await expect(validateApiKey("sk-x")).rejects.toThrow(
@@ -133,25 +132,25 @@ describe("validateApiKey", () => {
 	});
 
 	test("throws on network error", async () => {
-		spyOn(globalThis, "fetch").mockRejectedValue(
+		vi.spyOn(globalThis, "fetch").mockRejectedValue(
 			new Error("fetch failed: ECONNREFUSED"),
 		);
 		await expect(validateApiKey("sk-x")).rejects.toThrow("ECONNREFUSED");
 	});
 
 	test("strips a trailing /v1 from the baseUrl when targeting /key/info", async () => {
-		const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
-			jsonResponse(200, {}),
-		);
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, {}));
 		await validateApiKey("sk-y", "https://my-gw.example.com/v1");
 		const [url] = fetchSpy.mock.calls[0] as [string];
 		expect(url).toBe("https://my-gw.example.com/key/info");
 	});
 
 	test("handles a baseUrl without /v1", async () => {
-		const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
-			jsonResponse(200, {}),
-		);
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, {}));
 		await validateApiKey("sk-z", "https://gw.example.com/");
 		const [url] = fetchSpy.mock.calls[0] as [string];
 		expect(url).toBe("https://gw.example.com/key/info");
@@ -160,8 +159,6 @@ describe("validateApiKey", () => {
 
 describe("fetchSupabaseSession", () => {
 	let tempHome: string;
-	let homedirSpy: ReturnType<typeof spyOn>;
-
 	beforeEach(() => {
 		tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-proxy-test-")));
 		mkdirSync(join(tempHome, ".codev"), { recursive: true });
@@ -173,16 +170,16 @@ describe("fetchSupabaseSession", () => {
 				supabase_proxy_url: "https://api.test/api/codev",
 			}),
 		);
-		homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
+		vi.stubEnv("HOME", tempHome);
 	});
 
 	afterEach(() => {
-		homedirSpy.mockRestore();
+		vi.unstubAllEnvs();
 		rmSync(tempHome, { recursive: true, force: true });
 	});
 
 	test("posts to the configured supabase proxy URL", async () => {
-		const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				access_token: "supabase-token",
 				user: { id: "uid", email: "x@y.z" },
@@ -194,7 +191,7 @@ describe("fetchSupabaseSession", () => {
 	});
 
 	test("returns the Supabase session on a 2xx response", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				access_token: "supabase-token",
 				refresh_token: "refresh",
@@ -211,7 +208,7 @@ describe("fetchSupabaseSession", () => {
 	});
 
 	test("throws on a non-2xx response", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(401, { error: "invalid sso token" }),
 		);
 		await expect(fetchSupabaseSession("bad-token")).rejects.toThrow(
@@ -229,7 +226,7 @@ describe("fetchSupabaseSession", () => {
 
 describe("fetchCodevConfig", () => {
 	test("returns the three Supabase coordinates on a 2xx response", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				supabaseUrl: "https://x.supabase.co",
 				supabaseAnonKey: "anon",
@@ -244,7 +241,7 @@ describe("fetchCodevConfig", () => {
 	});
 
 	test("posts to the codev-proxy /config endpoint with a Bearer token", async () => {
-		const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				supabaseUrl: "u",
 				supabaseAnonKey: "a",
@@ -262,7 +259,7 @@ describe("fetchCodevConfig", () => {
 	});
 
 	test("throws on a non-2xx response with the proxy-supplied error", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(401, { error: "invalid sso" }),
 		);
 		await expect(fetchCodevConfig("bad")).rejects.toThrow(
@@ -271,7 +268,7 @@ describe("fetchCodevConfig", () => {
 	});
 
 	test("throws when the response is missing required fields", async () => {
-		spyOn(globalThis, "fetch").mockResolvedValue(
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, { supabaseUrl: "only-this" }),
 		);
 		await expect(fetchCodevConfig("token")).rejects.toThrow(

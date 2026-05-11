@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import {
 	existsSync,
@@ -9,26 +8,26 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { runUploadDaemon, spawner, spawnUploadDaemon } from "@/lib/upload.js";
 
 let tempHome: string;
 let projectCwd: string;
-let homedirSpy: ReturnType<typeof spyOn>;
-let cwdSpy: ReturnType<typeof spyOn>;
+let cwdSpy: MockInstance;
 
 beforeEach(() => {
 	tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-upload-daemon-")));
 	projectCwd = join(tempHome, "project");
 	mkdirSync(projectCwd, { recursive: true });
-	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
-	cwdSpy = spyOn(process, "cwd").mockReturnValue(projectCwd);
+	vi.stubEnv("HOME", tempHome);
+	cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(projectCwd);
 });
 
 afterEach(() => {
-	homedirSpy.mockRestore();
+	vi.unstubAllEnvs();
 	cwdSpy.mockRestore();
 	rmSync(tempHome, { recursive: true, force: true });
 	(globalThis.fetch as unknown as { mockRestore?: () => void }).mockRestore?.();
@@ -59,7 +58,7 @@ function writeLog(name = "a.md", content = "hello") {
 }
 
 function mockUploadHappyPath() {
-	spyOn(globalThis, "fetch").mockImplementation((async (
+	vi.spyOn(globalThis, "fetch").mockImplementation((async (
 		input: string | URL | Request,
 	) => {
 		const url =
@@ -190,7 +189,7 @@ describe("runUploadDaemon", () => {
 	test("supabase exchange failure writes ok=false status, releases lock", async () => {
 		writeAuth();
 		writeLog("new.md", "hello");
-		spyOn(globalThis, "fetch").mockImplementation((async (
+		vi.spyOn(globalThis, "fetch").mockImplementation((async (
 			input: string | URL | Request,
 		) => {
 			const url =
@@ -217,7 +216,7 @@ describe("runUploadDaemon", () => {
 	test("per-file upload failure leaves ok=false with errors and releases lock", async () => {
 		writeAuth();
 		writeLog("new.md", "hello");
-		spyOn(globalThis, "fetch").mockImplementation((async (
+		vi.spyOn(globalThis, "fetch").mockImplementation((async (
 			input: string | URL | Request,
 		) => {
 			const url =
@@ -260,7 +259,7 @@ describe("runUploadDaemon", () => {
 
 describe("spawnUploadDaemon", () => {
 	test("does not spawn when not logged in", () => {
-		const spawnSpy = spyOn(spawner, "spawn");
+		const spawnSpy = vi.spyOn(spawner, "spawn");
 		try {
 			spawnUploadDaemon();
 			expect(spawnSpy).not.toHaveBeenCalled();
@@ -273,8 +272,8 @@ describe("spawnUploadDaemon", () => {
 	test("spawns detached, unref'd child with --daemon when logged in", () => {
 		writeAuth();
 		const fakeChild = { unref: () => {} } as unknown as ChildProcess;
-		const unrefSpy = spyOn(fakeChild, "unref");
-		const spawnSpy = spyOn(spawner, "spawn").mockReturnValue(fakeChild);
+		const unrefSpy = vi.spyOn(fakeChild, "unref");
+		const spawnSpy = vi.spyOn(spawner, "spawn").mockReturnValue(fakeChild);
 		try {
 			spawnUploadDaemon();
 			expect(spawnSpy).toHaveBeenCalledTimes(1);
@@ -301,7 +300,7 @@ describe("spawnUploadDaemon", () => {
 
 	test("swallows spawn errors so the agent is never blocked", () => {
 		writeAuth();
-		const spawnSpy = spyOn(spawner, "spawn").mockImplementation(() => {
+		const spawnSpy = vi.spyOn(spawner, "spawn").mockImplementation(() => {
 			throw new Error("EAGAIN");
 		});
 		try {

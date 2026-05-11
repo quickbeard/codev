@@ -1,8 +1,7 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	SUPABASE_ANON_KEY,
 	SUPABASE_PROXY_URL,
@@ -10,15 +9,13 @@ import {
 } from "@/lib/const.js";
 
 let tempDir: string;
-let homedirSpy: ReturnType<typeof spyOn>;
-
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-const-"));
-	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempDir);
+	vi.stubEnv("HOME", tempDir);
 });
 
 afterEach(() => {
-	homedirSpy.mockRestore();
+	vi.unstubAllEnvs();
 	rmSync(tempDir, { recursive: true, force: true });
 });
 

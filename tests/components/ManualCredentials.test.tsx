@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { ManualCredentials } from "@/components/ManualCredentials.js";
 
 const BACKSPACE = String.fromCharCode(127);
@@ -14,7 +14,7 @@ afterEach(() => {
 
 describe("ManualCredentials", () => {
 	test("renders all three field labels", () => {
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { lastFrame } = render(<ManualCredentials onDone={onDone} />);
 		const output = lastFrame() ?? "";
 		expect(output).toContain("API URL");
@@ -23,7 +23,7 @@ describe("ManualCredentials", () => {
 	});
 
 	test("typed characters appear in the active field", async () => {
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
 
 		stdin.write("https://example.com/v1");
@@ -33,7 +33,7 @@ describe("ManualCredentials", () => {
 	});
 
 	test("Enter advances through all three fields and submits", async () => {
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { stdin } = render(<ManualCredentials onDone={onDone} />);
 
 		stdin.write("https://example.com/v1");
@@ -58,7 +58,7 @@ describe("ManualCredentials", () => {
 	});
 
 	test("trims surrounding whitespace from submitted values", async () => {
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { stdin } = render(<ManualCredentials onDone={onDone} />);
 
 		stdin.write("  https://example.com  ");
@@ -82,7 +82,7 @@ describe("ManualCredentials", () => {
 	});
 
 	test("Enter on an empty field shows an error and does not advance", async () => {
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
 
 		stdin.write("\r");
@@ -94,7 +94,7 @@ describe("ManualCredentials", () => {
 	});
 
 	test("Enter on an all-whitespace field shows the required error", async () => {
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
 
 		stdin.write("   ");
@@ -108,7 +108,7 @@ describe("ManualCredentials", () => {
 	});
 
 	test("backspace removes the last character of the active field", async () => {
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
 
 		stdin.write("abc");
@@ -125,7 +125,7 @@ describe("ManualCredentials", () => {
 	});
 
 	test("does not advance past the required error until user types a value", async () => {
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
 
 		// Empty Enter -> error
@@ -147,7 +147,7 @@ describe("ManualCredentials", () => {
 	});
 
 	test("readOnly ignores all keyboard input", async () => {
-		const onDone = mock();
+		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(
 			<ManualCredentials onDone={onDone} readOnly={true} />,
 		);

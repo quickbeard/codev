@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { FetchApiKey } from "@/components/FetchApiKey.js";
 import * as auth from "@/lib/auth.js";
 import * as proxy from "@/lib/proxy.js";
@@ -19,11 +19,11 @@ function fakeAuth(): auth.AuthData {
 
 describe("FetchApiKey", () => {
 	test("calls onDone and renders a success line after a successful fetch", async () => {
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
-		const saveSpy = spyOn(auth, "saveApiKey").mockImplementation(() => {});
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		const saveSpy = vi.spyOn(auth, "saveApiKey").mockImplementation(() => {});
 
-		const onDone = mock();
-		const onFallback = mock();
+		const onDone = vi.fn();
+		const onFallback = vi.fn();
 		const { lastFrame } = render(
 			<FetchApiKey auth={fakeAuth()} onDone={onDone} onFallback={onFallback} />,
 		);
@@ -38,10 +38,10 @@ describe("FetchApiKey", () => {
 	});
 
 	test("shows retry prompt on first empty key", async () => {
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("");
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("");
 
-		const onDone = mock();
-		const onFallback = mock();
+		const onDone = vi.fn();
+		const onFallback = vi.fn();
 		const { lastFrame } = render(
 			<FetchApiKey auth={fakeAuth()} onDone={onDone} onFallback={onFallback} />,
 		);
@@ -57,15 +57,16 @@ describe("FetchApiKey", () => {
 	});
 
 	test("retry on empty re-calls fetchApiKey with the same access_token", async () => {
-		const fetchSpy = spyOn(proxy, "fetchApiKey")
+		const fetchSpy = vi
+			.spyOn(proxy, "fetchApiKey")
 			.mockImplementationOnce(() => Promise.resolve(""))
 			.mockImplementationOnce(() => Promise.resolve("sk-second-try"));
-		spyOn(auth, "saveApiKey").mockImplementation(() => {});
+		vi.spyOn(auth, "saveApiKey").mockImplementation(() => {});
 		fetchSpy.mockClear();
 
 		const authData = fakeAuth();
-		const onDone = mock();
-		const onFallback = mock();
+		const onDone = vi.fn();
+		const onFallback = vi.fn();
 		const { stdin } = render(
 			<FetchApiKey auth={authData} onDone={onDone} onFallback={onFallback} />,
 		);
@@ -82,10 +83,10 @@ describe("FetchApiKey", () => {
 	});
 
 	test("second empty result shows manual fallback prompt", async () => {
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("");
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("");
 
-		const onDone = mock();
-		const onFallback = mock();
+		const onDone = vi.fn();
+		const onFallback = vi.fn();
 		const { stdin, lastFrame } = render(
 			<FetchApiKey auth={fakeAuth()} onDone={onDone} onFallback={onFallback} />,
 		);
@@ -104,10 +105,10 @@ describe("FetchApiKey", () => {
 	});
 
 	test("Enter on the manual fallback prompt calls onFallback", async () => {
-		spyOn(proxy, "fetchApiKey").mockResolvedValue("");
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("");
 
-		const onDone = mock();
-		const onFallback = mock();
+		const onDone = vi.fn();
+		const onFallback = vi.fn();
 		const { stdin } = render(
 			<FetchApiKey auth={fakeAuth()} onDone={onDone} onFallback={onFallback} />,
 		);
@@ -123,12 +124,12 @@ describe("FetchApiKey", () => {
 	});
 
 	test("shows error and retry prompt on fetchApiKey rejection", async () => {
-		spyOn(proxy, "fetchApiKey").mockRejectedValue(
+		vi.spyOn(proxy, "fetchApiKey").mockRejectedValue(
 			new Error("Proxy /auth/exchange failed (502): boom"),
 		);
 
-		const onDone = mock();
-		const onFallback = mock();
+		const onDone = vi.fn();
+		const onFallback = vi.fn();
 		const { lastFrame } = render(
 			<FetchApiKey auth={fakeAuth()} onDone={onDone} onFallback={onFallback} />,
 		);
@@ -143,14 +144,15 @@ describe("FetchApiKey", () => {
 	});
 
 	test("Enter retries after a fetchApiKey error and succeeds on second attempt", async () => {
-		const fetchSpy = spyOn(proxy, "fetchApiKey")
+		const fetchSpy = vi
+			.spyOn(proxy, "fetchApiKey")
 			.mockImplementationOnce(() => Promise.reject(new Error("transient")))
 			.mockImplementationOnce(() => Promise.resolve("sk-recovered"));
-		spyOn(auth, "saveApiKey").mockImplementation(() => {});
+		vi.spyOn(auth, "saveApiKey").mockImplementation(() => {});
 		fetchSpy.mockClear();
 
-		const onDone = mock();
-		const onFallback = mock();
+		const onDone = vi.fn();
+		const onFallback = vi.fn();
 		const { stdin, lastFrame } = render(
 			<FetchApiKey auth={fakeAuth()} onDone={onDone} onFallback={onFallback} />,
 		);

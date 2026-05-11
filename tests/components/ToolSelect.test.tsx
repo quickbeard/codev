@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { ToolSelect } from "@/components/ToolSelect.js";
 
 afterEach(() => {
@@ -8,7 +8,7 @@ afterEach(() => {
 
 describe("ToolSelect", () => {
 	test("renders all tool options", () => {
-		const onConfirm = mock();
+		const onConfirm = vi.fn();
 		const { lastFrame } = render(<ToolSelect onConfirm={onConfirm} />);
 
 		const output = lastFrame() ?? "";
@@ -18,7 +18,7 @@ describe("ToolSelect", () => {
 	});
 
 	test("renders unchecked checkboxes by default", () => {
-		const onConfirm = mock();
+		const onConfirm = vi.fn();
 		const { lastFrame } = render(<ToolSelect onConfirm={onConfirm} />);
 
 		const output = lastFrame() ?? "";
@@ -27,7 +27,7 @@ describe("ToolSelect", () => {
 	});
 
 	test("selects tool with space", async () => {
-		const onConfirm = mock();
+		const onConfirm = vi.fn();
 		const { lastFrame, stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
 		stdin.write(" ");
@@ -38,7 +38,7 @@ describe("ToolSelect", () => {
 	});
 
 	test("calls onConfirm with selected tools on enter", async () => {
-		const onConfirm = mock();
+		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
 		stdin.write(" ");
@@ -50,7 +50,7 @@ describe("ToolSelect", () => {
 	});
 
 	test("does not call onConfirm when no tools selected", async () => {
-		const onConfirm = mock();
+		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
 		stdin.write("\r");
@@ -60,7 +60,7 @@ describe("ToolSelect", () => {
 	});
 
 	test("can select multiple tools", async () => {
-		const onConfirm = mock();
+		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
 		stdin.write(" ");
@@ -78,7 +78,7 @@ describe("ToolSelect", () => {
 	});
 
 	test("can select Codex by moving cursor down once", async () => {
-		const onConfirm = mock();
+		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
 		stdin.write("\x1B[B");
@@ -92,7 +92,7 @@ describe("ToolSelect", () => {
 	});
 
 	test("can deselect a tool", async () => {
-		const onConfirm = mock();
+		const onConfirm = vi.fn();
 		const { lastFrame, stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
 		stdin.write(" ");

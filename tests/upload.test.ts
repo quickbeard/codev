@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -6,9 +5,10 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	fileSha256,
 	filterNewFiles,
@@ -19,19 +19,18 @@ import {
 
 let tempHome: string;
 let projectCwd: string;
-let homedirSpy: ReturnType<typeof spyOn>;
-let cwdSpy: ReturnType<typeof spyOn>;
+let cwdSpy: MockInstance;
 
 beforeEach(() => {
 	tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-upload-")));
 	projectCwd = join(tempHome, "project");
 	mkdirSync(projectCwd, { recursive: true });
-	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
-	cwdSpy = spyOn(process, "cwd").mockReturnValue(projectCwd);
+	vi.stubEnv("HOME", tempHome);
+	cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(projectCwd);
 });
 
 afterEach(() => {
-	homedirSpy.mockRestore();
+	vi.unstubAllEnvs();
 	cwdSpy.mockRestore();
 	rmSync(tempHome, { recursive: true, force: true });
 });
@@ -115,7 +114,7 @@ describe("runUpload", () => {
 		writeAuth();
 		writeLog("new.md", "hello");
 		const calls: string[] = [];
-		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
 			input: string | URL | Request,
 			init?: RequestInit,
 		) => {
@@ -184,7 +183,7 @@ describe("runUpload", () => {
 
 		let configCalls = 0;
 		let conversationCalls = 0;
-		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
 			input: string | URL | Request,
 		) => {
 			const url =
@@ -258,7 +257,7 @@ describe("runUpload", () => {
 
 		let configCalls = 0;
 		let conversationCalls = 0;
-		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
 			input: string | URL | Request,
 		) => {
 			const url =
@@ -312,7 +311,7 @@ describe("runUpload", () => {
 
 		let configCalls = 0;
 		let conversationCalls = 0;
-		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
 			input: string | URL | Request,
 		) => {
 			const url =
@@ -381,7 +380,7 @@ describe("runUpload", () => {
 
 		let configCalls = 0;
 		let presignCalls = 0;
-		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
 			input: string | URL | Request,
 		) => {
 			const url =
@@ -438,7 +437,7 @@ describe("runUpload", () => {
 
 		let configCalls = 0;
 		let conversationCalls = 0;
-		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
 			input: string | URL | Request,
 		) => {
 			const url =

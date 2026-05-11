@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { TaskList } from "@/components/TaskList.js";
 
 const VERB = {
@@ -46,7 +46,7 @@ describe("TaskList", () => {
 	});
 
 	test("marks a task as done and calls onDone(true) on success", async () => {
-		const onDone = mock(() => {});
+		const onDone = vi.fn(() => {});
 		const { frames } = render(
 			<TaskList
 				tasks={[{ key: "a", label: "pkg-a", run: () => Promise.resolve(null) }]}
@@ -61,7 +61,7 @@ describe("TaskList", () => {
 	});
 
 	test("marks a task as failed and uses the infinitive verb in the error", async () => {
-		const onDone = mock(() => {});
+		const onDone = vi.fn(() => {});
 		const { frames } = render(
 			<TaskList
 				tasks={[
@@ -109,7 +109,7 @@ describe("TaskList", () => {
 		// "Updated pkg-X"/"Failed to ..." commit to the terminal. onDone must
 		// run only after React has committed the terminal status for every row.
 		let frameAtDone: string | null = null;
-		const captureFrame = mock((_success: boolean) => {});
+		const captureFrame = vi.fn((_success: boolean) => {});
 		const onDone = (success: boolean) => {
 			frameAtDone = lastFrame() ?? "";
 			captureFrame(success);
@@ -165,7 +165,7 @@ describe("TaskList", () => {
 	});
 
 	test("calls onDone(false) if any task fails, even when others succeed", async () => {
-		const onDone = mock(() => {});
+		const onDone = vi.fn(() => {});
 		render(
 			<TaskList
 				tasks={[

@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import type * as childProcess from "node:child_process";
+import type { MockInstance } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ensureNodeSqliteOrReexec, spawner } from "@/lib/reexec.js";
 
 // `bun test` runs under Bun, which doesn't expose node:sqlite. That makes
@@ -19,14 +20,14 @@ async function nodeSqliteAvailable(): Promise<boolean> {
 	}
 }
 
-let spawnSyncSpy: ReturnType<typeof spyOn>;
+let spawnSyncSpy: MockInstance;
 let originalArgv: string[];
 let originalExecArgv: string[];
 
 beforeEach(() => {
 	originalArgv = process.argv;
 	originalExecArgv = process.execArgv;
-	spawnSyncSpy = spyOn(spawner, "spawnSync");
+	spawnSyncSpy = vi.spyOn(spawner, "spawnSync");
 });
 
 afterEach(() => {

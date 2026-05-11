@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { AuthMethod } from "@/components/AuthMethod.js";
 
 const DOWN = `${String.fromCharCode(27)}[B`;
@@ -11,7 +11,7 @@ afterEach(() => {
 
 describe("AuthMethod", () => {
 	test("renders all options", () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { lastFrame } = render(<AuthMethod onSelect={onSelect} />);
 		const output = lastFrame() ?? "";
 		expect(output).toContain("Get a new API Key");
@@ -20,7 +20,7 @@ describe("AuthMethod", () => {
 	});
 
 	test("Enter picks 'new' (default cursor at index 0)", async () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { stdin } = render(<AuthMethod onSelect={onSelect} />);
 
 		stdin.write("\r");
@@ -31,7 +31,7 @@ describe("AuthMethod", () => {
 	});
 
 	test("down arrow + Enter picks manual", async () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { stdin } = render(<AuthMethod onSelect={onSelect} />);
 
 		stdin.write(DOWN);
@@ -44,7 +44,7 @@ describe("AuthMethod", () => {
 	});
 
 	test("down then up returns cursor to 'new'", async () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { stdin } = render(<AuthMethod onSelect={onSelect} />);
 
 		stdin.write(DOWN);
@@ -58,7 +58,7 @@ describe("AuthMethod", () => {
 	});
 
 	test("down arrow does not move past the last option", async () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { stdin } = render(<AuthMethod onSelect={onSelect} />);
 
 		// Press down many times — cursor should clamp at the last option ("skip").
@@ -73,7 +73,7 @@ describe("AuthMethod", () => {
 	});
 
 	test("down twice + Enter picks 'skip'", async () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { stdin } = render(<AuthMethod onSelect={onSelect} />);
 
 		stdin.write(DOWN);
@@ -87,7 +87,7 @@ describe("AuthMethod", () => {
 	});
 
 	test("readOnly ignores keyboard input", async () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { stdin } = render(
 			<AuthMethod onSelect={onSelect} readOnly={true} />,
 		);
@@ -101,7 +101,7 @@ describe("AuthMethod", () => {
 	});
 
 	test("renders the selected option with a filled marker", () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { lastFrame } = render(
 			<AuthMethod onSelect={onSelect} selected="manual" readOnly={true} />,
 		);
@@ -114,7 +114,7 @@ describe("AuthMethod", () => {
 	});
 
 	test("hasExisting=true renders three options with 'existing' first", () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { lastFrame } = render(
 			<AuthMethod onSelect={onSelect} hasExisting={true} />,
 		);
@@ -134,7 +134,7 @@ describe("AuthMethod", () => {
 	});
 
 	test("hasExisting=true: Enter picks 'existing' (default cursor at index 0)", async () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { stdin } = render(
 			<AuthMethod onSelect={onSelect} hasExisting={true} />,
 		);
@@ -147,7 +147,7 @@ describe("AuthMethod", () => {
 	});
 
 	test("hasExisting=true: down + Enter picks 'new'", async () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { stdin } = render(
 			<AuthMethod onSelect={onSelect} hasExisting={true} />,
 		);
@@ -161,7 +161,7 @@ describe("AuthMethod", () => {
 	});
 
 	test("hasExisting=true: down twice + Enter picks 'manual'", async () => {
-		const onSelect = mock();
+		const onSelect = vi.fn();
 		const { stdin } = render(
 			<AuthMethod onSelect={onSelect} hasExisting={true} />,
 		);
