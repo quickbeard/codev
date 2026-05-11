@@ -1,4 +1,4 @@
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
 import { useCallback, useState } from "react";
 import type { AuthMethodChoice } from "@/components/AuthMethod.js";
@@ -82,13 +82,6 @@ const POST_AUTH: Phase[] = ["configuring", "configure-failed", "done"];
 
 export function InstallApp() {
 	const { exit } = useApp();
-	// Pin Ink's raw-mode reference count above zero for the entire install
-	// flow. Without this, the Login → Install → validating-existing window has
-	// no useInput mounted and Ink lets stdin fall back to cooked mode; on
-	// Windows ConPTY, re-engaging raw mode when AuthMethod mounts swallows the
-	// first keystroke (key events arrive line-buffered until a flush). macOS
-	// and Linux toggle raw mode atomically via tcsetattr and don't need this.
-	useInput(() => {});
 	const [step, setStep] = useState<Phase>("select");
 	const [tools, setTools] = useState<Tool[]>([]);
 	const [auth, setAuth] = useState<AuthData | null>(null);
