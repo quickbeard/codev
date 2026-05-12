@@ -1,5 +1,3 @@
-// Shebang is injected by the bundler (build.ts banner) so the shipped
-// `dist/index.js` is exec-runnable; dev tools (`tsx`, Bun) don't need it.
 import { render } from "ink";
 import { InstallApp } from "@/InstallApp.js";
 import { logout } from "@/lib/auth.js";

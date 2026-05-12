@@ -4,7 +4,7 @@ globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
 alwaysApply: false
 ---
 
-This is a Node.js project. The shipped bin (`dist/index.js`) runs under plain Node, and the dev/build/test toolchain runs under Node too — no Bun anywhere. Do not introduce `bun:*` imports or `Bun.*` runtime APIs.
+This is a Node.js project. The shipped bin (`dist/index.js`) runs under plain Node, and the dev/build/test toolchain runs under Node too.
 
 - Use `pnpm` for installs, scripts, and `pnpm exec`. Don't use `npm`/`yarn`/`bun install`.
 - Use `tsx <file>` to run TypeScript/TSX directly (e.g. `pnpm dev` → `tsx src/index.tsx`). Don't use `ts-node`. The dev script is one-shot, not watch — codev is an interactive Ink CLI, so respawning mid-flow would corrupt the TTY.
@@ -38,6 +38,7 @@ The CLI is layered. Each layer has one job and only depends on the layer below i
 - `src/providers/*.ts` — agent-specific reader implementations used by `src/lib/export.ts` (one file per agent).
 
 When adding a new command:
+
 1. Add a `src/<Name>App.tsx` for its Ink root.
 2. Put any phase-specific Ink components in `src/components/`.
 3. Put non-UI logic in `src/lib/<name>.ts` (or a folder if it grows beyond a couple of files).
@@ -72,7 +73,7 @@ Always run these commands after making changes and ensure they pass:
 
 - Use `node:fs/promises` (`readFile`, `writeFile`) for async I/O. `node:fs` sync APIs (`readFileSync`, `writeFileSync`, `mkdirSync`, `chmodSync`, etc.) are fine when synchronous behavior is required.
 - Use `node:crypto` for hashing (`createHash("sha256")`). Use `node:zlib` for gzip (`gzipSync`).
-- Use `node:child_process` (`spawn`, `spawnSync`) or `execa` for shelling out — not Bun's `$`.
+- Use `node:child_process` (`spawn`, `spawnSync`) or `execa` for shelling out.
 - Use built-in `fetch` and `WebSocket` (available in Node 22+).
 - **SQLite is built into Node** via `node:sqlite`. It stabilized in Node 23.5; on Node 22.5–23.4 it requires the `--experimental-sqlite` flag. `src/index.tsx` probes for the module at the entry of `case "upload"` and re-execs itself with the flag (via `src/lib/reexec.ts`) when the probe fails, so the rest of the code can `import { DatabaseSync } from "node:sqlite"` unconditionally.
 
