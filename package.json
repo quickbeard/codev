@@ -42,22 +42,22 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "ink": "^7.0.1",
+    "ink": "^7.0.2",
     "ink-spinner": "^5.0.0",
     "open": "^11.0.0",
-    "react": "^19.2.5"
+    "react": "^19.2.6"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.13",
+    "@biomejs/biome": "^2.4.15",
     "@types/iarna__toml": "^2.0.5",
-    "@types/node": "^22.10.0",
+    "@types/node": "^22.19.19",
     "@types/react": "^19.2.14",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.25.12",
     "husky": "^9.1.7",
     "ink-testing-library": "^4.0.0",
     "lint-staged": "^16.4.0",
-    "tsx": "^4.20.0",
+    "tsx": "^4.21.0",
     "typescript": "^6.0.3",
-    "vitest": "^3.0.0"
+    "vitest": "^3.2.4"
   }
 }
