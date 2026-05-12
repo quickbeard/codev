@@ -139,8 +139,6 @@ describe("Login", () => {
 			.spyOn(auth, "login")
 			.mockImplementationOnce(() => Promise.reject(new Error("transient")))
 			.mockImplementationOnce(() => Promise.resolve(authData));
-		// bun's spyOn retains call counts across tests in the same file; clear
-		// them so the per-test "called twice" assertion counts only this test.
 		loginSpy.mockClear();
 
 		const onDone = vi.fn();

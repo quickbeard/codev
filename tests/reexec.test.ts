@@ -3,14 +3,6 @@ import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ensureNodeSqliteOrReexec, spawner } from "@/lib/reexec.js";
 
-// `bun test` runs under Bun, which doesn't expose node:sqlite. That makes
-// the failure paths of ensureNodeSqliteOrReexec() trivially reachable here:
-// the initial `import("node:sqlite")` always throws, so the function falls
-// through to the re-exec/error logic and we can assert on it.
-//
-// If Bun ever ships node:sqlite, the probe at the top of each test will see
-// the import succeed and skip the failure-path assertions. The Node-runtime
-// "ok" path is covered end-to-end by tests/providers/opencode.node.test.ts.
 async function nodeSqliteAvailable(): Promise<boolean> {
 	try {
 		await import("node:sqlite");

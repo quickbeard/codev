@@ -142,8 +142,6 @@ function allFrames(frames: string[]): string {
 
 afterEach(() => {
 	cleanup();
-	// Restore any spyOn mocks created during a test so they don't leak across
-	// test files (bun's spyOn-on-imported-modules patches the live binding).
 	vi.restoreAllMocks();
 	rmSync(installAppTempHome, { recursive: true, force: true });
 });
@@ -276,7 +274,6 @@ describe("InstallApp fail-stop invariant", () => {
 					created: true,
 				},
 			]);
-		// bun's spyOn keeps call counts across tests in the same file.
 		configureCodexSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
