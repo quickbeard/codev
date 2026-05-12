@@ -1,18 +1,16 @@
 ---
-description: Use Bun instead of Node.js, npm, pnpm, or vite.
+description: Node-only CLI; pnpm + tsx + vitest + esbuild.
 globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
 alwaysApply: false
 ---
 
-Default to using Bun instead of Node.js.
+This is a Node.js project. The shipped bin (`dist/index.js`) runs under plain Node, and the dev/build/test toolchain runs under Node too — no Bun anywhere. Do not introduce `bun:*` imports or `Bun.*` runtime APIs.
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+- Use `pnpm` for installs, scripts, and `pnpm exec`. Don't use `npm`/`yarn`/`bun install`.
+- Use `tsx <file>` to run TypeScript/TSX directly (e.g. `pnpm dev` → `tsx src/index.tsx`). Don't use `ts-node`. The dev script is one-shot, not watch — codev is an interactive Ink CLI, so respawning mid-flow would corrupt the TTY.
+- Use `vitest` for tests (`pnpm test`). Don't use `jest`.
+- Use `esbuild` for bundling (driven by `build.ts` via `pnpm build`). Don't use `webpack`/`rollup`/`Bun.build`.
+- Use `.env` via Node's built-in support (`node --env-file=.env`) or a per-script setup. Don't add `dotenv`.
 
 ## React
 
@@ -65,34 +63,32 @@ import { runUpload } from "./lib/upload.js";
 
 Always run these commands after making changes and ensure they pass:
 
-- `bun run fix` — lint and format with Biome
-- `bun run typecheck` — type-check with TypeScript
-- `bun test` — run tests
-- `bun run build && node dist/index.js --version` — bundle the CLI and smoke-test it under Node. The shipped bundle runs under Node (`bin: dist/index.js`), not Bun, so anything that links cleanly under `bun dev` but breaks under Node's ESM loader (e.g. a stray `bun:` import) will only surface here. `bun dev` alone is not enough.
+- `pnpm fix` — lint and format with Biome
+- `pnpm typecheck` — type-check with TypeScript
+- `pnpm test` — run tests (Vitest)
+- `pnpm build && node dist/index.js --version` — bundle the CLI and smoke-test it under Node. The shipped bundle runs under Node (`bin: dist/index.js`); the smoke run catches anything that compiles cleanly but fails at module-link time under Node's ESM loader.
 
 ## APIs
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- SQLite is runtime-split: production runs under Node and uses the built-in `node:sqlite`; `bun test` uses `bun:sqlite`. Production modules that need SQLite (e.g. `src/providers/opencode.ts`) pick the driver at runtime via `typeof Bun !== "undefined"` and dynamic imports — never put a top-level `import ... from "bun:sqlite"` in any module reachable from `src/index.tsx`, because Node's ESM loader rejects the `bun:` scheme with `ERR_UNSUPPORTED_ESM_URL_SCHEME` at link time. `node:sqlite` is gated behind `--experimental-sqlite` on Node 22.5–23.4; `src/index.tsx` re-execs itself with that flag at the entry of `case "upload"` (via `src/lib/reexec.ts`) when the runtime probe fails, so the rest of the code can import `node:sqlite` unconditionally.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` for async reads/writes. `node:fs` sync APIs (`readFileSync`, `writeFileSync`, `mkdirSync`, `chmodSync`, etc.) are fine when synchronous behavior is required — Bun.file is async-only.
-- Bun.$`ls` instead of execa.
+- Use `node:fs/promises` (`readFile`, `writeFile`) for async I/O. `node:fs` sync APIs (`readFileSync`, `writeFileSync`, `mkdirSync`, `chmodSync`, etc.) are fine when synchronous behavior is required.
+- Use `node:crypto` for hashing (`createHash("sha256")`). Use `node:zlib` for gzip (`gzipSync`).
+- Use `node:child_process` (`spawn`, `spawnSync`) or `execa` for shelling out — not Bun's `$`.
+- Use built-in `fetch` and `WebSocket` (available in Node 22+).
+- **SQLite is built into Node** via `node:sqlite`. It stabilized in Node 23.5; on Node 22.5–23.4 it requires the `--experimental-sqlite` flag. `src/index.tsx` probes for the module at the entry of `case "upload"` and re-execs itself with the flag (via `src/lib/reexec.ts`) when the probe fails, so the rest of the code can `import { DatabaseSync } from "node:sqlite"` unconditionally.
 
 ## Testing
 
-Use `bun test` to run tests.
+Use Vitest (`pnpm test`). The API is close to Jest's:
 
 ```ts#index.test.ts
-import { test, expect } from "bun:test";
+import { test, expect } from "vitest";
 
 test("hello world", () => {
   expect(1).toBe(1);
 });
 ```
 
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+For mocks and spies use `vi`: `vi.fn()` to create a mock function, `vi.spyOn(obj, "method")` to spy on an existing one. Use the `MockInstance` type from `vitest` to type-annotate spy variables.
 
 When removing a string, label, or branch, don't pin its absence with `expect(...).not.toContain("removed string")`. The string is no longer anywhere in the source — nothing realistic could put it back — so the assertion only documents history. Update or delete the positive assertion instead. Negative assertions remain legitimate when the string is still emitted by **another branch of the same render**: e.g., a Confirm test that asserts the "no backup yet" arrow does NOT appear when rendering the "backup already exists" branch is pinning a conditional, not a deleted feature.
 

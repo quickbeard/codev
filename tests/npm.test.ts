@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
 	detectInstalledViaNpm,
 	installAndVerify,
@@ -8,6 +8,19 @@ import {
 	npmGlobalRoot,
 	verifyInstall,
 } from "@/lib/npm.js";
+
+// ESM module namespaces are frozen — vi.spyOn can't redefine `execFile` /
+// `existsSync` directly. We replace them up-front with vi.fn() via vi.mock()
+// (which vitest hoists above all imports), then per-test we call
+// `vi.mocked(...).mockImplementation(...)` to wire behavior.
+vi.mock("node:child_process", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:child_process")>();
+	return { ...actual, execFile: vi.fn() };
+});
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs")>();
+	return { ...actual, existsSync: vi.fn(actual.existsSync) };
+});
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
 
@@ -29,7 +42,7 @@ interface StubOptions {
 
 function stubExecFile(opts: StubOptions): ExecCall[] {
 	const calls: ExecCall[] = [];
-	spyOn(child_process, "execFile").mockImplementation(((
+	vi.mocked(child_process.execFile).mockImplementation(((
 		file: string,
 		args: string[],
 		...rest: unknown[]
@@ -44,9 +57,9 @@ function stubExecFile(opts: StubOptions): ExecCall[] {
 }
 
 afterEach(() => {
-	// bun's spyOn carries across tests in the same file; restore all mocks.
-	// biome-ignore lint/suspicious/noExplicitAny: test cleanup
-	(spyOn as any).mockRestore?.();
+	vi.restoreAllMocks();
+	vi.mocked(child_process.execFile).mockReset();
+	vi.mocked(fs.existsSync).mockReset();
 });
 
 describe("npm.ts", () => {
@@ -170,7 +183,7 @@ describe("npm.ts", () => {
 
 		test("claude-code: runs postinstall recovery and re-verifies", async () => {
 			let claudeCalls = 0;
-			const existsSpy = spyOn(fs, "existsSync").mockImplementation(() => true);
+			const existsSpy = vi.mocked(fs.existsSync).mockImplementation(() => true);
 			stubExecFile({
 				handler: (file, args) => {
 					if (file === "npm" && args[0] === "install") return { stdout: "ok" };
@@ -196,7 +209,7 @@ describe("npm.ts", () => {
 		});
 
 		test("claude-code: reports postinstall-recovery failure", async () => {
-			const existsSpy = spyOn(fs, "existsSync").mockImplementation(() => true);
+			const existsSpy = vi.mocked(fs.existsSync).mockImplementation(() => true);
 			stubExecFile({
 				handler: (file, args) => {
 					if (file === "npm" && args[0] === "install") return { stdout: "ok" };
@@ -425,10 +438,12 @@ describe("npm.ts", () => {
 	describe("detectInstalledViaNpm", () => {
 		test("returns true when package dir exists under npm root", async () => {
 			stubExecFile({ handler: () => ({ stdout: "/fake/root" }) });
-			const existsSpy = spyOn(fs, "existsSync").mockImplementation(
-				(p: fs.PathLike) =>
-					String(p) === "/fake/root/@anthropic-ai/claude-code",
-			);
+			const existsSpy = vi
+				.mocked(fs.existsSync)
+				.mockImplementation(
+					(p: fs.PathLike) =>
+						String(p) === "/fake/root/@anthropic-ai/claude-code",
+				);
 			const got = await detectInstalledViaNpm("claude-code");
 			expect(got).toBe(true);
 			existsSpy.mockRestore();
@@ -436,7 +451,9 @@ describe("npm.ts", () => {
 
 		test("returns false when package dir missing", async () => {
 			stubExecFile({ handler: () => ({ stdout: "/fake/root" }) });
-			const existsSpy = spyOn(fs, "existsSync").mockImplementation(() => false);
+			const existsSpy = vi
+				.mocked(fs.existsSync)
+				.mockImplementation(() => false);
 			const got = await detectInstalledViaNpm("opencode");
 			expect(got).toBe(false);
 			existsSpy.mockRestore();

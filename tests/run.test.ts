@@ -1,15 +1,16 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
+import type { MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { runAgent } from "@/lib/run.js";
 
 let tempDir: string;
-let errorSpy: ReturnType<typeof spyOn>;
+let errorSpy: MockInstance;
 
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-run-test-"));
-	errorSpy = spyOn(console, "error").mockImplementation(() => {});
+	errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {

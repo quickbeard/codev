@@ -81,10 +81,12 @@ export async function fetchCodevConfig(
 }
 
 // Manual creds may include a `/v1` suffix (OpenAI-style); /key/info lives at
-// the gateway root, so strip a trailing v1 segment before joining.
+// the gateway root, so strip a trailing v1 segment before joining. Falls
+// back to AI_GATEWAY_URL when the saved key has no base_url (SSO-fetched
+// keys don't store one).
 function keyInfoUrl(baseUrl?: string): string {
-	if (!baseUrl) return `${AI_GATEWAY_URL}key/info`;
-	const stripped = baseUrl.replace(/\/?v1\/?$/, "");
+	const base = baseUrl ?? AI_GATEWAY_URL;
+	const stripped = base.replace(/\/?v1\/?$/, "");
 	const trailing = stripped.endsWith("/") ? stripped : `${stripped}/`;
 	return `${trailing}key/info`;
 }

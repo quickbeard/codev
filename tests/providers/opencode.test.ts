@@ -1,35 +1,44 @@
-// Tests run under `bun test`, so the seed code uses `bun:sqlite`. The SUT
-// (openCodeProvider) picks its driver at runtime — under Bun it also opens
-// the file via `bun:sqlite`. Both libraries read the same on-disk format.
-import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync as Database } from "node:sqlite";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { openCodeProvider } from "@/providers/opencode.js";
 
+// node:sqlite has no `run(db, sql, params)` shortcut — DDL uses `exec`, DML uses
+// `prepare(sql).run(...params)`. Wrap both shapes so the seed code stays terse.
+function run(db: Database, sql: string, params: unknown[] = []): void {
+	if (params.length === 0) {
+		db.exec(sql);
+		return;
+	}
+	// biome-ignore lint/suspicious/noExplicitAny: SQLInputValue bind-type widening
+	db.prepare(sql).run(...(params as any[]));
+}
+
 let tempHome: string;
-let homedirSpy: ReturnType<typeof spyOn>;
 let projectCwd: string;
 let dbPath: string;
 
 function createSchema(db: Database): void {
-	db.run("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)");
-	db.run(
+	run(db, "CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)");
+	run(
+		db,
 		"CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, slug TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER)",
 	);
-	db.run(
+	run(
+		db,
 		"CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT)",
 	);
-	db.run(
+	run(
+		db,
 		"CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT)",
 	);
 }
 
 beforeEach(() => {
 	tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-opencode-")));
-	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
+	vi.stubEnv("HOME", tempHome);
 	projectCwd = join(tempHome, "works", "myapp");
 	mkdirSync(projectCwd, { recursive: true });
 	const dataDir = join(tempHome, ".local", "share", "opencode");
@@ -38,7 +47,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	homedirSpy.mockRestore();
+	vi.unstubAllEnvs();
 	rmSync(tempHome, { recursive: true, force: true });
 	delete process.env.XDG_DATA_HOME;
 });
@@ -46,11 +55,12 @@ afterEach(() => {
 function seedProjectAndSession(): void {
 	const db = new Database(dbPath);
 	createSchema(db);
-	db.run("INSERT INTO project (id, worktree) VALUES (?, ?)", [
+	run(db, "INSERT INTO project (id, worktree) VALUES (?, ?)", [
 		"proj-1",
 		projectCwd,
 	]);
-	db.run(
+	run(
+		db,
 		"INSERT INTO session (id, project_id, slug, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		[
 			"ses-1",
@@ -62,7 +72,8 @@ function seedProjectAndSession(): void {
 			Math.floor(Date.UTC(2026, 3, 27, 19, 0, 0) / 1000),
 		],
 	);
-	db.run(
+	run(
+		db,
 		"INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
 		[
 			"msg-1",
@@ -71,7 +82,8 @@ function seedProjectAndSession(): void {
 			JSON.stringify({ role: "user" }),
 		],
 	);
-	db.run(
+	run(
+		db,
 		"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
 		[
 			"part-1",
@@ -81,7 +93,8 @@ function seedProjectAndSession(): void {
 			JSON.stringify({ type: "text", text: "Refactor the auth module" }),
 		],
 	);
-	db.run(
+	run(
+		db,
 		"INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
 		[
 			"msg-2",
@@ -90,7 +103,8 @@ function seedProjectAndSession(): void {
 			JSON.stringify({ role: "assistant", modelID: "claude-sonnet-4-5" }),
 		],
 	);
-	db.run(
+	run(
+		db,
 		"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
 		[
 			"part-2",
@@ -101,7 +115,8 @@ function seedProjectAndSession(): void {
 		],
 	);
 	// A reasoning part should be ignored by the v1 renderer.
-	db.run(
+	run(
+		db,
 		"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
 		[
 			"part-3",
@@ -134,8 +149,12 @@ describe("openCodeProvider.detect", () => {
 	test("falls back to global project when matching directory column", async () => {
 		const db = new Database(dbPath);
 		createSchema(db);
-		db.run("INSERT INTO project (id, worktree) VALUES (?, ?)", ["global", "/"]);
-		db.run(
+		run(db, "INSERT INTO project (id, worktree) VALUES (?, ?)", [
+			"global",
+			"/",
+		]);
+		run(
+			db,
 			"INSERT INTO session (id, project_id, slug, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
 			[
 				"ses-global",
@@ -184,11 +203,12 @@ describe("openCodeProvider.listSessions", () => {
 			const xdgDbPath = join(xdgOpencodeDir, "opencode.db");
 			const db = new Database(xdgDbPath);
 			createSchema(db);
-			db.run("INSERT INTO project (id, worktree) VALUES (?, ?)", [
+			run(db, "INSERT INTO project (id, worktree) VALUES (?, ?)", [
 				"proj-1",
 				projectCwd,
 			]);
-			db.run(
+			run(
+				db,
 				"INSERT INTO session (id, project_id, slug, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
 				[
 					"ses-1",

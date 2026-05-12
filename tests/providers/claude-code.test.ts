@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -6,13 +5,12 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { claudeCodeProvider } from "@/providers/claude-code.js";
 
 let tempHome: string;
-let homedirSpy: ReturnType<typeof spyOn>;
 let projectCwd: string;
 let claudeProjectDir: string;
 
@@ -23,7 +21,7 @@ function mungeCwd(cwd: string): string {
 
 beforeEach(() => {
 	tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-claude-")));
-	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
+	vi.stubEnv("HOME", tempHome);
 	projectCwd = join(tempHome, "works", "myapp");
 	mkdirSync(projectCwd, { recursive: true });
 	claudeProjectDir = join(
@@ -36,7 +34,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	homedirSpy.mockRestore();
+	vi.unstubAllEnvs();
 	rmSync(tempHome, { recursive: true, force: true });
 });
 

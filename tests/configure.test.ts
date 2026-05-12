@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
 	existsSync,
 	mkdirSync,
@@ -7,22 +6,20 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import TOML from "@iarna/toml";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AI_GATEWAY_OPENAI_URL, AI_GATEWAY_URL } from "@/lib/const.js";
 
 let tempDir: string;
-let homedirSpy: ReturnType<typeof spyOn>;
-
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-test-"));
-	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempDir);
+	vi.stubEnv("HOME", tempDir);
 });
 
 afterEach(() => {
-	homedirSpy.mockRestore();
+	vi.unstubAllEnvs();
 	rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -506,6 +503,7 @@ describe("backupOnly", () => {
 		const result = results[0];
 		expect(result?.kind).toBe("claude-settings");
 		expect(result?.backupPath).toBe(backupPath);
+		expect(result?.created).toBe(true);
 		expect(existsSync(backupPath)).toBe(true);
 		expect(readFileSync(backupPath, "utf-8")).toBe(original);
 		// Live config is left untouched.
@@ -524,6 +522,7 @@ describe("backupOnly", () => {
 		const results = backupOnly("codex");
 
 		expect(results[0]?.backupPath).toBe(backupPath);
+		expect(results[0]?.created).toBe(false);
 		expect(readFileSync(backupPath, "utf-8")).toContain('marker = "original"');
 		expect(readFileSync(livePath, "utf-8")).toContain('marker = "current"');
 	});
@@ -534,6 +533,7 @@ describe("backupOnly", () => {
 
 		expect(results[0]?.kind).toBe("opencode-config");
 		expect(results[0]?.backupPath).toBeNull();
+		expect(results[0]?.created).toBe(false);
 		expect(
 			existsSync(join(tempDir, ".config", "opencode", "opencode.json.backup")),
 		).toBe(false);

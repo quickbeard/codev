@@ -1,5 +1,5 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Message, Provider, Session } from "@/providers/types.js";
@@ -55,7 +55,7 @@ function isToolResultContent(content: unknown): boolean {
 }
 
 async function parseSessionFile(filePath: string): Promise<Session | null> {
-	const raw = await Bun.file(filePath).text();
+	const raw = await readFile(filePath, "utf-8");
 	const lines = raw.split("\n").filter((l) => l.trim().length > 0);
 	if (lines.length === 0) return null;
 

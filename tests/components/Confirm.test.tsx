@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { cleanup, render } from "ink-testing-library";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { Confirm } from "@/components/Confirm.js";
 import * as configure from "@/lib/configure.js";
 
 afterEach(() => {
 	cleanup();
-	mock.restore();
+	vi.restoreAllMocks();
 });
 
 const SOURCE = "/home/u/.claude/settings.json";
@@ -13,7 +13,7 @@ const BACKUP = `${SOURCE}.backup`;
 
 describe("Confirm", () => {
 	test("renders source → backup arrow when no backup exists yet", () => {
-		spyOn(configure, "getBackupStatus").mockReturnValue([
+		vi.spyOn(configure, "getBackupStatus").mockReturnValue([
 			{
 				kind: "claude-settings",
 				sourcePath: SOURCE,
@@ -23,7 +23,7 @@ describe("Confirm", () => {
 			},
 		]);
 
-		const onConfirm = mock();
+		const onConfirm = vi.fn();
 		const { lastFrame } = render(
 			<Confirm tools={["claude-code"]} onConfirm={onConfirm} />,
 		);
@@ -33,7 +33,7 @@ describe("Confirm", () => {
 	});
 
 	test("flags an existing backup as preserved (no new backup)", () => {
-		spyOn(configure, "getBackupStatus").mockReturnValue([
+		vi.spyOn(configure, "getBackupStatus").mockReturnValue([
 			{
 				kind: "claude-settings",
 				sourcePath: SOURCE,
@@ -43,7 +43,7 @@ describe("Confirm", () => {
 			},
 		]);
 
-		const onConfirm = mock();
+		const onConfirm = vi.fn();
 		const { lastFrame } = render(
 			<Confirm tools={["claude-code"]} onConfirm={onConfirm} />,
 		);
@@ -56,7 +56,7 @@ describe("Confirm", () => {
 	});
 
 	test("omits the backup line entirely when neither source nor backup exists", () => {
-		spyOn(configure, "getBackupStatus").mockReturnValue([
+		vi.spyOn(configure, "getBackupStatus").mockReturnValue([
 			{
 				kind: "claude-settings",
 				sourcePath: SOURCE,
@@ -66,7 +66,7 @@ describe("Confirm", () => {
 			},
 		]);
 
-		const onConfirm = mock();
+		const onConfirm = vi.fn();
 		const { lastFrame } = render(
 			<Confirm tools={["claude-code"]} onConfirm={onConfirm} />,
 		);

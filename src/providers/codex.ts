@@ -1,5 +1,5 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Message, Provider, Session } from "@/providers/types.js";
@@ -45,7 +45,7 @@ interface CodexPreview {
 
 async function readMeta(filePath: string): Promise<CodexMeta | null> {
 	try {
-		const text = await Bun.file(filePath).text();
+		const text = await readFile(filePath, "utf-8");
 		const firstLine = text.split("\n", 1)[0];
 		if (!firstLine) return null;
 		return JSON.parse(firstLine) as CodexMeta;
@@ -119,7 +119,7 @@ async function findSessions(cwd: string): Promise<CodexPreview[]> {
 }
 
 async function parseSession(preview: CodexPreview): Promise<Session | null> {
-	const text = await Bun.file(preview.path).text();
+	const text = await readFile(preview.path, "utf-8");
 	const lines = text.split("\n").filter((l) => l.trim().length > 0);
 	if (lines.length <= 1) return null; // only metadata, no events
 

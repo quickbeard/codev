@@ -1,13 +1,9 @@
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
-// Driver picked at runtime. Production runs under Node and uses the built-in
-// `node:sqlite`; tests run under `bun test` and use `bun:sqlite`. Both branches
-// use dynamic import so neither runtime tries to resolve the other's specifier
-// at module-link time — Node's ESM loader rejects `bun:` schemes, and Bun
-// can't load `node:sqlite`.
 interface Stmt<P extends unknown[], R> {
 	get(...args: P): R | undefined;
 	all(...args: P): R[];
@@ -18,34 +14,16 @@ interface DB {
 	close(): void;
 }
 
-async function openDb(path: string): Promise<DB> {
-	if (typeof Bun !== "undefined") {
-		const { Database } = await import("bun:sqlite");
-		const db = new Database(path, { readonly: true });
-		return {
-			prepare<P extends unknown[], R>(sql: string): Stmt<P, R> {
-				// bun:sqlite's bind types are stricter than our generic; cast since
-				// every caller passes string/number tuples that satisfy both libs.
-				// biome-ignore lint/suspicious/noExplicitAny: cross-driver shim
-				const stmt = db.query<R, any>(sql);
-				return {
-					get: (...args: P) => stmt.get(...args) ?? undefined,
-					all: (...args: P) => stmt.all(...args),
-				};
-			},
-			close: () => db.close(),
-		};
-	}
-	const { DatabaseSync } = await import("node:sqlite");
+function openDb(path: string): DB {
 	const db = new DatabaseSync(path, { readOnly: true });
 	return {
 		prepare<P extends unknown[], R>(sql: string): Stmt<P, R> {
 			const stmt = db.prepare(sql);
 			return {
 				// node:sqlite's bind types accept SQLInputValue; our generic is wider.
-				// biome-ignore lint/suspicious/noExplicitAny: cross-driver shim
+				// biome-ignore lint/suspicious/noExplicitAny: bind-type widening
 				get: (...args: P) => stmt.get(...(args as any[])) as R | undefined,
-				// biome-ignore lint/suspicious/noExplicitAny: cross-driver shim
+				// biome-ignore lint/suspicious/noExplicitAny: bind-type widening
 				all: (...args: P) => stmt.all(...(args as any[])) as R[],
 			};
 		},
@@ -222,7 +200,7 @@ export const openCodeProvider: Provider = {
 		if (!existsSync(path)) return false;
 		let db: DB | null = null;
 		try {
-			db = await openDb(path);
+			db = openDb(path);
 			const match = resolveProject(db, cwd);
 			if (!match) return false;
 			const rows = listSessionRows(db, match);
@@ -237,7 +215,7 @@ export const openCodeProvider: Provider = {
 	async listSessions(cwd: string): Promise<Session[]> {
 		const path = dbPath();
 		if (!existsSync(path)) return [];
-		const db = await openDb(path);
+		const db = openDb(path);
 		try {
 			const match = resolveProject(db, cwd);
 			if (!match) return [];

@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	appendFileSync,
 	closeSync,
@@ -15,6 +16,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { gzipSync } from "node:zlib";
 import {
 	type AuthData,
 	loadAuth,
@@ -163,9 +165,7 @@ export function listMarkdownLogs(outDir: string): string[] {
 }
 
 export function fileSha256(path: string): string {
-	return new Bun.CryptoHasher("sha256")
-		.update(readFileSync(path))
-		.digest("hex");
+	return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
 export function filterNewFiles(
@@ -256,7 +256,7 @@ async function presignUpload(
 }
 
 async function putGzip(path: string, uploadUrl: string): Promise<void> {
-	const payload = Bun.gzipSync(readFileSync(path));
+	const payload = gzipSync(readFileSync(path));
 	const res = await fetch(uploadUrl, {
 		method: "PUT",
 		headers: {

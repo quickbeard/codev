@@ -75,31 +75,32 @@ If you have a session running, you might need to restart it with `claude -c`, `c
 ## Development
 
 ```bash
-bun install
-bun dev
+corepack enable
+pnpm install
+pnpm dev
 ```
 
 ## Build
 
 ```bash
-bun run build
+pnpm build
 ```
 
 The bundled CLI is output to `dist/index.js`. Run it with:
 
 ```bash
-bun start
+pnpm start
 ```
 
 ## Lint & Format
 
 ```bash
-bun fix
-bun typecheck
+pnpm fix
+pnpm typecheck
 ```
 
 ## Test
 
 ```bash
-bun test
+pnpm test
 ```

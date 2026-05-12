@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
 	existsSync,
 	mkdirSync,
@@ -8,15 +7,15 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { runExport } from "@/lib/export.js";
 
 let tempHome: string;
 let projectCwd: string;
-let homedirSpy: ReturnType<typeof spyOn>;
-let cwdSpy: ReturnType<typeof spyOn>;
+let cwdSpy: MockInstance;
 
 function mungeCwd(cwd: string): string {
 	const dashed = cwd.replace(/[^a-zA-Z0-9-]/g, "-");
@@ -82,12 +81,12 @@ beforeEach(() => {
 	tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-export-")));
 	projectCwd = join(tempHome, "works", "myapp");
 	mkdirSync(projectCwd, { recursive: true });
-	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
-	cwdSpy = spyOn(process, "cwd").mockReturnValue(projectCwd);
+	vi.stubEnv("HOME", tempHome);
+	cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(projectCwd);
 });
 
 afterEach(() => {
-	homedirSpy.mockRestore();
+	vi.unstubAllEnvs();
 	cwdSpy.mockRestore();
 	rmSync(tempHome, { recursive: true, force: true });
 });

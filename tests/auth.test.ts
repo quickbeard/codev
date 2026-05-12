@@ -1,13 +1,4 @@
 import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	mock,
-	spyOn,
-	test,
-} from "bun:test";
-import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -16,9 +7,10 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	type AuthData,
 	browserOpener,
@@ -34,8 +26,6 @@ import { SSO_URL } from "@/lib/const.js";
 const REVOCATION_ENDPOINT = `${SSO_URL}/revoke`;
 
 let tempDir: string;
-let homedirSpy: ReturnType<typeof spyOn>;
-
 const VALID_AUTH: AuthData = {
 	access_token: "test-access-token",
 	id_token: "test-id-token",
@@ -54,11 +44,11 @@ const EXPIRED_AUTH: AuthData = {
 
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-auth-test-"));
-	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempDir);
+	vi.stubEnv("HOME", tempDir);
 });
 
 afterEach(() => {
-	homedirSpy.mockRestore();
+	vi.unstubAllEnvs();
 	rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -72,7 +62,7 @@ function mockAuthFetch(
 	handlers: Partial<Record<string, (url: string) => Promise<Response>>> = {},
 ) {
 	const originalFetch = globalThis.fetch;
-	return spyOn(globalThis, "fetch").mockImplementation((async (
+	return vi.spyOn(globalThis, "fetch").mockImplementation((async (
 		input: string | URL | Request,
 	) => {
 		const url = typeof input === "string" ? input : (input as Request).url;
@@ -113,7 +103,7 @@ describe("loadAuth", () => {
 });
 
 describe("logout", () => {
-	let fetchSpy: ReturnType<typeof spyOn>;
+	let fetchSpy: MockInstance;
 
 	beforeEach(() => {
 		fetchSpy = mockAuthFetch({
@@ -338,7 +328,7 @@ describe("login", () => {
 	test("returns existing auth when already logged in", async () => {
 		writeAuthFile(VALID_AUTH);
 		const logs: string[] = [];
-		const onReady = mock();
+		const onReady = vi.fn();
 
 		// Cached-login path also refreshes the CoDev config — mock /config so
 		// the test stays hermetic and we can assert the refresh actually ran.
@@ -397,7 +387,7 @@ describe("login", () => {
 });
 
 describe("login refresh-token path", () => {
-	let fetchSpy: ReturnType<typeof spyOn>;
+	let fetchSpy: MockInstance;
 
 	afterEach(() => {
 		fetchSpy?.mockRestore();
@@ -464,30 +454,30 @@ describe("login refresh-token path", () => {
 	});
 });
 
-function getAuthorizeUrl(spy: ReturnType<typeof spyOn>): URL | null {
+function getAuthorizeUrl(spy: MockInstance): URL | null {
 	const call = spy.mock.calls[0];
 	if (!call) return null;
 	return new URL(call[0] as string);
 }
 
-function getCallbackPort(spy: ReturnType<typeof spyOn>): number {
+function getCallbackPort(spy: MockInstance): number {
 	const authorizeUrl = getAuthorizeUrl(spy);
 	const redirectUri = authorizeUrl?.searchParams.get("redirect_uri");
 	if (!redirectUri) return 0;
 	return Number.parseInt(new URL(redirectUri).port, 10);
 }
 
-function getCallbackState(spy: ReturnType<typeof spyOn>): string {
+function getCallbackState(spy: MockInstance): string {
 	return getAuthorizeUrl(spy)?.searchParams.get("state") ?? "";
 }
 
-function getCallbackNonce(spy: ReturnType<typeof spyOn>): string {
+function getCallbackNonce(spy: MockInstance): string {
 	return getAuthorizeUrl(spy)?.searchParams.get("nonce") ?? "";
 }
 
 describe("login full OAuth flow", () => {
-	let fetchSpy: ReturnType<typeof spyOn>;
-	let openBrowserSpy: ReturnType<typeof spyOn>;
+	let fetchSpy: MockInstance;
+	let openBrowserSpy: MockInstance;
 	const originalFetch = globalThis.fetch;
 
 	function mockSsoFetch(overrides: { config?: () => Promise<Response> } = {}) {
@@ -525,9 +515,9 @@ describe("login full OAuth flow", () => {
 	}
 
 	beforeEach(() => {
-		openBrowserSpy = spyOn(browserOpener, "open").mockImplementation(() =>
-			Promise.resolve(undefined),
-		);
+		openBrowserSpy = vi
+			.spyOn(browserOpener, "open")
+			.mockImplementation(() => Promise.resolve(undefined));
 	});
 
 	afterEach(() => {
@@ -662,7 +652,7 @@ describe("login full OAuth flow", () => {
 			},
 		);
 
-		expect(loginPromise).rejects.toThrow("SSO login failed: User denied");
+		await expect(loginPromise).rejects.toThrow("SSO login failed: User denied");
 	});
 
 	test("rejects when callback state does not match", async () => {
@@ -680,7 +670,7 @@ describe("login full OAuth flow", () => {
 			},
 		);
 
-		expect(loginPromise).rejects.toThrow("State mismatch");
+		await expect(loginPromise).rejects.toThrow("State mismatch");
 	});
 
 	test("rejects when callback receives no code", async () => {
@@ -696,7 +686,9 @@ describe("login full OAuth flow", () => {
 			},
 		);
 
-		expect(loginPromise).rejects.toThrow("No authorization code received");
+		await expect(loginPromise).rejects.toThrow(
+			"No authorization code received",
+		);
 	});
 
 	test("callback server returns 404 for non-callback paths", async () => {
@@ -864,8 +856,8 @@ describe("login full OAuth flow", () => {
 });
 
 describe("login with force-login marker", () => {
-	let fetchSpy: ReturnType<typeof spyOn>;
-	let openBrowserSpy: ReturnType<typeof spyOn>;
+	let fetchSpy: MockInstance;
+	let openBrowserSpy: MockInstance;
 	const originalFetch = globalThis.fetch;
 
 	function writeMarker() {
@@ -880,9 +872,9 @@ describe("login with force-login marker", () => {
 	}
 
 	beforeEach(() => {
-		openBrowserSpy = spyOn(browserOpener, "open").mockImplementation(() =>
-			Promise.resolve(undefined),
-		);
+		openBrowserSpy = vi
+			.spyOn(browserOpener, "open")
+			.mockImplementation(() => Promise.resolve(undefined));
 		fetchSpy = mockAuthFetch({
 			"/token": async () =>
 				new Response(

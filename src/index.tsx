@@ -1,4 +1,5 @@
-#!/usr/bin/env node
+// Shebang is injected by the bundler (build.ts banner) so the shipped
+// `dist/index.js` is exec-runnable; dev tools (`tsx`, Bun) don't need it.
 import { render } from "ink";
 import { InstallApp } from "@/InstallApp.js";
 import { logout } from "@/lib/auth.js";
@@ -25,13 +26,9 @@ if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 5)) {
 }
 
 async function gateSqlite(): Promise<void> {
-	// Under Bun (e.g. `bun dev`, `bun src/index.tsx`), opencode.ts takes the
-	// bun:sqlite branch — node:sqlite isn't a real specifier in Bun and the
-	// re-exec would just relaunch Bun with a flag it doesn't honor. Note that
-	// Bun's `process.versions.node` reports a Node-compat version (e.g. 24.3.0
-	// on Bun 1.3.13), which is what made an earlier failure mode look like a
-	// genuine Node bug.
-	if (typeof Bun !== "undefined") return;
+	// `node:sqlite` is built into Node but only stable in 23.5+. On 22.5–23.4 it
+	// requires the `--experimental-sqlite` flag, so we probe and (if needed)
+	// re-exec the same process with the flag attached.
 	const result = await ensureNodeSqliteOrReexec();
 	if (result.action === "reexec") process.exit(result.exitCode ?? 1);
 	if (result.action === "error") {

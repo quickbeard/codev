@@ -1,8 +1,17 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
 import { cleanup, render } from "ink-testing-library";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { UpdateApp } from "@/UpdateApp.js";
+
+vi.mock("node:child_process", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:child_process")>();
+	return { ...actual, execFile: vi.fn() };
+});
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs")>();
+	return { ...actual, existsSync: vi.fn(actual.existsSync) };
+});
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
 
@@ -12,7 +21,7 @@ function stubExecFile(
 		args: string[],
 	) => { error?: Error | null; stdout?: string; stderr?: string },
 ) {
-	spyOn(child_process, "execFile").mockImplementation(((
+	vi.mocked(child_process.execFile).mockImplementation(((
 		file: string,
 		args: string[],
 		...rest: unknown[]
@@ -40,9 +49,11 @@ describe("UpdateApp", () => {
 			if (file === "opencode") return { stdout: "1.0.0" };
 			return { stdout: "" };
 		});
-		const existsSpy = spyOn(fs, "existsSync").mockImplementation(
-			(p: fs.PathLike) => String(p) === "/fake/root/opencode-ai",
-		);
+		const existsSpy = vi
+			.mocked(fs.existsSync)
+			.mockImplementation(
+				(p: fs.PathLike) => String(p) === "/fake/root/opencode-ai",
+			);
 
 		const { frames } = render(<UpdateApp />);
 		await new Promise((r) => setTimeout(r, 200));
@@ -58,7 +69,7 @@ describe("UpdateApp", () => {
 			if (file === "npm" && args[0] === "root") return { stdout: "/fake/root" };
 			return { stdout: "" };
 		});
-		const existsSpy = spyOn(fs, "existsSync").mockReturnValue(false);
+		const existsSpy = vi.mocked(fs.existsSync).mockReturnValue(false);
 
 		const { frames } = render(<UpdateApp />);
 		await new Promise((r) => setTimeout(r, 200));
@@ -77,9 +88,11 @@ describe("UpdateApp", () => {
 			}
 			return { stdout: "" };
 		});
-		const existsSpy = spyOn(fs, "existsSync").mockImplementation(
-			(p: fs.PathLike) => String(p) === "/fake/root/opencode-ai",
-		);
+		const existsSpy = vi
+			.mocked(fs.existsSync)
+			.mockImplementation(
+				(p: fs.PathLike) => String(p) === "/fake/root/opencode-ai",
+			);
 
 		const { frames } = render(<UpdateApp />);
 		await new Promise((r) => setTimeout(r, 200));

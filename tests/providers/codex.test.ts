@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -6,13 +5,12 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { codexProvider } from "@/providers/codex.js";
 
 let tempHome: string;
-let homedirSpy: ReturnType<typeof spyOn>;
 let projectCwd: string;
 let dayDir: string;
 
@@ -23,7 +21,7 @@ function writeSession(name: string, lines: object[]): void {
 
 beforeEach(() => {
 	tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-codex-")));
-	homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
+	vi.stubEnv("HOME", tempHome);
 	projectCwd = join(tempHome, "works", "myapp");
 	mkdirSync(projectCwd, { recursive: true });
 	dayDir = join(tempHome, ".codex", "sessions", "2026", "04", "27");
@@ -31,7 +29,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	homedirSpy.mockRestore();
+	vi.unstubAllEnvs();
 	rmSync(tempHome, { recursive: true, force: true });
 });
 
