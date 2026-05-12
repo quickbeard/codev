@@ -1,7 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
 interface Stmt<P extends unknown[], R> {
@@ -14,7 +13,13 @@ interface DB {
 	close(): void;
 }
 
-function openDb(path: string): DB {
+// `node:sqlite` is loaded lazily so that non-upload commands (--version,
+// install, etc.) don't trigger Node's ExperimentalWarning at bundle link
+// time. The upload path goes through `ensureNodeSqliteOrReexec`, which
+// re-execs with `--disable-warning=ExperimentalWarning` when needed, so the
+// dynamic import inside this function stays silent.
+async function openDb(path: string): Promise<DB> {
+	const { DatabaseSync } = await import("node:sqlite");
 	const db = new DatabaseSync(path, { readOnly: true });
 	return {
 		prepare<P extends unknown[], R>(sql: string): Stmt<P, R> {
@@ -200,7 +205,7 @@ export const openCodeProvider: Provider = {
 		if (!existsSync(path)) return false;
 		let db: DB | null = null;
 		try {
-			db = openDb(path);
+			db = await openDb(path);
 			const match = resolveProject(db, cwd);
 			if (!match) return false;
 			const rows = listSessionRows(db, match);
@@ -215,7 +220,7 @@ export const openCodeProvider: Provider = {
 	async listSessions(cwd: string): Promise<Session[]> {
 		const path = dbPath();
 		if (!existsSync(path)) return [];
-		const db = openDb(path);
+		const db = await openDb(path);
 		try {
 			const match = resolveProject(db, cwd);
 			if (!match) return [];

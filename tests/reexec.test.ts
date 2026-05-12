@@ -85,7 +85,7 @@ test("re-execs with --experimental-sqlite when node:sqlite is unloadable", async
 	const call = spawnSyncSpy.mock.calls[0];
 	const args = call?.[1] as string[] | undefined;
 	expect(args?.[0]).toBe("--experimental-sqlite");
-	expect(args).toContain("--no-warnings=ExperimentalWarning");
+	expect(args).toContain("--disable-warning=ExperimentalWarning");
 	expect(args).toContain("/path/to/dist/index.js");
 	expect(args).toContain("upload");
 });

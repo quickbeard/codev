@@ -59,7 +59,11 @@ export async function ensureNodeSqliteOrReexec(): Promise<ReexecResult> {
 		process.execPath,
 		[
 			"--experimental-sqlite",
-			"--no-warnings=ExperimentalWarning",
+			// Suppress Node's "SQLite is an experimental feature" ProcessWarning
+			// in the re-execed child. `--no-warnings=ExperimentalWarning` is not
+			// a real flag (--no-warnings is a boolean); the documented name-filter
+			// is --disable-warning=<name>, available since Node 21.3.
+			"--disable-warning=ExperimentalWarning",
 			...process.execArgv,
 			selfPath,
 			...process.argv.slice(2),
