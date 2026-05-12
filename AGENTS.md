@@ -7,7 +7,7 @@ alwaysApply: false
 This is a Node.js project. The shipped bin (`dist/index.js`) runs under plain Node, and the dev/build/test toolchain runs under Node too — no Bun anywhere. Do not introduce `bun:*` imports or `Bun.*` runtime APIs.
 
 - Use `pnpm` for installs, scripts, and `pnpm exec`. Don't use `npm`/`yarn`/`bun install`.
-- Use `tsx <file>` to run TypeScript/TSX directly (e.g. `pnpm dev` → `tsx watch src/index.tsx`). Don't use `ts-node`.
+- Use `tsx <file>` to run TypeScript/TSX directly (e.g. `pnpm dev` → `tsx src/index.tsx`). Don't use `ts-node`. The dev script is one-shot, not watch — codev is an interactive Ink CLI, so respawning mid-flow would corrupt the TTY.
 - Use `vitest` for tests (`pnpm test`). Don't use `jest`.
 - Use `esbuild` for bundling (driven by `build.ts` via `pnpm build`). Don't use `webpack`/`rollup`/`Bun.build`.
 - Use `.env` via Node's built-in support (`node --env-file=.env`) or a per-script setup. Don't add `dotenv`.

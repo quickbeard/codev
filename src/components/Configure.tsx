@@ -56,11 +56,9 @@ function resumeMessage(tools: Tool[]): ReactNode {
 
 function describeResult(r: ConfigureResult, skipped: boolean): string[] {
 	if (skipped) {
-		return [
-			r.backupPath
-				? `Backed up ${LABEL[r.kind]} (config left unchanged)`
-				: `Skipped ${LABEL[r.kind]} (no existing config to back up)`,
-		];
+		if (!r.backupPath) return [`Nothing to back up for ${LABEL[r.kind]}`];
+		if (r.created) return [`Backed up ${LABEL[r.kind]}`];
+		return [`${LABEL[r.kind]} backup already exists — left untouched`];
 	}
 	return [`Configured ${LABEL[r.kind]}`];
 }

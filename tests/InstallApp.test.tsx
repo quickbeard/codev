@@ -248,6 +248,7 @@ describe("InstallApp fail-stop invariant", () => {
 					kind: "claude-settings",
 					sourcePath: "/tmp/x",
 					backupPath: "/tmp/x.b",
+					created: true,
 				},
 			]);
 
@@ -272,6 +273,7 @@ describe("InstallApp fail-stop invariant", () => {
 					kind: "codex-config",
 					sourcePath: "/tmp/codex.toml",
 					backupPath: "/tmp/codex.toml.backup",
+					created: true,
 				},
 			]);
 		// bun's spyOn keeps call counts across tests in the same file.
@@ -302,6 +304,7 @@ describe("InstallApp fail-stop invariant", () => {
 					kind: "claude-settings",
 					sourcePath: "/tmp/x",
 					backupPath: "/tmp/x.b",
+					created: true,
 				},
 			]);
 		loginSpy.mockClear();
@@ -342,6 +345,7 @@ describe("InstallApp fail-stop invariant", () => {
 					kind: "claude-settings",
 					sourcePath: "/tmp/x",
 					backupPath: "/tmp/x.b",
+					created: true,
 				},
 			]);
 		fetchApiKeySpy.mockClear();
@@ -410,6 +414,7 @@ describe("InstallApp fail-stop invariant", () => {
 					kind: "claude-settings",
 					sourcePath: "/tmp/x",
 					backupPath: "/tmp/x.b",
+					created: true,
 				},
 			]);
 		fetchApiKeySpy.mockClear();
@@ -450,6 +455,7 @@ describe("InstallApp fail-stop invariant", () => {
 				kind: "claude-settings",
 				sourcePath: "/tmp/x",
 				backupPath: "/tmp/x.backup",
+				created: true,
 			},
 		]);
 		fetchApiKeySpy.mockClear();
@@ -472,6 +478,58 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(fetchApiKeySpy).not.toHaveBeenCalled();
 	});
 
+	test("skip-configuration with pre-existing backup reports it as preserved, not re-backed-up", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+		vi.spyOn(configure, "backupOnly").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.backup",
+				created: false,
+			},
+		]);
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin);
+		await pickSkip(stdin);
+		await new Promise((r) => setTimeout(r, 1_300));
+
+		const history = allFrames(frames);
+		expect(history).toContain(
+			"Claude Code backup already exists — left untouched",
+		);
+		expect(history).not.toContain("Backed up Claude Code");
+	});
+
+	test("skip-configuration with no live config reports nothing to back up", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+		vi.spyOn(configure, "backupOnly").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: null,
+				created: false,
+			},
+		]);
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin);
+		await pickSkip(stdin);
+		await new Promise((r) => setTimeout(r, 1_300));
+
+		const history = allFrames(frames);
+		expect(history).toContain("Nothing to back up for Claude Code");
+		expect(history).not.toContain("Backed up Claude Code");
+	});
+
 	test("login retry after failure reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
 		const loginSpy = vi
@@ -486,6 +544,7 @@ describe("InstallApp fail-stop invariant", () => {
 					kind: "claude-settings",
 					sourcePath: "/tmp/x",
 					backupPath: "/tmp/x.b",
+					created: true,
 				},
 			]);
 		loginSpy.mockClear();
@@ -534,6 +593,7 @@ describe("InstallApp existing-key path", () => {
 					kind: "claude-settings",
 					sourcePath: "/tmp/x",
 					backupPath: "/tmp/x.b",
+					created: true,
 				},
 			]);
 		loadSpy.mockClear();

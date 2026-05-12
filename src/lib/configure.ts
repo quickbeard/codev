@@ -28,6 +28,9 @@ export interface ConfigureResult {
 	kind: BackupKind;
 	sourcePath: string;
 	backupPath: string | null;
+	// True only when this call actually wrote a new `*.backup` file. False when
+	// a pre-existing backup was preserved (or when nothing existed to back up).
+	created: boolean;
 }
 
 export interface Credentials {
@@ -140,23 +143,30 @@ function kindForTool(tool: Tool): BackupKind {
 // Used by the install flow's "Skip configuration" path.
 export function backupOnly(tool: Tool): ConfigureResult[] {
 	const kind = kindForTool(tool);
-	const backupPath = ensureBackup(kind);
-	return [{ kind, sourcePath: sourcePathOf(kind), backupPath }];
+	const { path, created } = ensureBackup(kind);
+	return [{ kind, sourcePath: sourcePathOf(kind), backupPath: path, created }];
 }
 
-function ensureBackup(kind: BackupKind): string | null {
+interface BackupOutcome {
+	path: string | null;
+	created: boolean;
+}
+
+function ensureBackup(kind: BackupKind): BackupOutcome {
 	const sourcePath = sourcePathOf(kind);
 	const backupPath = `${sourcePath}.backup`;
 	if (!existsSync(sourcePath)) {
-		return existsSync(backupPath) ? backupPath : null;
+		return existsSync(backupPath)
+			? { path: backupPath, created: false }
+			: { path: null, created: false };
 	}
 	// Preserve any pre-existing backup — assume it's the user's original
 	// pre-codev state and should not be clobbered by later runs.
 	if (existsSync(backupPath)) {
-		return backupPath;
+		return { path: backupPath, created: false };
 	}
 	copyFileSync(sourcePath, backupPath);
-	return backupPath;
+	return { path: backupPath, created: true };
 }
 
 function readJson(path: string): Record<string, unknown> {
@@ -190,7 +200,7 @@ export function bypassClaudeLogin(): void {
 export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 	bypassClaudeLogin();
 
-	const backupPath = ensureBackup("claude-settings");
+	const { path: backupPath, created } = ensureBackup("claude-settings");
 	const sourcePath = sourcePathOf("claude-settings");
 	mkdirSync(dirname(sourcePath), { recursive: true });
 
@@ -212,7 +222,7 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 		},
 	});
 
-	return [{ kind: "claude-settings", sourcePath, backupPath }];
+	return [{ kind: "claude-settings", sourcePath, backupPath, created }];
 }
 
 export type RestoreStatus = "restored" | "no-backup";
@@ -243,7 +253,7 @@ export function restoreTool(tool: Tool): RestoreResult {
 }
 
 export function configureCodex(creds: Credentials): ConfigureResult[] {
-	const backupPath = ensureBackup("codex-config");
+	const { path: backupPath, created } = ensureBackup("codex-config");
 	const sourcePath = sourcePathOf("codex-config");
 	mkdirSync(dirname(sourcePath), { recursive: true });
 
@@ -265,11 +275,11 @@ export function configureCodex(creds: Credentials): ConfigureResult[] {
 		},
 	});
 
-	return [{ kind: "codex-config", sourcePath, backupPath }];
+	return [{ kind: "codex-config", sourcePath, backupPath, created }];
 }
 
 export function configureOpenCode(creds: Credentials): ConfigureResult[] {
-	const backupPath = ensureBackup("opencode-config");
+	const { path: backupPath, created } = ensureBackup("opencode-config");
 	const sourcePath = sourcePathOf("opencode-config");
 	mkdirSync(dirname(sourcePath), { recursive: true });
 
@@ -297,5 +307,5 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 		},
 	});
 
-	return [{ kind: "opencode-config", sourcePath, backupPath }];
+	return [{ kind: "opencode-config", sourcePath, backupPath, created }];
 }

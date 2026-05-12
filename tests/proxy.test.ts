@@ -103,7 +103,7 @@ describe("validateApiKey", () => {
 			string,
 			{ method?: string; headers?: Record<string, string> },
 		];
-		expect(url).toBe(`${AI_GATEWAY_URL}key/info`);
+		expect(url).toBe(`${AI_GATEWAY_URL}/key/info`);
 		expect(init.method).toBe("GET");
 		expect(init.headers?.Authorization).toBe("Bearer sk-abc");
 	});
@@ -154,6 +154,21 @@ describe("validateApiKey", () => {
 		await validateApiKey("sk-z", "https://gw.example.com/");
 		const [url] = fetchSpy.mock.calls[0] as [string];
 		expect(url).toBe("https://gw.example.com/key/info");
+	});
+
+	test("inserts the path separator when AI_GATEWAY_URL has no trailing slash", async () => {
+		// Regression: keyInfoUrl(undefined) used to produce ".../gatewaykey/info"
+		// because it concatenated AI_GATEWAY_URL (no trailing slash) directly
+		// with "key/info". SSO-fetched keys have no base_url, so they hit this
+		// fallback — and the malformed URL made validateApiKey throw, hiding
+		// the "use existing API key" option even when the key was valid.
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, {}));
+		await validateApiKey("sk-w");
+		const [url] = fetchSpy.mock.calls[0] as [string];
+		expect(url).not.toContain("gatewaykey");
+		expect(url.endsWith("/gateway/key/info")).toBe(true);
 	});
 });
 
