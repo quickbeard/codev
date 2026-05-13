@@ -79,13 +79,11 @@ interface AuthFileContents {
 	model?: string;
 	supabase_url?: string;
 	supabase_anon_key?: string;
-	supabase_proxy_url?: string;
 }
 
 export interface CodevConfig {
 	supabaseUrl: string;
 	supabaseAnonKey: string;
-	supabaseProxyUrl: string;
 }
 
 interface TokenResponse {
@@ -161,7 +159,6 @@ export function saveCodevConfig(config: CodevConfig): void {
 		...existing,
 		supabase_url: config.supabaseUrl,
 		supabase_anon_key: config.supabaseAnonKey,
-		supabase_proxy_url: config.supabaseProxyUrl,
 	});
 }
 
@@ -187,7 +184,6 @@ export async function logout(): Promise<boolean> {
 			model: raw.model,
 			supabase_url: raw.supabase_url,
 			supabase_anon_key: raw.supabase_anon_key,
-			supabase_proxy_url: raw.supabase_proxy_url,
 		};
 		const hasAnything = Object.values(preserved).some((v) => v !== undefined);
 		if (hasAnything) {

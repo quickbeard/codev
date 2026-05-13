@@ -101,7 +101,7 @@ The install flow's "Skip configuration" auth choice routes through `backupOnly(t
 
 ## Config refresh and upload self-healing
 
-Supabase coordinates (`supabase_url`, `supabase_anon_key`, `supabase_proxy_url`) are not baked into the source — they're fetched from `codev-proxy`'s `POST /config` endpoint and cached in `~/.codev/auth.json`. Two invariants keep that cache fresh:
+Supabase coordinates (`supabase_url`, `supabase_anon_key`) are not baked into the source — they're fetched from `codev-proxy`'s `POST /config` endpoint and cached in `~/.codev/auth.json`. Two invariants keep that cache fresh:
 
 1. **`login()` always ends with `refreshCodevConfig`** — including the cached "already logged in" branch. Don't add another early return that skips it; the whole point is that every successful login leaves the cache fresh. Tests that exercise real `login()` must mock `POST /codev-proxy/config` to stay hermetic.
 2. **`runUpload` retries once on a "refreshable" error.** `isRefreshableError` (in `src/lib/upload.ts`) is deliberately narrow: `Missing supabase_…` from the cache accessors, or HTTP `401`/`403` from any Supabase or proxy fetch. `5xx`, `404`, network errors, and timeouts are NOT retried — refreshing won't help and we'd amplify the outage. Per-file upload errors stay in `summary.errors` and don't trigger the pipeline-level retry. If you change `runSupabaseUpload`'s shape, keep that boundary intact.

@@ -1,13 +1,4 @@
-import {
-	mkdirSync,
-	mkdtempSync,
-	realpathSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { AI_GATEWAY_URL, PROXY_URL } from "@/lib/const.js";
 import {
 	fetchApiKey,
@@ -173,27 +164,7 @@ describe("validateApiKey", () => {
 });
 
 describe("fetchSupabaseSession", () => {
-	let tempHome: string;
-	beforeEach(() => {
-		tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-proxy-test-")));
-		mkdirSync(join(tempHome, ".codev"), { recursive: true });
-		writeFileSync(
-			join(tempHome, ".codev", "auth.json"),
-			JSON.stringify({
-				supabase_url: "https://test.supabase.co",
-				supabase_anon_key: "anon",
-				supabase_proxy_url: "https://api.test/api/codev",
-			}),
-		);
-		vi.stubEnv("HOME", tempHome);
-	});
-
-	afterEach(() => {
-		vi.unstubAllEnvs();
-		rmSync(tempHome, { recursive: true, force: true });
-	});
-
-	test("posts to the configured supabase proxy URL", async () => {
+	test("posts to the codev-proxy /supabase/exchange endpoint", async () => {
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				access_token: "supabase-token",
@@ -202,7 +173,7 @@ describe("fetchSupabaseSession", () => {
 		);
 		await fetchSupabaseSession("sso-token");
 		const [url] = fetchSpy.mock.calls[0] as [string];
-		expect(url).toBe("https://api.test/api/codev/supabase/exchange");
+		expect(url).toBe(`${PROXY_URL}/supabase/exchange`);
 	});
 
 	test("returns the Supabase session on a 2xx response", async () => {
@@ -230,28 +201,19 @@ describe("fetchSupabaseSession", () => {
 			"Proxy /supabase/exchange failed (401): invalid sso token",
 		);
 	});
-
-	test("throws with hard-fail message when supabase_proxy_url is missing", async () => {
-		writeFileSync(join(tempHome, ".codev", "auth.json"), JSON.stringify({}));
-		await expect(fetchSupabaseSession("token")).rejects.toThrow(
-			/Run `codev install`/,
-		);
-	});
 });
 
 describe("fetchCodevConfig", () => {
-	test("returns the three Supabase coordinates on a 2xx response", async () => {
+	test("returns the Supabase coordinates on a 2xx response", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				supabaseUrl: "https://x.supabase.co",
 				supabaseAnonKey: "anon",
-				supabaseProxyUrl: "https://api.test/api/codev",
 			}),
 		);
 		expect(await fetchCodevConfig("sso-token")).toEqual({
 			supabaseUrl: "https://x.supabase.co",
 			supabaseAnonKey: "anon",
-			supabaseProxyUrl: "https://api.test/api/codev",
 		});
 	});
 
@@ -260,7 +222,6 @@ describe("fetchCodevConfig", () => {
 			jsonResponse(200, {
 				supabaseUrl: "u",
 				supabaseAnonKey: "a",
-				supabaseProxyUrl: "p",
 			}),
 		);
 		await fetchCodevConfig("my-token");

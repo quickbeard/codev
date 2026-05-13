@@ -199,7 +199,6 @@ describe("logout", () => {
 				...VALID_AUTH,
 				supabase_url: "https://keep.supabase.co",
 				supabase_anon_key: "keep-anon",
-				supabase_proxy_url: "https://api.test/api/codev",
 			}),
 		);
 		expect(await logout()).toBe(true);
@@ -209,7 +208,6 @@ describe("logout", () => {
 		) as Record<string, unknown>;
 		expect(after.supabase_url).toBe("https://keep.supabase.co");
 		expect(after.supabase_anon_key).toBe("keep-anon");
-		expect(after.supabase_proxy_url).toBe("https://api.test/api/codev");
 		expect(after.access_token).toBeUndefined();
 		expect(after.refresh_token).toBeUndefined();
 	});
@@ -224,7 +222,6 @@ describe("logout", () => {
 				api_key: "sk-keep",
 				supabase_url: "https://keep.supabase.co",
 				supabase_anon_key: "keep-anon",
-				supabase_proxy_url: "https://api.test/api/codev",
 			}),
 		);
 		expect(await logout()).toBe(true);
@@ -237,18 +234,16 @@ describe("logout", () => {
 });
 
 describe("saveCodevConfig", () => {
-	test("round-trips the three Supabase fields through auth.json", () => {
+	test("round-trips the Supabase fields through auth.json", () => {
 		saveCodevConfig({
 			supabaseUrl: "https://x.supabase.co",
 			supabaseAnonKey: "anon-x",
-			supabaseProxyUrl: "https://api.test/api/codev",
 		});
 		const file = JSON.parse(
 			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
 		) as Record<string, unknown>;
 		expect(file.supabase_url).toBe("https://x.supabase.co");
 		expect(file.supabase_anon_key).toBe("anon-x");
-		expect(file.supabase_proxy_url).toBe("https://api.test/api/codev");
 	});
 
 	test("does not clobber SSO fields when saving codev config", () => {
@@ -256,7 +251,6 @@ describe("saveCodevConfig", () => {
 		saveCodevConfig({
 			supabaseUrl: "https://x.supabase.co",
 			supabaseAnonKey: "anon-x",
-			supabaseProxyUrl: "https://api.test/api/codev",
 		});
 		expect(loadAuth()?.access_token).toBe("test-access-token");
 	});
@@ -266,7 +260,6 @@ describe("saveCodevConfig", () => {
 		saveCodevConfig({
 			supabaseUrl: "https://x.supabase.co",
 			supabaseAnonKey: "anon-x",
-			supabaseProxyUrl: "https://api.test/api/codev",
 		});
 		expect(loadApiKey()?.apiKey).toBe("sk-merged");
 	});
@@ -275,7 +268,6 @@ describe("saveCodevConfig", () => {
 		saveCodevConfig({
 			supabaseUrl: "u",
 			supabaseAnonKey: "a",
-			supabaseProxyUrl: "p",
 		});
 		const stat = statSync(join(tempDir, ".codev", "auth.json"));
 		expect(stat.mode & 0o777).toBe(0o600);
@@ -338,7 +330,6 @@ describe("login", () => {
 					JSON.stringify({
 						supabaseUrl: "https://refreshed-on-cached.supabase.co",
 						supabaseAnonKey: "refreshed-anon",
-						supabaseProxyUrl: "https://api.test/api/codev",
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				),
@@ -433,7 +424,6 @@ describe("login refresh-token path", () => {
 					JSON.stringify({
 						supabaseUrl: "https://refreshed.supabase.co",
 						supabaseAnonKey: "refreshed-anon",
-						supabaseProxyUrl: "https://api.test/api/codev",
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				),
@@ -450,7 +440,6 @@ describe("login refresh-token path", () => {
 		) as Record<string, unknown>;
 		expect(saved.supabase_url).toBe("https://refreshed.supabase.co");
 		expect(saved.supabase_anon_key).toBe("refreshed-anon");
-		expect(saved.supabase_proxy_url).toBe("https://api.test/api/codev");
 	});
 });
 
@@ -507,7 +496,6 @@ describe("login full OAuth flow", () => {
 						JSON.stringify({
 							supabaseUrl: "https://x.supabase.co",
 							supabaseAnonKey: "anon-x",
-							supabaseProxyUrl: "https://api.test/api/codev",
 						}),
 						{ headers: { "Content-Type": "application/json" } },
 					)),
@@ -577,7 +565,6 @@ describe("login full OAuth flow", () => {
 		) as Record<string, unknown>;
 		expect(saved.supabase_url).toBe("https://x.supabase.co");
 		expect(saved.supabase_anon_key).toBe("anon-x");
-		expect(saved.supabase_proxy_url).toBe("https://api.test/api/codev");
 		expect(saved.access_token).toBe("flow-access-token");
 	});
 

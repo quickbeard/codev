@@ -44,7 +44,6 @@ function writeAuth() {
 			user: { sub: "u", email: "u@example.com", displayName: "User" },
 			supabase_url: "https://test.supabase.co",
 			supabase_anon_key: "anon",
-			supabase_proxy_url: "https://api.test/api/codev",
 		}),
 	);
 }
@@ -65,7 +64,7 @@ function mockUploadHappyPath() {
 			typeof input === "string" || input instanceof URL
 				? String(input)
 				: input.url;
-		if (url.includes("/api/codev/supabase/exchange")) {
+		if (url.includes("/codev-proxy/supabase/exchange")) {
 			return new Response(
 				JSON.stringify({
 					access_token: "supabase-upload-token",
@@ -196,7 +195,7 @@ describe("runUploadDaemon", () => {
 				typeof input === "string" || input instanceof URL
 					? String(input)
 					: input.url;
-			if (url.includes("/api/codev/supabase/exchange")) {
+			if (url.includes("/codev-proxy/supabase/exchange")) {
 				return new Response(JSON.stringify({ error: "nope" }), {
 					status: 401,
 				});
@@ -223,7 +222,7 @@ describe("runUploadDaemon", () => {
 				typeof input === "string" || input instanceof URL
 					? String(input)
 					: input.url;
-			if (url.includes("/api/codev/supabase/exchange")) {
+			if (url.includes("/codev-proxy/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "x",
