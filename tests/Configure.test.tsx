@@ -72,7 +72,7 @@ describe("Configure resume message", () => {
 		});
 		expect(text).toContain("Done! Run");
 		expect(text).toContain("exec $SHELL");
-		expect(text).toContain(", then");
+		expect(text).toContain("to activate, then");
 		expect(text).toContain("codev opencode");
 		expect(text).toContain("to get started.");
 		// The old two-sentence form should be gone.

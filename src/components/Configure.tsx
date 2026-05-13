@@ -73,7 +73,7 @@ function resumeMessage(tools: Tool[], shimsInstalled: boolean): ReactNode {
 		<Text>
 			{"Done! Run "}
 			<Text color="cyan">exec $SHELL</Text>
-			{", then "}
+			{" to activate, then "}
 			{parts}
 			{" to get started."}
 		</Text>
