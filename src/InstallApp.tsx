@@ -28,6 +28,7 @@ import {
 } from "@/lib/auth.js";
 import type { Credentials, Tool } from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
+import { installShims } from "@/lib/shims.js";
 
 type Phase =
 	| "select"
@@ -90,6 +91,7 @@ export function InstallApp() {
 	const [savedCreds, setSavedCreds] = useState<ApiKeyCreds | null>(null);
 	const [existingValid, setExistingValid] = useState(false);
 	const [existingMessage, setExistingMessage] = useState<string | null>(null);
+	const [shimsInstalled, setShimsInstalled] = useState(false);
 
 	const handleConfirm = (selected: Tool[]) => {
 		setTools(selected);
@@ -112,15 +114,7 @@ export function InstallApp() {
 		setStep("installing");
 	}, []);
 
-	// On failure we set a terminal `*-failed` phase and stop advancing. The
-	// step's error frame stays rendered so the user can read it; exiting the
-	// app is left to the user (Ctrl-C), matching Login/Configure's prior
-	// hang-on-error behavior.
-	const handleInstallDone = useCallback((success: boolean) => {
-		if (!success) {
-			setStep("install-failed");
-			return;
-		}
+	const advancePastInstall = useCallback(() => {
 		const saved = loadApiKey();
 		if (!saved) {
 			setStep("key-choice");
@@ -145,6 +139,29 @@ export function InstallApp() {
 				setStep("key-choice");
 			});
 	}, []);
+
+	// On failure we set a terminal `*-failed` phase and stop advancing. The
+	// step's error frame stays rendered so the user can read it; exiting the
+	// app is left to the user (Ctrl-C), matching Login/Configure's prior
+	// hang-on-error behavior.
+	const handleInstallDone = useCallback(
+		(success: boolean) => {
+			if (!success) {
+				setStep("install-failed");
+				return;
+			}
+			// Install PATH shims silently — the final "Done!" message merges the
+			// activation hint in. Best-effort: a failure doesn't block install.
+			try {
+				installShims();
+				setShimsInstalled(true);
+			} catch {
+				// Leave shimsInstalled=false so the resume message stays simple.
+			}
+			advancePastInstall();
+		},
+		[advancePastInstall],
+	);
 
 	const handleAuthMethod = useCallback(
 		(choice: AuthMethodChoice) => {
@@ -300,6 +317,7 @@ export function InstallApp() {
 						<Configure
 							tools={tools}
 							creds={creds}
+							shimsInstalled={shimsInstalled}
 							onDone={handleConfigureDone}
 						/>
 					</Step>

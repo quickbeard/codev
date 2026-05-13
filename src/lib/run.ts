@@ -1,9 +1,17 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:os";
+import { stripShimDirFromPath } from "@/lib/shims.js";
 
 export function runAgent(cmd: string, args: string[]): Promise<number> {
 	return new Promise((resolve) => {
-		const child = spawn(cmd, args, { stdio: "inherit" });
+		// Strip ~/.codev/bin from the child's PATH so spawning `claude` resolves
+		// the real npm-installed binary, not our shim — otherwise the shim would
+		// re-exec `codev claude` and infinite-loop.
+		const env = {
+			...process.env,
+			PATH: stripShimDirFromPath(process.env.PATH),
+		};
+		const child = spawn(cmd, args, { stdio: "inherit", env });
 
 		// The child shares our process group, so the terminal already delivers
 		// SIGINT/SIGTERM to it. Swallow them in the parent so we don't exit
