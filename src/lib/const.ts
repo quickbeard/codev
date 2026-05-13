@@ -17,7 +17,6 @@ export const HAPPY_CODING = "Happy coding! 🎉";
 interface CodevAuthFile {
 	supabase_url?: string;
 	supabase_anon_key?: string;
-	supabase_proxy_url?: string;
 }
 
 function readCodevAuthFile(): CodevAuthFile | null {
@@ -46,8 +45,4 @@ export function SUPABASE_URL(): string {
 
 export function SUPABASE_ANON_KEY(): string {
 	return readField("supabase_anon_key", "supabase_anon_key");
-}
-
-export function SUPABASE_PROXY_URL(): string {
-	return readField("supabase_proxy_url", "supabase_proxy_url");
 }

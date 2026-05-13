@@ -1,5 +1,5 @@
 import type { CodevConfig } from "@/lib/auth.js";
-import { AI_GATEWAY_URL, PROXY_URL, SUPABASE_PROXY_URL } from "@/lib/const.js";
+import { AI_GATEWAY_URL, PROXY_URL } from "@/lib/const.js";
 
 interface ExchangeResponse {
 	api_key: string;
@@ -13,7 +13,6 @@ interface ExchangeResponse {
 interface ConfigResponse {
 	supabaseUrl: string;
 	supabaseAnonKey: string;
-	supabaseProxyUrl: string;
 }
 
 interface ErrorResponse {
@@ -68,7 +67,7 @@ export async function fetchCodevConfig(
 	}
 
 	const data = (await res.json()) as ConfigResponse;
-	if (!data.supabaseUrl || !data.supabaseAnonKey || !data.supabaseProxyUrl) {
+	if (!data.supabaseUrl || !data.supabaseAnonKey) {
 		throw new Error(
 			`Proxy /config returned incomplete payload: ${JSON.stringify(data)}`,
 		);
@@ -76,7 +75,6 @@ export async function fetchCodevConfig(
 	return {
 		supabaseUrl: data.supabaseUrl,
 		supabaseAnonKey: data.supabaseAnonKey,
-		supabaseProxyUrl: data.supabaseProxyUrl,
 	};
 }
 
@@ -114,8 +112,7 @@ export async function validateApiKey(
 export async function fetchSupabaseSession(
 	accessToken: string,
 ): Promise<SupabaseSession> {
-	const supabaseProxyUrl = SUPABASE_PROXY_URL().replace(/\/+$/, "");
-	const res = await fetch(`${supabaseProxyUrl}/supabase/exchange`, {
+	const res = await fetch(`${PROXY_URL}/supabase/exchange`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
 	});

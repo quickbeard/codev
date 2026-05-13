@@ -2,11 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import {
-	SUPABASE_ANON_KEY,
-	SUPABASE_PROXY_URL,
-	SUPABASE_URL,
-} from "@/lib/const.js";
+import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/const.js";
 
 let tempDir: string;
 beforeEach(() => {
@@ -30,7 +26,6 @@ const ACCESSORS: ReadonlyArray<
 > = [
 	["SUPABASE_URL", () => SUPABASE_URL(), "supabase_url"],
 	["SUPABASE_ANON_KEY", () => SUPABASE_ANON_KEY(), "supabase_anon_key"],
-	["SUPABASE_PROXY_URL", () => SUPABASE_PROXY_URL(), "supabase_proxy_url"],
 ];
 
 describe("Supabase const accessors", () => {
@@ -38,11 +33,9 @@ describe("Supabase const accessors", () => {
 		writeAuthJson({
 			supabase_url: "https://x.supabase.co",
 			supabase_anon_key: "anon-x",
-			supabase_proxy_url: "https://api.test/api/codev",
 		});
 		expect(SUPABASE_URL()).toBe("https://x.supabase.co");
 		expect(SUPABASE_ANON_KEY()).toBe("anon-x");
-		expect(SUPABASE_PROXY_URL()).toBe("https://api.test/api/codev");
 	});
 
 	for (const [name, fn, field] of ACCESSORS) {
@@ -74,14 +67,12 @@ describe("Supabase const accessors", () => {
 		writeAuthJson({
 			supabase_url: "https://first.supabase.co",
 			supabase_anon_key: "a1",
-			supabase_proxy_url: "p1",
 		});
 		expect(SUPABASE_URL()).toBe("https://first.supabase.co");
 
 		writeAuthJson({
 			supabase_url: "https://second.supabase.co",
 			supabase_anon_key: "a2",
-			supabase_proxy_url: "p2",
 		});
 		expect(SUPABASE_URL()).toBe("https://second.supabase.co");
 	});

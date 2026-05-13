@@ -46,7 +46,6 @@ function writeAuth() {
 			user: { sub: "u", email: "u@example.com", displayName: "User" },
 			supabase_url: "https://test.supabase.co",
 			supabase_anon_key: "anon",
-			supabase_proxy_url: "https://api.test/api/codev",
 		}),
 	);
 }
@@ -123,7 +122,7 @@ describe("runUpload", () => {
 					? String(input)
 					: input.url;
 			calls.push(url);
-			if (url.includes("/api/codev/supabase/exchange")) {
+			if (url.includes("/codev-proxy/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -198,12 +197,11 @@ describe("runUpload", () => {
 					JSON.stringify({
 						supabaseUrl: "https://test.supabase.co",
 						supabaseAnonKey: "anon",
-						supabaseProxyUrl: "https://api.test/api/codev",
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				);
 			}
-			if (url.includes("/api/codev/supabase/exchange")) {
+			if (url.includes("/codev-proxy/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -270,7 +268,7 @@ describe("runUpload", () => {
 					headers: { "Content-Type": "application/json" },
 				});
 			}
-			if (url.includes("/api/codev/supabase/exchange")) {
+			if (url.includes("/codev-proxy/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -324,12 +322,11 @@ describe("runUpload", () => {
 					JSON.stringify({
 						supabaseUrl: "https://fresh.supabase.co",
 						supabaseAnonKey: "fresh-anon",
-						supabaseProxyUrl: "https://api.test/api/codev",
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				);
 			}
-			if (url.includes("/api/codev/supabase/exchange")) {
+			if (url.includes("/codev-proxy/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -393,7 +390,7 @@ describe("runUpload", () => {
 					headers: { "Content-Type": "application/json" },
 				});
 			}
-			if (url.includes("/api/codev/supabase/exchange")) {
+			if (url.includes("/codev-proxy/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -450,12 +447,11 @@ describe("runUpload", () => {
 					JSON.stringify({
 						supabaseUrl: "https://test.supabase.co",
 						supabaseAnonKey: "anon",
-						supabaseProxyUrl: "https://api.test/api/codev",
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				);
 			}
-			if (url.includes("/api/codev/supabase/exchange")) {
+			if (url.includes("/codev-proxy/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
