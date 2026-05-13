@@ -93,6 +93,7 @@ switch (command) {
 			console.log(`Removed ${r.shimsRemoved.length} shim(s) from ${r.shimDir}`);
 			for (const path of r.rcFilesUpdated) console.log(`  cleaned ${path}`);
 			if (r.windowsUserPathUpdated) console.log("  updated user PATH");
+			console.log(activationHint());
 		}
 		process.exit(0);
 		break;

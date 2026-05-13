@@ -49,9 +49,7 @@ describe("activationHint", () => {
 		const { activationHint } = await import("@/lib/shims.js");
 		// darwin is what the CI runner and the dev's macOS report.
 		const msg = withPlatform("darwin", activationHint);
-		expect(msg).toBe(
-			"Run `exec $SHELL` to activate in this terminal (or open a new one).",
-		);
+		expect(msg).toBe("Run `exec $SHELL` to apply (or open a new terminal).");
 		const linux = withPlatform("linux", activationHint);
 		expect(linux).toBe(msg);
 	});
@@ -59,7 +57,7 @@ describe("activationHint", () => {
 	test("returns the restart-terminal hint on Windows", async () => {
 		const { activationHint } = await import("@/lib/shims.js");
 		const msg = withPlatform("win32", activationHint);
-		expect(msg).toBe("Restart your terminal to activate.");
+		expect(msg).toBe("Restart your terminal to apply.");
 	});
 
 	test("does not mention exec or $SHELL on Windows", async () => {
@@ -68,6 +66,16 @@ describe("activationHint", () => {
 		const { activationHint } = await import("@/lib/shims.js");
 		const msg = withPlatform("win32", activationHint);
 		expect(msg).not.toMatch(/exec|\$SHELL/);
+	});
+
+	test("uses neutral wording so it fits both block and unblock", async () => {
+		// `codev unblock` reuses this hint; if it said "to activate", the
+		// unblock output would read backwards. Pin the neutral wording.
+		const { activationHint } = await import("@/lib/shims.js");
+		const unix = withPlatform("darwin", activationHint);
+		const win = withPlatform("win32", activationHint);
+		expect(unix).not.toMatch(/activate|deactivate/);
+		expect(win).not.toMatch(/activate|deactivate/);
 	});
 });
 
