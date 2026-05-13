@@ -7,6 +7,7 @@ import {
 	configurationMethodTitle,
 } from "@/components/AuthMethod.js";
 import { Banner } from "@/components/Banner.js";
+import { BlockShims, blockShimsTitle } from "@/components/BlockShims.js";
 import { Configure, configureTitle } from "@/components/Configure.js";
 import { Confirm, confirmTitle } from "@/components/Confirm.js";
 import { FetchApiKey, fetchApiKeyTitle } from "@/components/FetchApiKey.js";
@@ -35,6 +36,7 @@ type Phase =
 	| "login"
 	| "installing"
 	| "install-failed"
+	| "blocking-shims"
 	| "validating-existing"
 	| "key-choice"
 	| "fetching-key"
@@ -46,6 +48,17 @@ type Phase =
 const POST_LOGIN: Phase[] = [
 	"installing",
 	"install-failed",
+	"blocking-shims",
+	"validating-existing",
+	"key-choice",
+	"fetching-key",
+	"manual-creds",
+	"configuring",
+	"configure-failed",
+	"done",
+];
+const POST_SHIMS_START: Phase[] = [
+	"blocking-shims",
 	"validating-existing",
 	"key-choice",
 	"fetching-key",
@@ -112,15 +125,7 @@ export function InstallApp() {
 		setStep("installing");
 	}, []);
 
-	// On failure we set a terminal `*-failed` phase and stop advancing. The
-	// step's error frame stays rendered so the user can read it; exiting the
-	// app is left to the user (Ctrl-C), matching Login/Configure's prior
-	// hang-on-error behavior.
-	const handleInstallDone = useCallback((success: boolean) => {
-		if (!success) {
-			setStep("install-failed");
-			return;
-		}
+	const advancePastInstall = useCallback(() => {
 		const saved = loadApiKey();
 		if (!saved) {
 			setStep("key-choice");
@@ -145,6 +150,25 @@ export function InstallApp() {
 				setStep("key-choice");
 			});
 	}, []);
+
+	// On failure we set a terminal `*-failed` phase and stop advancing. The
+	// step's error frame stays rendered so the user can read it; exiting the
+	// app is left to the user (Ctrl-C), matching Login/Configure's prior
+	// hang-on-error behavior.
+	const handleInstallDone = useCallback((success: boolean) => {
+		if (!success) {
+			setStep("install-failed");
+			return;
+		}
+		setStep("blocking-shims");
+	}, []);
+
+	// Shim setup is best-effort: even if it fails, continue with the auth flow
+	// so the user can still complete `codev install`. The BlockShims component
+	// surfaces the error inline.
+	const handleBlockShimsDone = useCallback(() => {
+		advancePastInstall();
+	}, [advancePastInstall]);
 
 	const handleAuthMethod = useCallback(
 		(choice: AuthMethodChoice) => {
@@ -234,6 +258,11 @@ export function InstallApp() {
 						title={<Text bold>Installing packages</Text>}
 					>
 						<Install tools={tools} onDone={handleInstallDone} />
+					</Step>
+				)}
+				{POST_SHIMS_START.includes(step) && (
+					<Step active={step === "blocking-shims"} title={blockShimsTitle()}>
+						<BlockShims onDone={handleBlockShimsDone} />
 					</Step>
 				)}
 				{POST_INSTALL.includes(step) && savedCreds && (

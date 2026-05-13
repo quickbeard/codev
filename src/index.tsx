@@ -5,6 +5,7 @@ import { printHelp, printVersion } from "@/lib/help.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
 import { runRestore } from "@/lib/restore.js";
 import { runAgent } from "@/lib/run.js";
+import { activationHint, installShims, uninstallShims } from "@/lib/shims.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
@@ -70,6 +71,29 @@ switch (command) {
 	case "logout": {
 		const ok = await logout();
 		console.log(ok ? "Logged out." : "Not logged in.");
+		process.exit(0);
+		break;
+	}
+	// Hidden: not surfaced in --help or README. Installs/removes PATH shims
+	// that route `claude`/`codex`/`opencode` through codev.
+	case "block": {
+		const r = installShims();
+		console.log(`Installed shims in ${r.shimDir}`);
+		for (const path of r.rcFilesUpdated) console.log(`  patched ${path}`);
+		if (r.windowsUserPathUpdated) console.log("  updated user PATH");
+		console.log(activationHint());
+		process.exit(0);
+		break;
+	}
+	case "unblock": {
+		const r = uninstallShims();
+		if (r.shimsRemoved.length === 0 && r.rcFilesUpdated.length === 0) {
+			console.log("No codev shims installed.");
+		} else {
+			console.log(`Removed ${r.shimsRemoved.length} shim(s) from ${r.shimDir}`);
+			for (const path of r.rcFilesUpdated) console.log(`  cleaned ${path}`);
+			if (r.windowsUserPathUpdated) console.log("  updated user PATH");
+		}
 		process.exit(0);
 		break;
 	}
