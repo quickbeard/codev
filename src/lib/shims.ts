@@ -239,12 +239,6 @@ function updateWindowsUserPath(): boolean {
 	}
 }
 
-// Shells we set up have no cross-platform way to refresh PATH in-place:
-// `exec $SHELL` works on bash/zsh/sh/fish; PowerShell has no exec, and
-// PowerShell reads user-scope PATH from the registry only at session start, so
-// even `. $PROFILE` won't pick up the change. cmd.exe has nothing comparable.
-// Wording is neutral ("to apply") so the same hint works for both `codev
-// block` and `codev unblock`.
 export function activationHint(): string {
 	if (process.platform === "win32") {
 		return "Restart your terminal to apply.";
