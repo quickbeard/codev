@@ -36,7 +36,7 @@
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
-      "pnpm fix",
+      "pnpm check",
       "pnpm typecheck"
     ]
   },
