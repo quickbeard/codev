@@ -16,6 +16,9 @@ interface ConfigureProps {
 	tools: Tool[];
 	// `null` means skip writing CoDev's config; only create the backup.
 	creds: Credentials | null;
+	// When true, the final resume message merges in the shim-activation hint
+	// (platform-aware: `exec $SHELL` on Unix, "Restart your terminal" on Win).
+	shimsInstalled?: boolean;
 	onDone: (success: boolean) => void;
 }
 
@@ -33,7 +36,7 @@ const RUN_CMD: Record<Tool, string> = {
 	opencode: "codev opencode",
 };
 
-function resumeMessage(tools: Tool[]): ReactNode {
+function resumeMessage(tools: Tool[], shimsInstalled: boolean): ReactNode {
 	if (tools.length === 0) return null;
 	const parts = tools.flatMap((t, i) => {
 		const cmd = (
@@ -45,9 +48,32 @@ function resumeMessage(tools: Tool[]): ReactNode {
 		const sep = i === tools.length - 1 ? " or " : ", ";
 		return [sep, cmd];
 	});
+	if (!shimsInstalled) {
+		return (
+			<Text>
+				{"Done! You can now run "}
+				{parts}
+				{" to get started."}
+			</Text>
+		);
+	}
+	// Shims are installed but won't take effect in the current shell. Merge
+	// the activation hint into the resume sentence rather than show it as a
+	// separate line.
+	if (process.platform === "win32") {
+		return (
+			<Text>
+				{"Done! Restart your terminal, then run "}
+				{parts}
+				{" to get started."}
+			</Text>
+		);
+	}
 	return (
 		<Text>
-			{"Done! You can now run "}
+			{"Done! Run "}
+			<Text color="cyan">exec $SHELL</Text>
+			{", then "}
 			{parts}
 			{" to get started."}
 		</Text>
@@ -63,7 +89,12 @@ function describeResult(r: ConfigureResult, skipped: boolean): string[] {
 	return [`Configured ${LABEL[r.kind]}`];
 }
 
-export function Configure({ tools, creds, onDone }: ConfigureProps) {
+export function Configure({
+	tools,
+	creds,
+	shimsInstalled = false,
+	onDone,
+}: ConfigureProps) {
 	const [phase, setPhase] = useState<Phase>("running");
 	const [logs, setLogs] = useState<string[]>([]);
 	const [error, setError] = useState<string | null>(null);
@@ -106,7 +137,7 @@ export function Configure({ tools, creds, onDone }: ConfigureProps) {
 			))}
 			{phase === "done" && (
 				<Box marginBottom={1} flexDirection="column">
-					{resumeMessage(tools)}
+					{resumeMessage(tools, shimsInstalled)}
 					<Box marginTop={1}>
 						<Text dimColor>{HELP_HINT}</Text>
 					</Box>

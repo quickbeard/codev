@@ -7,7 +7,6 @@ import {
 	configurationMethodTitle,
 } from "@/components/AuthMethod.js";
 import { Banner } from "@/components/Banner.js";
-import { BlockShims, blockShimsTitle } from "@/components/BlockShims.js";
 import { Configure, configureTitle } from "@/components/Configure.js";
 import { Confirm, confirmTitle } from "@/components/Confirm.js";
 import { FetchApiKey, fetchApiKeyTitle } from "@/components/FetchApiKey.js";
@@ -29,6 +28,7 @@ import {
 } from "@/lib/auth.js";
 import type { Credentials, Tool } from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
+import { installShims } from "@/lib/shims.js";
 
 type Phase =
 	| "select"
@@ -36,7 +36,6 @@ type Phase =
 	| "login"
 	| "installing"
 	| "install-failed"
-	| "blocking-shims"
 	| "validating-existing"
 	| "key-choice"
 	| "fetching-key"
@@ -48,17 +47,6 @@ type Phase =
 const POST_LOGIN: Phase[] = [
 	"installing",
 	"install-failed",
-	"blocking-shims",
-	"validating-existing",
-	"key-choice",
-	"fetching-key",
-	"manual-creds",
-	"configuring",
-	"configure-failed",
-	"done",
-];
-const POST_SHIMS_START: Phase[] = [
-	"blocking-shims",
 	"validating-existing",
 	"key-choice",
 	"fetching-key",
@@ -103,6 +91,7 @@ export function InstallApp() {
 	const [savedCreds, setSavedCreds] = useState<ApiKeyCreds | null>(null);
 	const [existingValid, setExistingValid] = useState(false);
 	const [existingMessage, setExistingMessage] = useState<string | null>(null);
+	const [shimsInstalled, setShimsInstalled] = useState(false);
 
 	const handleConfirm = (selected: Tool[]) => {
 		setTools(selected);
@@ -155,20 +144,24 @@ export function InstallApp() {
 	// step's error frame stays rendered so the user can read it; exiting the
 	// app is left to the user (Ctrl-C), matching Login/Configure's prior
 	// hang-on-error behavior.
-	const handleInstallDone = useCallback((success: boolean) => {
-		if (!success) {
-			setStep("install-failed");
-			return;
-		}
-		setStep("blocking-shims");
-	}, []);
-
-	// Shim setup is best-effort: even if it fails, continue with the auth flow
-	// so the user can still complete `codev install`. The BlockShims component
-	// surfaces the error inline.
-	const handleBlockShimsDone = useCallback(() => {
-		advancePastInstall();
-	}, [advancePastInstall]);
+	const handleInstallDone = useCallback(
+		(success: boolean) => {
+			if (!success) {
+				setStep("install-failed");
+				return;
+			}
+			// Install PATH shims silently — the final "Done!" message merges the
+			// activation hint in. Best-effort: a failure doesn't block install.
+			try {
+				installShims();
+				setShimsInstalled(true);
+			} catch {
+				// Leave shimsInstalled=false so the resume message stays simple.
+			}
+			advancePastInstall();
+		},
+		[advancePastInstall],
+	);
 
 	const handleAuthMethod = useCallback(
 		(choice: AuthMethodChoice) => {
@@ -260,11 +253,6 @@ export function InstallApp() {
 						<Install tools={tools} onDone={handleInstallDone} />
 					</Step>
 				)}
-				{POST_SHIMS_START.includes(step) && (
-					<Step active={step === "blocking-shims"} title={blockShimsTitle()}>
-						<BlockShims onDone={handleBlockShimsDone} />
-					</Step>
-				)}
 				{POST_INSTALL.includes(step) && savedCreds && (
 					<Step
 						active={step === "validating-existing"}
@@ -329,6 +317,7 @@ export function InstallApp() {
 						<Configure
 							tools={tools}
 							creds={creds}
+							shimsInstalled={shimsInstalled}
 							onDone={handleConfigureDone}
 						/>
 					</Step>
