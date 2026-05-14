@@ -12,19 +12,45 @@ export interface ReexecResult {
 	error?: string;
 }
 
+let warningFilterInstalled = false;
+
+// Drop Node's "SQLite is an experimental feature" ProcessWarning while letting
+// every other warning fall through to the default printer. Needed on Node 22.x
+// patches that expose `node:sqlite` unflagged: the probe import below succeeds
+// but emits the warning before returning, so `--disable-warning` in a re-exec
+// child can't help — we never re-exec on that path.
+function suppressSqliteExperimentalWarning(): void {
+	if (warningFilterInstalled) return;
+	warningFilterInstalled = true;
+	const originalListeners = process.listeners("warning");
+	process.removeAllListeners("warning");
+	process.on("warning", (warning) => {
+		if (
+			warning.name === "ExperimentalWarning" &&
+			/SQLite/i.test(warning.message)
+		) {
+			return;
+		}
+		for (const listener of originalListeners) listener(warning);
+	});
+}
+
 // Ensure `node:sqlite` is loadable in the current process. If it isn't, and
 // we haven't already been re-execed, re-launch the same CLI invocation with
 // `--experimental-sqlite` so the import will succeed in the child. The child
 // inherits stdio, so the user sees no difference; we just exit with whatever
 // exit code the child returns.
 //
-// `node:sqlite` is stable from Node 23.5 onward and gated behind
-// `--experimental-sqlite` on Node 22.5–23.4. Node < 22.5 lacks the module
-// entirely and is rejected at startup by the `MIN_NODE_VERSION` check in
-// `index.tsx`, so a re-exec'd child that still can't import means something
-// unexpected (e.g. `--experimental-sqlite` removed in a future Node) and we
-// surface that rather than loop.
+// `node:sqlite` is stable from Node 23.5 onward. On Node 22.x it's gated
+// behind `--experimental-sqlite` in early patches and unflagged-but-still-
+// experimental in later ones; both paths produce an ExperimentalWarning, which
+// we suppress before probing. Node < 22.5 lacks the module entirely and is
+// rejected at startup by the `MIN_NODE_VERSION` check in `index.tsx`, so a
+// re-exec'd child that still can't import means something unexpected (e.g.
+// `--experimental-sqlite` removed in a future Node) and we surface that
+// rather than loop.
 export async function ensureNodeSqliteOrReexec(): Promise<ReexecResult> {
+	suppressSqliteExperimentalWarning();
 	try {
 		await import("node:sqlite");
 		return { action: "ok" };

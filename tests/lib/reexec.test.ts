@@ -81,3 +81,24 @@ test("re-execs with --experimental-sqlite when node:sqlite is unloadable", async
 	expect(args).toContain("/path/to/dist/index.js");
 	expect(args).toContain("upload");
 });
+
+test("suppresses node:sqlite ExperimentalWarning emitted during the probe", async () => {
+	if (!(await nodeSqliteAvailable())) return;
+	await ensureNodeSqliteOrReexec();
+
+	const stderrSpy = vi
+		.spyOn(process.stderr, "write")
+		.mockImplementation(() => true);
+	try {
+		process.emitWarning("SQLite is an experimental feature codev-test-marker", {
+			type: "ExperimentalWarning",
+		});
+		process.emitWarning("a different non-sqlite warning codev-test-marker");
+		await new Promise((resolve) => setImmediate(resolve));
+		const stderr = stderrSpy.mock.calls.flat().map(String).join("");
+		expect(stderr).not.toMatch(/SQLite is an experimental feature/);
+		expect(stderr).toMatch(/non-sqlite warning codev-test-marker/);
+	} finally {
+		stderrSpy.mockRestore();
+	}
+});
