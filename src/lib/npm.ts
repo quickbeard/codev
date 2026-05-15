@@ -9,6 +9,20 @@ export const PKG: Record<Tool, string> = {
 	codex: "@openai/codex",
 };
 
+// Claude Code 2.1.142 shipped a Windows npm package that resolves to a
+// non-PE binary at `bin/claude.exe`, which Windows surfaces as the generic
+// "Unsupported 16-Bit Application" dialog and refuses to run
+// (anthropics/claude-code#50962). 2.1.141 is the last known-good release on
+// Windows; macOS/Linux are unaffected, so we only pin on win32.
+const CLAUDE_CODE_WIN32_PIN = "2.1.141";
+
+export function installSpec(tool: Tool): string {
+	if (tool === "claude-code" && process.platform === "win32") {
+		return `${PKG[tool]}@${CLAUDE_CODE_WIN32_PIN}`;
+	}
+	return PKG[tool];
+}
+
 export const CLI: Record<Tool, string> = {
 	"claude-code": "claude",
 	opencode: "opencode",
@@ -106,7 +120,7 @@ export async function runCodexWindowsRecovery(): Promise<string | null> {
 }
 
 export async function installAndVerify(tool: Tool): Promise<string | null> {
-	const installErr = await installPackage(PKG[tool]);
+	const installErr = await installPackage(installSpec(tool));
 	if (installErr) return installErr;
 
 	const firstVerify = await verifyInstall(tool);
