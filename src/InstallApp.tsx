@@ -18,13 +18,20 @@ import {
 	type ManualCredentialsValue,
 	manualCredentialsTitle,
 } from "@/components/ManualCredentials.js";
+import {
+	ProxyUrl,
+	type ProxyUrlChoice,
+	proxyUrlTitle,
+} from "@/components/ProxyUrl.js";
 import { Step } from "@/components/Step.js";
 import { ToolSelect, toolSelectTitle } from "@/components/ToolSelect.js";
 import {
 	type ApiKeyCreds,
 	type AuthData,
 	loadApiKey,
+	refreshCodevConfig,
 	saveApiKey,
+	saveProxyUrl,
 } from "@/lib/auth.js";
 import type { Credentials, Tool } from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
@@ -36,6 +43,8 @@ type Phase =
 	| "login"
 	| "installing"
 	| "install-failed"
+	| "proxy-url-choice"
+	| "refreshing-config"
 	| "validating-existing"
 	| "key-choice"
 	| "fetching-key"
@@ -47,6 +56,8 @@ type Phase =
 const POST_LOGIN: Phase[] = [
 	"installing",
 	"install-failed",
+	"proxy-url-choice",
+	"refreshing-config",
 	"validating-existing",
 	"key-choice",
 	"fetching-key",
@@ -56,6 +67,27 @@ const POST_LOGIN: Phase[] = [
 	"done",
 ];
 const POST_INSTALL: Phase[] = [
+	"proxy-url-choice",
+	"refreshing-config",
+	"validating-existing",
+	"key-choice",
+	"fetching-key",
+	"manual-creds",
+	"configuring",
+	"configure-failed",
+	"done",
+];
+const POST_PROXY_CHOICE: Phase[] = [
+	"refreshing-config",
+	"validating-existing",
+	"key-choice",
+	"fetching-key",
+	"manual-creds",
+	"configuring",
+	"configure-failed",
+	"done",
+];
+const POST_REFRESH: Phase[] = [
 	"validating-existing",
 	"key-choice",
 	"fetching-key",
@@ -92,6 +124,8 @@ export function InstallApp() {
 	const [existingValid, setExistingValid] = useState(false);
 	const [existingMessage, setExistingMessage] = useState<string | null>(null);
 	const [shimsInstalled, setShimsInstalled] = useState(false);
+	const [proxyChoice, setProxyChoice] = useState<ProxyUrlChoice | null>(null);
+	const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
 
 	const handleConfirm = (selected: Tool[]) => {
 		setTools(selected);
@@ -144,23 +178,39 @@ export function InstallApp() {
 	// step's error frame stays rendered so the user can read it; exiting the
 	// app is left to the user (Ctrl-C), matching Login/Configure's prior
 	// hang-on-error behavior.
-	const handleInstallDone = useCallback(
-		(success: boolean) => {
-			if (!success) {
-				setStep("install-failed");
+	const handleInstallDone = useCallback((success: boolean) => {
+		if (!success) {
+			setStep("install-failed");
+			return;
+		}
+		// Install PATH shims silently — the final "Done!" message merges the
+		// activation hint in. Best-effort: a failure doesn't block install.
+		try {
+			installShims();
+			setShimsInstalled(true);
+		} catch {
+			// Leave shimsInstalled=false so the resume message stays simple.
+		}
+		setStep("proxy-url-choice");
+	}, []);
+
+	const handleProxyUrlDone = useCallback(
+		(url: string | null) => {
+			saveProxyUrl(url);
+			setProxyChoice(url === null ? "default" : "custom");
+			setStep("refreshing-config");
+			if (!auth) {
+				// login() runs before this phase, so this is defensive only.
+				advancePastInstall();
 				return;
 			}
-			// Install PATH shims silently — the final "Done!" message merges the
-			// activation hint in. Best-effort: a failure doesn't block install.
-			try {
-				installShims();
-				setShimsInstalled(true);
-			} catch {
-				// Leave shimsInstalled=false so the resume message stays simple.
-			}
-			advancePastInstall();
+			refreshCodevConfig(auth.access_token, (msg) => {
+				setRefreshMessage(msg);
+			}).finally(() => {
+				advancePastInstall();
+			});
 		},
-		[advancePastInstall],
+		[auth, advancePastInstall],
 	);
 
 	const handleAuthMethod = useCallback(
@@ -253,7 +303,36 @@ export function InstallApp() {
 						<Install tools={tools} onDone={handleInstallDone} />
 					</Step>
 				)}
-				{POST_INSTALL.includes(step) && savedCreds && (
+				{POST_INSTALL.includes(step) && (
+					<Step
+						active={step === "proxy-url-choice"}
+						title={proxyUrlTitle(step !== "proxy-url-choice")}
+					>
+						<ProxyUrl
+							onDone={handleProxyUrlDone}
+							readOnly={step !== "proxy-url-choice"}
+							selected={proxyChoice}
+						/>
+					</Step>
+				)}
+				{POST_PROXY_CHOICE.includes(step) && (
+					<Step
+						active={step === "refreshing-config"}
+						title={<Text bold>Refreshing CoDev config</Text>}
+					>
+						{step === "refreshing-config" ? (
+							<Box>
+								<Text color="cyan">
+									<Spinner />
+								</Text>
+								<Text> Fetching Supabase coordinates from proxy...</Text>
+							</Box>
+						) : (
+							<Text dimColor>{refreshMessage ?? "Refreshed."}</Text>
+						)}
+					</Step>
+				)}
+				{POST_REFRESH.includes(step) && savedCreds && (
 					<Step
 						active={step === "validating-existing"}
 						title={<Text bold>Checking saved API key</Text>}

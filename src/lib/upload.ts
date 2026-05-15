@@ -186,7 +186,13 @@ export function filterNewFiles(
 async function ensureAuth(onStatus: (message: string) => void) {
 	const auth = loadAuth();
 	if (auth) return auth;
-	return login(onStatus, (openBrowser) => openBrowser());
+	const fresh = await login(onStatus, (openBrowser) => openBrowser());
+	// login() no longer refreshes CoDev config on its own — every caller does
+	// it explicitly so the call uses the user's chosen proxy URL. On a fresh
+	// login we don't have a cache yet, so populating it here avoids burning
+	// the first Supabase attempt + retry path just to fetch coords.
+	await refreshCodevConfig(fresh.access_token, onStatus);
+	return fresh;
 }
 
 async function fetchExistingUploads(
