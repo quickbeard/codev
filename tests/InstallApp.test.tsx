@@ -22,6 +22,9 @@ let installAppTempHome: string;
 beforeEach(() => {
 	installAppTempHome = mkdtempSync(join(tmpdir(), "codev-installapp-test-"));
 	vi.stubEnv("HOME", installAppTempHome);
+	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
+	// new `refreshing-config` phase doesn't block the test on real fetch.
+	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
@@ -82,19 +85,28 @@ async function advanceThroughConfirmCodex(stdin: {
 	await new Promise((r) => setTimeout(r, 30));
 }
 
-async function pickNewKey(stdin: { write: (s: string) => void }) {
-	// Wait for login + install + validation to settle and the key-choice screen
-	// to appear, then press Enter on the default first option ("Get a new API Key"
-	// when no saved key exists).
+// After install completes, the proxy-url-choice screen appears with the
+// cursor on "Use default CoDev proxy URL". Enter picks it; refreshing-config
+// resolves immediately because refreshCodevConfig is mocked in beforeEach.
+async function advanceProxyUrlChoice(stdin: { write: (s: string) => void }) {
 	await new Promise((r) => setTimeout(r, 200));
+	stdin.write("\r");
+	await new Promise((r) => setTimeout(r, 100));
+}
+
+async function pickNewKey(stdin: { write: (s: string) => void }) {
+	// Wait for login + install + proxy-url + refresh + validation to settle and
+	// the key-choice screen to appear, then press Enter on the default first
+	// option ("Get a new API Key" when no saved key exists).
+	await advanceProxyUrlChoice(stdin);
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
 
 async function pickManual(stdin: { write: (s: string) => void }) {
-	// Wait for login + install + validation to settle, move cursor to "I have my
+	// Wait for the upstream phases to settle, move cursor to "I have my
 	// own API Key", Enter.
-	await new Promise((r) => setTimeout(r, 200));
+	await advanceProxyUrlChoice(stdin);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
@@ -102,10 +114,10 @@ async function pickManual(stdin: { write: (s: string) => void }) {
 }
 
 async function pickSkip(stdin: { write: (s: string) => void }) {
-	// Wait for login + install + validation to settle, move cursor past
+	// Wait for the upstream phases to settle, move cursor past
 	// "Get a new API Key" and "I have my own API Key" to land on
 	// "Skip configuration", Enter.
-	await new Promise((r) => setTimeout(r, 200));
+	await advanceProxyUrlChoice(stdin);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\x1B[B");
@@ -601,7 +613,8 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin);
-		// Wait for login + install + validation to settle and key-choice to render
+		await advanceProxyUrlChoice(stdin);
+		// Wait for refresh + validation to settle and key-choice to render
 		// with the new option as the default cursor.
 		await new Promise((r) => setTimeout(r, 300));
 
@@ -640,6 +653,7 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin);
+		await advanceProxyUrlChoice(stdin);
 		await new Promise((r) => setTimeout(r, 300));
 
 		const history = allFrames(frames);
@@ -661,6 +675,7 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin);
+		await advanceProxyUrlChoice(stdin);
 		await new Promise((r) => setTimeout(r, 300));
 
 		const history = allFrames(frames);

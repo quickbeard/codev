@@ -16,12 +16,15 @@ import {
 	browserOpener,
 	loadApiKey,
 	loadAuth,
+	loadProxyUrl,
 	login,
 	logout,
+	refreshCodevConfig,
 	saveApiKey,
 	saveCodevConfig,
+	saveProxyUrl,
 } from "@/lib/auth.js";
-import { SSO_URL } from "@/lib/const.js";
+import { PROXY_URL, SSO_URL } from "@/lib/const.js";
 
 const REVOCATION_ENDPOINT = `${SSO_URL}/revoke`;
 
@@ -274,6 +277,125 @@ describe("saveCodevConfig", () => {
 	});
 });
 
+describe("saveProxyUrl / loadProxyUrl", () => {
+	test("round-trips a custom URL", () => {
+		saveProxyUrl("https://custom.example.com/proxy");
+		expect(loadProxyUrl()).toBe("https://custom.example.com/proxy");
+	});
+
+	test("returns null when no proxy_url is set", () => {
+		writeAuthFile(VALID_AUTH);
+		expect(loadProxyUrl()).toBeNull();
+	});
+
+	test("returns null when auth.json does not exist", () => {
+		expect(loadProxyUrl()).toBeNull();
+	});
+
+	test("null argument clears the field while preserving other blocks", () => {
+		writeAuthFile(VALID_AUTH);
+		saveProxyUrl("https://custom.example.com/proxy");
+		expect(loadProxyUrl()).toBe("https://custom.example.com/proxy");
+		saveProxyUrl(null);
+		expect(loadProxyUrl()).toBeNull();
+		expect(loadAuth()?.access_token).toBe("test-access-token");
+	});
+
+	test("PROXY_URL() returns the saved value", () => {
+		saveProxyUrl("https://custom.example.com/proxy");
+		expect(PROXY_URL()).toBe("https://custom.example.com/proxy");
+	});
+
+	test("PROXY_URL() falls back to the default when nothing is saved", () => {
+		expect(PROXY_URL()).toContain("/codev-proxy");
+	});
+
+	test("logout preserves proxy_url alongside other long-lived fields", async () => {
+		const dir = join(tempDir, ".codev");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({
+				...VALID_AUTH,
+				proxy_url: "https://custom.example.com/proxy",
+				api_key: "sk-keep",
+			}),
+		);
+		const fetchSpy = mockAuthFetch({
+			[REVOCATION_ENDPOINT]: async () => new Response("", { status: 200 }),
+		});
+		try {
+			expect(await logout()).toBe(true);
+			expect(loadProxyUrl()).toBe("https://custom.example.com/proxy");
+			expect(loadApiKey()?.apiKey).toBe("sk-keep");
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+});
+
+describe("refreshCodevConfig", () => {
+	test("fetches /config and writes Supabase coords into auth.json", async () => {
+		const fetchSpy = mockAuthFetch({
+			"/codev-proxy/config": async () =>
+				new Response(
+					JSON.stringify({
+						supabaseUrl: "https://fresh.supabase.co",
+						supabaseAnonKey: "fresh-anon",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				),
+		});
+		try {
+			await refreshCodevConfig("token", () => {});
+			const saved = JSON.parse(
+				readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
+			) as Record<string, unknown>;
+			expect(saved.supabase_url).toBe("https://fresh.supabase.co");
+			expect(saved.supabase_anon_key).toBe("fresh-anon");
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	test("uses the persisted custom proxy URL", async () => {
+		saveProxyUrl("https://custom.example.com/proxy");
+		const fetchSpy = mockAuthFetch({
+			"https://custom.example.com/proxy/config": async () =>
+				new Response(
+					JSON.stringify({
+						supabaseUrl: "u",
+						supabaseAnonKey: "a",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				),
+		});
+		try {
+			await refreshCodevConfig("token", () => {});
+			const calls = fetchSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+			expect(calls).toContain("https://custom.example.com/proxy/config");
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	test("logs a warning and does not throw on failure", async () => {
+		const fetchSpy = mockAuthFetch({
+			"/codev-proxy/config": async () =>
+				new Response(JSON.stringify({ error: "boom" }), { status: 502 }),
+		});
+		const logs: string[] = [];
+		try {
+			await refreshCodevConfig("token", (msg) => logs.push(msg));
+			expect(
+				logs.some((l) => l.includes("could not refresh CoDev config")),
+			).toBe(true);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+});
+
 describe("saveApiKey / loadApiKey", () => {
 	test("round-trips api_key with optional baseUrl and model", () => {
 		saveApiKey({
@@ -322,18 +444,9 @@ describe("login", () => {
 		const logs: string[] = [];
 		const onReady = vi.fn();
 
-		// Cached-login path also refreshes the CoDev config — mock /config so
-		// the test stays hermetic and we can assert the refresh actually ran.
-		const fetchSpy = mockAuthFetch({
-			"/codev-proxy/config": async () =>
-				new Response(
-					JSON.stringify({
-						supabaseUrl: "https://refreshed-on-cached.supabase.co",
-						supabaseAnonKey: "refreshed-anon",
-					}),
-					{ headers: { "Content-Type": "application/json" } },
-				),
-		});
+		// login() no longer refreshes CoDev config — every /codev-proxy/config
+		// call would be a violation. Spy on fetch so any stray call is visible.
+		const fetchSpy = mockAuthFetch({});
 
 		try {
 			const result = await login((msg) => logs.push(msg), onReady);
@@ -344,14 +457,10 @@ describe("login", () => {
 			expect(logs.some((l) => l.includes("Already logged in"))).toBe(true);
 			expect(onReady).not.toHaveBeenCalled();
 
-			// Cache should now hold the freshly fetched Supabase coords.
-			const saved = JSON.parse(
-				readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
-			) as Record<string, unknown>;
-			expect(saved.supabase_url).toBe(
-				"https://refreshed-on-cached.supabase.co",
+			const configCalls = fetchSpy.mock.calls.filter((c: unknown[]) =>
+				String(c[0]).includes("/codev-proxy/config"),
 			);
-			expect(saved.supabase_anon_key).toBe("refreshed-anon");
+			expect(configCalls).toHaveLength(0);
 		} finally {
 			fetchSpy.mockRestore();
 		}
@@ -384,7 +493,7 @@ describe("login refresh-token path", () => {
 		fetchSpy?.mockRestore();
 	});
 
-	test("refreshes tokens and persists Supabase config from /config", async () => {
+	test("refreshes tokens silently without touching codev-proxy", async () => {
 		// Pre-seed an expired SSO session with a refresh_token so login() takes
 		// the silent-refresh branch instead of the browser flow.
 		const dir = join(tempDir, ".codev");
@@ -419,14 +528,6 @@ describe("login refresh-token path", () => {
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				),
-			"/codev-proxy/config": async () =>
-				new Response(
-					JSON.stringify({
-						supabaseUrl: "https://refreshed.supabase.co",
-						supabaseAnonKey: "refreshed-anon",
-					}),
-					{ headers: { "Content-Type": "application/json" } },
-				),
 		});
 
 		const result = await login(
@@ -435,11 +536,10 @@ describe("login refresh-token path", () => {
 		);
 
 		expect(result.access_token).toBe("refreshed-access");
-		const saved = JSON.parse(
-			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
-		) as Record<string, unknown>;
-		expect(saved.supabase_url).toBe("https://refreshed.supabase.co");
-		expect(saved.supabase_anon_key).toBe("refreshed-anon");
+		const configCalls = fetchSpy.mock.calls.filter((c: unknown[]) =>
+			String(c[0]).includes("/codev-proxy/config"),
+		);
+		expect(configCalls).toHaveLength(0);
 	});
 });
 
@@ -469,7 +569,7 @@ describe("login full OAuth flow", () => {
 	let openBrowserSpy: MockInstance;
 	const originalFetch = globalThis.fetch;
 
-	function mockSsoFetch(overrides: { config?: () => Promise<Response> } = {}) {
+	function mockSsoFetch() {
 		fetchSpy = mockAuthFetch({
 			"/token": async () =>
 				new Response(
@@ -489,16 +589,6 @@ describe("login full OAuth flow", () => {
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				),
-			"/codev-proxy/config":
-				overrides.config ??
-				(async () =>
-					new Response(
-						JSON.stringify({
-							supabaseUrl: "https://x.supabase.co",
-							supabaseAnonKey: "anon-x",
-						}),
-						{ headers: { "Content-Type": "application/json" } },
-					)),
 		});
 	}
 
@@ -543,7 +633,7 @@ describe("login full OAuth flow", () => {
 		expect(logs.some((l) => l.includes("Logged in as"))).toBe(true);
 	});
 
-	test("persists Supabase config from /config into auth.json", async () => {
+	test("does not call codev-proxy /config during login", async () => {
 		mockSsoFetch();
 
 		await login(
@@ -560,43 +650,15 @@ describe("login full OAuth flow", () => {
 			},
 		);
 
-		const saved = JSON.parse(
-			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
-		) as Record<string, unknown>;
-		expect(saved.supabase_url).toBe("https://x.supabase.co");
-		expect(saved.supabase_anon_key).toBe("anon-x");
-		expect(saved.access_token).toBe("flow-access-token");
-	});
-
-	test("login still succeeds when /config fetch fails (warns via onLog)", async () => {
-		mockSsoFetch({
-			config: async () =>
-				new Response(JSON.stringify({ error: "boom" }), { status: 502 }),
-		});
-		const logs: string[] = [];
-
-		const result = await login(
-			(msg) => logs.push(msg),
-			(openBrowserFn) => {
-				openBrowserFn();
-				const port = getCallbackPort(openBrowserSpy);
-				const state = getCallbackState(openBrowserSpy);
-				setTimeout(() => {
-					originalFetch(
-						`http://localhost:${port}/callback?code=c&state=${state}`,
-					);
-				}, 50);
-			},
+		const configCalls = fetchSpy.mock.calls.filter((c: unknown[]) =>
+			String(c[0]).includes("/codev-proxy/config"),
 		);
-
-		expect(result.access_token).toBe("flow-access-token");
+		expect(configCalls).toHaveLength(0);
 		const saved = JSON.parse(
 			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
 		) as Record<string, unknown>;
 		expect(saved.supabase_url).toBeUndefined();
-		expect(logs.some((l) => l.includes("could not refresh CoDev config"))).toBe(
-			true,
-		);
+		expect(saved.access_token).toBe("flow-access-token");
 	});
 
 	test("authorize URL includes nonce", async () => {

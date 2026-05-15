@@ -173,7 +173,7 @@ describe("fetchSupabaseSession", () => {
 		);
 		await fetchSupabaseSession("sso-token");
 		const [url] = fetchSpy.mock.calls[0] as [string];
-		expect(url).toBe(`${PROXY_URL}/supabase/exchange`);
+		expect(url).toBe(`${PROXY_URL()}/supabase/exchange`);
 	});
 
 	test("returns the Supabase session on a 2xx response", async () => {
@@ -229,7 +229,7 @@ describe("fetchCodevConfig", () => {
 			string,
 			{ method?: string; headers?: Record<string, string> },
 		];
-		expect(url).toBe(`${PROXY_URL}/config`);
+		expect(url).toBe(`${PROXY_URL()}/config`);
 		expect(init.method).toBe("POST");
 		expect(init.headers?.Authorization).toBe("Bearer my-token");
 	});
