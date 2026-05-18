@@ -48,7 +48,9 @@ describe("runAgent", () => {
 		const messages = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
 		expect(
 			messages.some((m: string) =>
-				m.includes("is not installed. Run 'codev install'"),
+				m.includes(
+					"could not be launched. If it isn't installed, run 'codev install'",
+				),
 			),
 		).toBe(true);
 	});
