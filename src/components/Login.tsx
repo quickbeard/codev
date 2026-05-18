@@ -34,7 +34,18 @@ export function Login({ onDone }: LoginProps) {
 				onDone(auth);
 			})
 			.catch((err: Error) => {
-				setError(err.message);
+				// Node's built-in fetch throws `TypeError: fetch failed` for any
+				// network-layer failure and stashes the real reason (DNS, TLS,
+				// proxy interception, etc.) on `err.cause`. Surface it so users
+				// can self-diagnose instead of staring at a bare "fetch failed".
+				const cause = err.cause;
+				const causeMsg =
+					cause instanceof Error
+						? cause.message
+						: cause !== undefined
+							? String(cause)
+							: "";
+				setError(causeMsg ? `${err.message} (${causeMsg})` : err.message);
 			});
 	}, [addLog, onDone, attempt]);
 
