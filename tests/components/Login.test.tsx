@@ -65,6 +65,26 @@ describe("Login", () => {
 		expect(onDone).not.toHaveBeenCalled();
 	});
 
+	test("surfaces err.cause when present (real-world: fetch failed → DNS detail)", async () => {
+		vi.spyOn(auth, "login").mockImplementation(() => {
+			const err = new TypeError("fetch failed");
+			(err as Error & { cause?: unknown }).cause = new Error(
+				"getaddrinfo ENOTFOUND sso.example.com",
+			);
+			return Promise.reject(err);
+		});
+
+		const onDone = vi.fn();
+		const { lastFrame } = render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 50));
+
+		const output = lastFrame() ?? "";
+		expect(output).toContain(
+			"Login failed: fetch failed (getaddrinfo ENOTFOUND sso.example.com)",
+		);
+	});
+
 	test("opens browser when Enter is pressed", async () => {
 		const openBrowserFn = vi.fn();
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
