@@ -11,7 +11,15 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 			...process.env,
 			PATH: stripShimDirFromPath(process.env.PATH),
 		};
-		const child = spawn(cmd, args, { stdio: "inherit", env });
+		// On Windows, npm-installed agent binaries are `.cmd` shims (e.g.
+		// `opencode.cmd`). Node's `spawn` only consults PATHEXT when `shell: true`,
+		// so without this flag the spawn fails with ENOENT even though the agent
+		// is installed. Mirrors the win32 handling in lib/npm.ts.
+		const child = spawn(cmd, args, {
+			stdio: "inherit",
+			env,
+			shell: process.platform === "win32",
+		});
 
 		// The child shares our process group, so the terminal already delivers
 		// SIGINT/SIGTERM to it. Swallow them in the parent so we don't exit
@@ -29,7 +37,7 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 			cleanup();
 			if (err.code === "ENOENT") {
 				console.error(
-					`'${cmd}' is not installed. Run 'codev install' to install it.`,
+					`'${cmd}' could not be launched. If it isn't installed, run 'codev install'.`,
 				);
 			} else {
 				console.error(`Failed to run ${cmd}: ${err.message}`);
