@@ -130,10 +130,6 @@ describe.skipIf(process.platform === "win32")("installShims (Unix)", () => {
 			const contents = readFileSync(path, "utf-8");
 			expect(contents).toMatch(/^#!\/bin\/sh\b/);
 			expect(contents).toContain(`exec codev ${agent} "$@"`);
-			// The notice substitutes the agent name via printf %s — assert on
-			// the literal printf template + the agent string passed as an arg.
-			expect(contents).toContain("'codev %s'");
-			expect(contents).toContain(`"${agent}" "${agent}"`);
 			// chmod +x — at least the owner-execute bit
 			expect(statSync(path).mode & 0o100).toBe(0o100);
 		}

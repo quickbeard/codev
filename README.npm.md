@@ -25,11 +25,8 @@ codev install
 | `codev install`            | Install and configure AI coding agents                                                                   |
 | `codev update`             | Update installed AI coding agents                                                                        |
 | `codev upload`             | Export this directory's agent conversations to `~/.codev/logs/<project>/` and upload them to the backend |
-| `codev claude`             | Run the `claude` CLI (forwards remaining arguments)                                                      |
 | `codev claude --restore`   | Restore `~/.claude/settings.json` from `~/.claude/settings.json.backup`                                  |
-| `codev codex`              | Run the `codex` CLI (forwards remaining arguments)                                                       |
 | `codev codex --restore`    | Restore `~/.codex/config.toml` from `~/.codex/config.toml.backup`                                        |
-| `codev opencode`           | Run the `opencode` CLI (forwards remaining arguments)                                                    |
 | `codev opencode --restore` | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup`                |
 | `codev logout`             | Sign out of SSO                                                                                          |
 

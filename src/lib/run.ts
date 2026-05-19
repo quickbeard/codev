@@ -2,8 +2,16 @@ import { spawn } from "node:child_process";
 import { constants } from "node:os";
 import { stripShimDirFromPath } from "@/lib/shims.js";
 
+const AGENT_LABEL: Record<string, string> = {
+	claude: "Claude Code",
+	codex: "Codex",
+	opencode: "OpenCode",
+};
+
 export function runAgent(cmd: string, args: string[]): Promise<number> {
 	return new Promise((resolve) => {
+		const label = AGENT_LABEL[cmd] ?? cmd;
+		process.stderr.write(`Starting ${label} with CoDev...\n`);
 		// Strip ~/.codev/bin from the child's PATH so spawning `claude` resolves
 		// the real npm-installed binary, not our shim — otherwise the shim would
 		// re-exec `codev claude` and infinite-loop.

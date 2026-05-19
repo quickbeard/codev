@@ -73,8 +73,11 @@ describe("Configure resume message", () => {
 		expect(text).toContain("Done! Run");
 		expect(text).toContain("exec $SHELL");
 		expect(text).toContain("to activate, then");
-		expect(text).toContain("codev opencode");
+		expect(text).toContain("opencode");
 		expect(text).toContain("to get started.");
+		// With shims, the bare binary name is what users invoke — the
+		// `codev <agent>` form is reserved for the no-shims fallback branch.
+		expect(text).not.toContain("codev opencode");
 		// The old two-sentence form should be gone.
 		expect(text).not.toContain("You can now run");
 	});
@@ -93,8 +96,9 @@ describe("Configure resume message", () => {
 			return lastFrame(frames);
 		});
 		expect(text).toContain("Done! Restart your terminal, then run");
-		expect(text).toContain("codev opencode");
+		expect(text).toContain("opencode");
 		expect(text).toContain("to get started.");
+		expect(text).not.toContain("codev opencode");
 		// Windows must not mention Unix-only jargon.
 		expect(text).not.toMatch(/exec|\$SHELL/);
 	});
@@ -113,8 +117,10 @@ describe("Configure resume message", () => {
 			return lastFrame(frames);
 		});
 		expect(text).toContain("exec $SHELL");
-		expect(text).toContain("codev claude");
+		expect(text).toContain("claude");
 		expect(text).toContain(" or ");
-		expect(text).toContain("codev opencode");
+		expect(text).toContain("opencode");
+		expect(text).not.toContain("codev claude");
+		expect(text).not.toContain("codev opencode");
 	});
 });
