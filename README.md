@@ -16,11 +16,7 @@ Then run:
 codev install
 ```
 
-After install, launch any of the configured agents by name:
-
-```bash
-claude   # or:  codex  /  opencode
-```
+After install, type `claude`, `codex`, or `opencode` to launch.
 
 ## Commands
 
