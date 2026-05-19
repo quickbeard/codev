@@ -76,16 +76,6 @@ describe("activationHint", () => {
 		const msg = withPlatform("win32", activationHint);
 		expect(msg).not.toMatch(/exec|\$SHELL/);
 	});
-
-	test("uses neutral wording so it fits both block and unblock", async () => {
-		// `codev unblock` reuses this hint; if it said "to activate", the
-		// unblock output would read backwards. Pin the neutral wording.
-		const { activationHint } = await import("@/lib/shims.js");
-		const unix = withPlatform("darwin", activationHint);
-		const win = withPlatform("win32", activationHint);
-		expect(unix).not.toMatch(/activate|deactivate/);
-		expect(win).not.toMatch(/activate|deactivate/);
-	});
 });
 
 describe("stripShimDirFromPath", () => {

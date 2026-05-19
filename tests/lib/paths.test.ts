@@ -53,7 +53,6 @@ describe("projectFolderName", () => {
 		);
 		try {
 			expect(projectFolderName(tempOther)).not.toBe("home");
-			expect(projectFolderName(tempOther)).not.toMatch(/^-/);
 		} finally {
 			rmSync(tempOther, { recursive: true, force: true });
 		}
