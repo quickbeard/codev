@@ -24,7 +24,7 @@ codev install
 | `codev --version`, `-v`    | Show version                                                                                             |
 | `codev install`            | Install and configure AI coding agents                                                                   |
 | `codev update`             | Update installed AI coding agents                                                                        |
-| `codev upload`             | Export this directory's agent conversations to `~/.codev/logs/<project>/` and upload them to the backend |
+| `codev upload`             | Export this directory's agent conversations to `~/.codev/logs/<project>/` and upload them to the monitor module |
 | `codev claude --restore`   | Restore `~/.claude/settings.json` from `~/.claude/settings.json.backup`                                  |
 | `codev codex --restore`    | Restore `~/.codex/config.toml` from `~/.codex/config.toml.backup`                                        |
 | `codev opencode --restore` | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup`                |
