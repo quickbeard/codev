@@ -35,7 +35,7 @@ import {
 } from "@/lib/auth.js";
 import type { Credentials, Tool } from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
-import { installShims } from "@/lib/shims.js";
+import { installShims, toolToShimAgent } from "@/lib/shims.js";
 
 type Phase =
 	| "select"
@@ -178,21 +178,24 @@ export function InstallApp() {
 	// step's error frame stays rendered so the user can read it; exiting the
 	// app is left to the user (Ctrl-C), matching Login/Configure's prior
 	// hang-on-error behavior.
-	const handleInstallDone = useCallback((success: boolean) => {
-		if (!success) {
-			setStep("install-failed");
-			return;
-		}
-		// Install PATH shims silently — the final "Done!" message merges the
-		// activation hint in. Best-effort: a failure doesn't block install.
-		try {
-			installShims();
-			setShimsInstalled(true);
-		} catch {
-			// Leave shimsInstalled=false so the resume message stays simple.
-		}
-		setStep("proxy-url-choice");
-	}, []);
+	const handleInstallDone = useCallback(
+		(success: boolean) => {
+			if (!success) {
+				setStep("install-failed");
+				return;
+			}
+			// Install PATH shims silently — the final "Done!" message merges the
+			// activation hint in. Best-effort: a failure doesn't block install.
+			try {
+				installShims(tools.map(toolToShimAgent));
+				setShimsInstalled(true);
+			} catch {
+				// Leave shimsInstalled=false so the resume message stays simple.
+			}
+			setStep("proxy-url-choice");
+		},
+		[tools],
+	);
 
 	const handleProxyUrlDone = useCallback(
 		(url: string | null) => {
