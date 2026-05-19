@@ -10,9 +10,15 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
+import type { Tool } from "@/lib/configure.js";
 
 export const SHIM_AGENTS = ["claude", "opencode", "codex"] as const;
 export type ShimAgent = (typeof SHIM_AGENTS)[number];
+
+export function toolToShimAgent(tool: Tool): ShimAgent {
+	if (tool === "claude-code") return "claude";
+	return tool;
+}
 
 const SENTINEL_START = "# >>> codev shims (managed) >>>";
 const SENTINEL_END = "# <<< codev shims (managed) <<<";
@@ -87,11 +93,11 @@ codev ${agent} %*\r
 `;
 }
 
-function writeShimFiles(): ShimAgent[] {
+function writeShimFiles(agents: readonly ShimAgent[]): ShimAgent[] {
 	const dir = shimDir();
 	mkdirSync(dir, { recursive: true });
 	const written: ShimAgent[] = [];
-	for (const agent of SHIM_AGENTS) {
+	for (const agent of agents) {
 		if (process.platform === "win32") {
 			writeFileSync(join(dir, `${agent}.cmd`), cmdShimContent(agent));
 		} else {
@@ -102,6 +108,20 @@ function writeShimFiles(): ShimAgent[] {
 		written.push(agent);
 	}
 	return written;
+}
+
+// Lists agents whose shim file currently lives in ~/.codev/bin. installShims
+// uses this to compute the rc-file alias union so a second `codev install`
+// for a different tool doesn't drop the first run's aliases.
+export function detectInstalledShims(): ShimAgent[] {
+	const dir = shimDir();
+	if (!existsSync(dir)) return [];
+	const installed: ShimAgent[] = [];
+	for (const agent of SHIM_AGENTS) {
+		const name = process.platform === "win32" ? `${agent}.cmd` : agent;
+		if (existsSync(join(dir, name))) installed.push(agent);
+	}
+	return installed;
 }
 
 // Replaces an existing sentinel block, or appends one if not present.
@@ -123,9 +143,9 @@ function escapeRegExp(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function posixShellSnippet(): string {
+function posixShellSnippet(agents: readonly ShimAgent[]): string {
 	const dir = "$HOME/.codev/bin";
-	const aliases = SHIM_AGENTS.map((a) => `alias ${a}="${dir}/${a}"`).join("\n");
+	const aliases = agents.map((a) => `alias ${a}="${dir}/${a}"`).join("\n");
 	return `# Routes claude/codex/opencode through codev so they pick up CoDev's config.
 # Remove this block to disable.
 export PATH="${dir}:$PATH"
@@ -133,9 +153,9 @@ ${aliases}
 `;
 }
 
-function fishShellSnippet(): string {
+function fishShellSnippet(agents: readonly ShimAgent[]): string {
 	const dir = "$HOME/.codev/bin";
-	const aliases = SHIM_AGENTS.map((a) => `alias ${a} "${dir}/${a}"`).join("\n");
+	const aliases = agents.map((a) => `alias ${a} "${dir}/${a}"`).join("\n");
 	return `# Routes claude/codex/opencode through codev so they pick up CoDev's config.
 # Remove this block to disable.
 fish_add_path -p ${dir}
@@ -143,11 +163,11 @@ ${aliases}
 `;
 }
 
-function powershellSnippet(): string {
+function powershellSnippet(agents: readonly ShimAgent[]): string {
 	const dir = "$HOME\\.codev\\bin";
-	const functions = SHIM_AGENTS.map(
-		(a) => `function ${a} { & "${dir}\\${a}.cmd" @args }`,
-	).join("\n");
+	const functions = agents
+		.map((a) => `function ${a} { & "${dir}\\${a}.cmd" @args }`)
+		.join("\n");
 	return `# Routes claude/codex/opencode through codev so they pick up CoDev's config.
 # Remove this block to disable.
 $env:PATH = "${dir}" + [IO.Path]::PathSeparator + $env:PATH
@@ -166,10 +186,10 @@ function updateRcFile(path: string, snippet: string, create: boolean): boolean {
 	return true;
 }
 
-function patchUnixRcs(): string[] {
+function patchUnixRcs(agents: readonly ShimAgent[]): string[] {
 	const home = homedir();
 	const updated: string[] = [];
-	const snippet = posixShellSnippet();
+	const snippet = posixShellSnippet(agents);
 	// zsh/bash rc files: always create-or-update — they're the universal shells
 	// on Unix and the user may switch into them at any time.
 	for (const name of [".zshrc", ".bashrc", ".bash_profile"]) {
@@ -181,14 +201,14 @@ function patchUnixRcs(): string[] {
 	const fishDir = join(home, ".config", "fish");
 	if (existsSync(fishDir)) {
 		const path = join(fishDir, "config.fish");
-		if (updateRcFile(path, fishShellSnippet(), true)) updated.push(path);
+		if (updateRcFile(path, fishShellSnippet(agents), true)) updated.push(path);
 	}
 	return updated;
 }
 
-function patchWindowsProfiles(): string[] {
+function patchWindowsProfiles(agents: readonly ShimAgent[]): string[] {
 	const home = homedir();
-	const snippet = powershellSnippet();
+	const snippet = powershellSnippet(agents);
 	const updated: string[] = [];
 	const profiles = [
 		join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"),
@@ -246,15 +266,21 @@ export function activationHint(): string {
 	return "Run `exec $SHELL` to apply (or open a new terminal).";
 }
 
-export function installShims(): ShimResult {
-	const shimsWritten = writeShimFiles();
+export function installShims(
+	agents: readonly ShimAgent[] = SHIM_AGENTS,
+): ShimResult {
+	const shimsWritten = writeShimFiles(agents);
+	// rc-file aliases reflect every shim on disk (just-written ∪ pre-existing
+	// from earlier installs), so a second `codev install` that picks a
+	// different tool doesn't orphan the first run's aliases.
+	const aliasAgents = detectInstalledShims();
 	const rcFilesUpdated: string[] = [];
 	let windowsUserPathUpdated = false;
 	if (process.platform === "win32") {
-		rcFilesUpdated.push(...patchWindowsProfiles());
+		rcFilesUpdated.push(...patchWindowsProfiles(aliasAgents));
 		windowsUserPathUpdated = updateWindowsUserPath();
 	} else {
-		rcFilesUpdated.push(...patchUnixRcs());
+		rcFilesUpdated.push(...patchUnixRcs(aliasAgents));
 	}
 	return {
 		shimDir: shimDir(),

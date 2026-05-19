@@ -24,6 +24,19 @@ afterEach(() => {
 	rmSync(tempDir, { recursive: true, force: true });
 });
 
+function withPlatform<T>(value: NodeJS.Platform, fn: () => T): T {
+	const original = Object.getOwnPropertyDescriptor(process, "platform");
+	Object.defineProperty(process, "platform", {
+		value,
+		configurable: true,
+	});
+	try {
+		return fn();
+	} finally {
+		if (original) Object.defineProperty(process, "platform", original);
+	}
+}
+
 describe("shimDir", () => {
 	test("resolves under $HOME/.codev/bin", async () => {
 		const { shimDir } = await import("@/lib/shims.js");
@@ -31,20 +44,16 @@ describe("shimDir", () => {
 	});
 });
 
-describe("activationHint", () => {
-	function withPlatform<T>(value: NodeJS.Platform, fn: () => T): T {
-		const original = Object.getOwnPropertyDescriptor(process, "platform");
-		Object.defineProperty(process, "platform", {
-			value,
-			configurable: true,
-		});
-		try {
-			return fn();
-		} finally {
-			if (original) Object.defineProperty(process, "platform", original);
-		}
-	}
+describe("toolToShimAgent", () => {
+	test("maps claude-code to claude and the others 1:1", async () => {
+		const { toolToShimAgent } = await import("@/lib/shims.js");
+		expect(toolToShimAgent("claude-code")).toBe("claude");
+		expect(toolToShimAgent("codex")).toBe("codex");
+		expect(toolToShimAgent("opencode")).toBe("opencode");
+	});
+});
 
+describe("activationHint", () => {
 	test("returns the exec $SHELL hint on Unix platforms", async () => {
 		const { activationHint } = await import("@/lib/shims.js");
 		// darwin is what the CI runner and the dev's macOS report.
@@ -235,6 +244,42 @@ describe.skipIf(process.platform === "win32")("installShims (Unix)", () => {
 		const zshrc = readFileSync(join(tempDir, ".zshrc"), "utf-8");
 		expect(zshrc.match(/alias claude=/g)?.length).toBe(1);
 	});
+
+	test("scoped install writes only the requested shims", async () => {
+		const { installShims } = await import("@/lib/shims.js");
+		const result = installShims(["claude"]);
+
+		expect(result.shimsWritten).toEqual(["claude"]);
+		expect(existsSync(join(tempDir, ".codev", "bin", "claude"))).toBe(true);
+		expect(existsSync(join(tempDir, ".codev", "bin", "codex"))).toBe(false);
+		expect(existsSync(join(tempDir, ".codev", "bin", "opencode"))).toBe(false);
+
+		const zshrc = readFileSync(join(tempDir, ".zshrc"), "utf-8");
+		expect(zshrc).toContain('alias claude="$HOME/.codev/bin/claude"');
+		expect(zshrc).not.toContain("alias codex=");
+		expect(zshrc).not.toContain("alias opencode=");
+	});
+
+	test("second install is additive: keeps existing shims and aliases both", async () => {
+		// User first installs Claude Code, then re-runs install picking OpenCode.
+		// The opencode shim is added, the claude shim survives, and the rc-file
+		// alias block lists both.
+		const { installShims } = await import("@/lib/shims.js");
+		installShims(["claude"]);
+		const result = installShims(["opencode"]);
+
+		expect(result.shimsWritten).toEqual(["opencode"]);
+		expect(existsSync(join(tempDir, ".codev", "bin", "claude"))).toBe(true);
+		expect(existsSync(join(tempDir, ".codev", "bin", "opencode"))).toBe(true);
+		expect(existsSync(join(tempDir, ".codev", "bin", "codex"))).toBe(false);
+
+		const zshrc = readFileSync(join(tempDir, ".zshrc"), "utf-8");
+		expect(zshrc).toContain('alias claude="$HOME/.codev/bin/claude"');
+		expect(zshrc).toContain('alias opencode="$HOME/.codev/bin/opencode"');
+		expect(zshrc).not.toContain("alias codex=");
+		// One sentinel block, not two — the second install replaces in place.
+		expect(zshrc.match(/# >>> codev shims \(managed\) >>>/g)?.length).toBe(1);
+	});
 });
 
 describe.skipIf(process.platform === "win32")("uninstallShims (Unix)", () => {
@@ -325,3 +370,73 @@ describe.skipIf(process.platform === "win32")("uninstallShims (Unix)", () => {
 		expect(existsSync(userFile)).toBe(true);
 	});
 });
+
+// Simulate Windows by patching process.platform on a Unix host. Skipped on
+// actual Windows hosts to avoid the simulation conflicting with the real
+// platform code path (e.g. updateWindowsUserPath actually shelling out).
+describe.skipIf(process.platform === "win32")(
+	"installShims (Windows simulation)",
+	() => {
+		const psProfile = () =>
+			join(
+				tempDir,
+				"Documents",
+				"PowerShell",
+				"Microsoft.PowerShell_profile.ps1",
+			);
+
+		test("scoped install writes only the requested .cmd shim and PS function", async () => {
+			const { installShims } = await import("@/lib/shims.js");
+			const result = withPlatform("win32", () => installShims(["claude"]));
+
+			expect(result.shimsWritten).toEqual(["claude"]);
+			expect(existsSync(join(tempDir, ".codev", "bin", "claude.cmd"))).toBe(
+				true,
+			);
+			expect(existsSync(join(tempDir, ".codev", "bin", "codex.cmd"))).toBe(
+				false,
+			);
+			expect(existsSync(join(tempDir, ".codev", "bin", "opencode.cmd"))).toBe(
+				false,
+			);
+
+			const profile = readFileSync(psProfile(), "utf-8");
+			expect(profile).toContain("# >>> codev shims (managed) >>>");
+			expect(profile).toContain(
+				'function claude { & "$HOME\\.codev\\bin\\claude.cmd" @args }',
+			);
+			expect(profile).not.toContain("function codex");
+			expect(profile).not.toContain("function opencode");
+		});
+
+		test("second install is additive: keeps existing .cmd shims and lists both functions", async () => {
+			const { installShims } = await import("@/lib/shims.js");
+			withPlatform("win32", () => installShims(["claude"]));
+			const result = withPlatform("win32", () => installShims(["opencode"]));
+
+			expect(result.shimsWritten).toEqual(["opencode"]);
+			expect(existsSync(join(tempDir, ".codev", "bin", "claude.cmd"))).toBe(
+				true,
+			);
+			expect(existsSync(join(tempDir, ".codev", "bin", "opencode.cmd"))).toBe(
+				true,
+			);
+			expect(existsSync(join(tempDir, ".codev", "bin", "codex.cmd"))).toBe(
+				false,
+			);
+
+			const profile = readFileSync(psProfile(), "utf-8");
+			expect(profile).toContain(
+				'function claude { & "$HOME\\.codev\\bin\\claude.cmd" @args }',
+			);
+			expect(profile).toContain(
+				'function opencode { & "$HOME\\.codev\\bin\\opencode.cmd" @args }',
+			);
+			expect(profile).not.toContain("function codex");
+			// One sentinel block after the second install — replaced in place.
+			expect(profile.match(/# >>> codev shims \(managed\) >>>/g)?.length).toBe(
+				1,
+			);
+		});
+	},
+);
