@@ -30,7 +30,17 @@ const LABEL: Record<BackupKind, string> = {
 	"opencode-config": "OpenCode",
 };
 
+// With shims installed, users launch agents by the bare binary name; the
+// shim forwards through `codev <agent>` transparently.
 const RUN_CMD: Record<Tool, string> = {
+	"claude-code": "claude",
+	codex: "codex",
+	opencode: "opencode",
+};
+
+// Without shims (best-effort install failed), the bare command isn't on
+// PATH, so fall back to the always-working `codev <agent>` form.
+const RUN_CMD_FALLBACK: Record<Tool, string> = {
 	"claude-code": "codev claude",
 	codex: "codev codex",
 	opencode: "codev opencode",
@@ -38,10 +48,11 @@ const RUN_CMD: Record<Tool, string> = {
 
 function resumeMessage(tools: Tool[], shimsInstalled: boolean): ReactNode {
 	if (tools.length === 0) return null;
+	const cmdMap = shimsInstalled ? RUN_CMD : RUN_CMD_FALLBACK;
 	const parts = tools.flatMap((t, i) => {
 		const cmd = (
 			<Text key={t} color="cyan">
-				{RUN_CMD[t]}
+				{cmdMap[t]}
 			</Text>
 		);
 		if (i === 0) return [cmd];

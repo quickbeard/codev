@@ -16,22 +16,21 @@ Then run:
 codev install
 ```
 
+After install, type `claude`, `codex`, or `opencode` to launch.
+
 ## Commands
 
-| Command                    | What it does                                                                                             |
-| -------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `codev --help`, `-h`       | Show help                                                                                                |
-| `codev --version`, `-v`    | Show version                                                                                             |
-| `codev install`            | Install and configure AI coding agents                                                                   |
-| `codev update`             | Update installed AI coding agents                                                                        |
-| `codev upload`             | Export this directory's agent conversations to `~/.codev/logs/<project>/` and upload them to the backend |
-| `codev claude`             | Run the `claude` CLI (forwards remaining arguments)                                                      |
-| `codev claude --restore`   | Restore `~/.claude/settings.json` from `~/.claude/settings.json.backup`                                  |
-| `codev codex`              | Run the `codex` CLI (forwards remaining arguments)                                                       |
-| `codev codex --restore`    | Restore `~/.codex/config.toml` from `~/.codex/config.toml.backup`                                        |
-| `codev opencode`           | Run the `opencode` CLI (forwards remaining arguments)                                                    |
-| `codev opencode --restore` | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup`                |
-| `codev logout`             | Sign out of SSO                                                                                          |
+| Command                    | What it does                                                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `codev --help`, `-h`       | Show help                                                                                                       |
+| `codev --version`, `-v`    | Show version                                                                                                    |
+| `codev install`            | Install and configure AI coding agents                                                                          |
+| `codev update`             | Update installed AI coding agents                                                                               |
+| `codev upload`             | Export this directory's agent conversations to `~/.codev/logs/<project>/` and upload them to the monitor module |
+| `codev claude --restore`   | Restore `~/.claude/settings.json` from `~/.claude/settings.json.backup`                                         |
+| `codev codex --restore`    | Restore `~/.codex/config.toml` from `~/.codex/config.toml.backup`                                               |
+| `codev opencode --restore` | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup`                       |
+| `codev logout`             | Sign out of SSO                                                                                                 |
 
 ## Restoring a previous configuration
 

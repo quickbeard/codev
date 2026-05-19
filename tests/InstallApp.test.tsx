@@ -295,7 +295,6 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
-		expect(history).toContain("codev codex");
 		expect(configureCodexSpy).toHaveBeenCalledTimes(1);
 		expect(configureCodexSpy).toHaveBeenCalledWith({ apiKey: "sk-codex-123" });
 	});

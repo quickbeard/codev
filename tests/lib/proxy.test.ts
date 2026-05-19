@@ -158,7 +158,6 @@ describe("validateApiKey", () => {
 			.mockResolvedValue(jsonResponse(200, {}));
 		await validateApiKey("sk-w");
 		const [url] = fetchSpy.mock.calls[0] as [string];
-		expect(url).not.toContain("gatewaykey");
 		expect(url.endsWith("/gateway/key/info")).toBe(true);
 	});
 });

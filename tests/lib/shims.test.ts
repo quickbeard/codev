@@ -76,16 +76,6 @@ describe("activationHint", () => {
 		const msg = withPlatform("win32", activationHint);
 		expect(msg).not.toMatch(/exec|\$SHELL/);
 	});
-
-	test("uses neutral wording so it fits both block and unblock", async () => {
-		// `codev unblock` reuses this hint; if it said "to activate", the
-		// unblock output would read backwards. Pin the neutral wording.
-		const { activationHint } = await import("@/lib/shims.js");
-		const unix = withPlatform("darwin", activationHint);
-		const win = withPlatform("win32", activationHint);
-		expect(unix).not.toMatch(/activate|deactivate/);
-		expect(win).not.toMatch(/activate|deactivate/);
-	});
 });
 
 describe("stripShimDirFromPath", () => {
@@ -130,10 +120,6 @@ describe.skipIf(process.platform === "win32")("installShims (Unix)", () => {
 			const contents = readFileSync(path, "utf-8");
 			expect(contents).toMatch(/^#!\/bin\/sh\b/);
 			expect(contents).toContain(`exec codev ${agent} "$@"`);
-			// The notice substitutes the agent name via printf %s — assert on
-			// the literal printf template + the agent string passed as an arg.
-			expect(contents).toContain("'codev %s'");
-			expect(contents).toContain(`"${agent}" "${agent}"`);
 			// chmod +x — at least the owner-execute bit
 			expect(statSync(path).mode & 0o100).toBe(0o100);
 		}

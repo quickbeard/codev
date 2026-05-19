@@ -69,7 +69,6 @@ set +f
 IFS="$old_ifs"
 PATH="$new_path"
 export PATH
-printf "note: forwarded to 'codev %s'. Run 'codev %s' directly to silence this.\\n" "${agent}" "${agent}" >&2
 exec codev ${agent} "$@"
 `;
 }
@@ -88,7 +87,6 @@ for %%P in ("%PATH:;=";"%") do (\r
 \t)\r
 )\r
 endlocal & set "PATH=%NEWPATH%"\r
-echo note: forwarded to 'codev ${agent}'. Run 'codev ${agent}' directly to silence this. 1>&2\r
 codev ${agent} %*\r
 `;
 }
