@@ -26,16 +26,6 @@ interface CodexMeta {
 	};
 }
 
-interface CodexEvent {
-	type?: string;
-	timestamp?: string;
-	payload?: {
-		type?: string;
-		message?: string;
-		text?: string;
-	};
-}
-
 interface CodexPreview {
 	id: string;
 	cwd: string;
@@ -118,6 +108,139 @@ async function findSessions(cwd: string): Promise<CodexPreview[]> {
 	return result;
 }
 
+function formatCodexToolUse(
+	name: string,
+	input: Record<string, unknown>,
+	output: string,
+	isError: boolean,
+): string {
+	const toolName = name.toLowerCase();
+	let toolType = "tool";
+	let summary = `Call tool: ${name}`;
+	let body = "";
+
+	if (
+		toolName === "exec_command" ||
+		toolName === "bash" ||
+		toolName === "shell"
+	) {
+		toolType = "shell";
+		const cmd =
+			typeof input.cmd === "string"
+				? input.cmd
+				: typeof input.command === "string"
+					? input.command
+					: "";
+		summary = `Run command: ${cmd}`;
+		body = `\`\`\`bash\n$ ${cmd}\n${isError ? `Error: ${output}` : output}\n\`\`\``;
+	} else if (
+		toolName === "read_file" ||
+		toolName === "read" ||
+		toolName === "view_file"
+	) {
+		toolType = "read";
+		const path =
+			typeof input.filePath === "string"
+				? input.filePath
+				: typeof input.path === "string"
+					? input.path
+					: "";
+		summary = `Read file: ${path}`;
+		body = isError ? `Error: ${output}` : output;
+	} else if (toolName === "grep" || toolName === "grep_search") {
+		toolType = "grep";
+		const pattern = typeof input.pattern === "string" ? input.pattern : "";
+		const path = typeof input.path === "string" ? input.path : "";
+		summary = `Grep search: ${pattern}`;
+		body = `\`\`\`\nPattern: ${pattern}\nPath: ${path}\nMatches:\n${isError ? `Error: ${output}` : output}\n\`\`\``;
+	} else if (toolName === "write_file" || toolName === "write") {
+		toolType = "write";
+		const path =
+			typeof input.filePath === "string"
+				? input.filePath
+				: typeof input.path === "string"
+					? input.path
+					: "";
+		const content = typeof input.content === "string" ? input.content : "";
+		summary = `Edit file: ${path}`;
+		body = isError
+			? `Error: ${output}`
+			: content
+				? `\`\`\`\n${content}\n\`\`\``
+				: output;
+	} else if (
+		toolName === "replace_file_content" ||
+		toolName === "edit" ||
+		toolName === "multi_replace_file_content"
+	) {
+		toolType = "write";
+		const path =
+			typeof input.TargetFile === "string"
+				? input.TargetFile
+				: typeof input.filePath === "string"
+					? input.filePath
+					: typeof input.path === "string"
+						? input.path
+						: "";
+		summary = `Edit file: ${path}`;
+		body = isError
+			? `Error: ${output}`
+			: output.includes("<<<") ||
+					output.includes("---") ||
+					output.includes("+++")
+				? `\`\`\`diff\n${output}\n\`\`\``
+				: `\`\`\`\n${output}\n\`\`\``;
+	} else if (
+		toolName === "subagent" ||
+		toolName === "invoke_subagent" ||
+		toolName === "task"
+	) {
+		toolType = "task";
+		const desc = typeof input.description === "string" ? input.description : "";
+		const prompt = typeof input.prompt === "string" ? input.prompt : "";
+		summary = `Spawn subagent: ${desc || name}`;
+		body = `**Prompt**:\n${prompt}\n\n**Result**:\n${isError ? `Error: ${output}` : output}`;
+	} else {
+		summary = `Call tool: ${name}`;
+		body = `**Input**:\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
+	}
+
+	return `<tool-use data-tool-type="${toolType}" data-tool-name="${toolName}">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+}
+
+function extractPatchFilePath(patch: string): string {
+	const match =
+		patch.match(/^\*\*\* Update File:\s*(.+)$/m) ??
+		patch.match(/^\*\*\* Add File:\s*(.+)$/m) ??
+		patch.match(/^---\s+a\/(.+)$/m) ??
+		patch.match(/^\+\+\+\s+b\/(.+)$/m);
+	return match?.[1]?.trim() ?? "";
+}
+
+function formatCodexCustomToolUse(
+	name: string,
+	input: unknown,
+	output: string,
+	isError: boolean,
+): string {
+	const toolName = name.toLowerCase();
+	if (toolName === "apply_patch") {
+		const patch = typeof input === "string" ? input : "";
+		const path = extractPatchFilePath(patch);
+		const body = isError
+			? `Error: ${output}`
+			: `\`\`\`diff\n${patch}\n\`\`\`\n\n${output}`;
+		return `<tool-use data-tool-type="write" data-tool-name="${toolName}">\n<details>\n<summary>Edit file: ${path}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+	}
+
+	const body = `**Input**:\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
+	return `<tool-use data-tool-type="tool" data-tool-name="${toolName}">\n<details>\n<summary>Call tool: ${name}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+}
+
+function textValue(value: unknown): string {
+	return typeof value === "string" ? value : "";
+}
+
 async function parseSession(preview: CodexPreview): Promise<Session | null> {
 	const text = await readFile(preview.path, "utf-8");
 	const lines = text.split("\n").filter((l) => l.trim().length > 0);
@@ -127,33 +250,225 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 	let firstUserMessage = "";
 	let updatedAt: Date | null = preview.createdAt;
 
+	let activeAssistantContent = "";
+	let activeAssistantTimestamp: string | undefined;
+
+	const pendingToolUses = new Map<
+		string,
+		{ name: string; arguments: Record<string, unknown>; timestamp?: string }
+	>();
+	const pendingCustomToolUses = new Map<
+		string,
+		{ name: string; input: unknown; timestamp?: string }
+	>();
+
+	function appendContent(next: string) {
+		if (!next) return;
+		if (activeAssistantContent) {
+			if (activeAssistantContent.endsWith("\n")) {
+				activeAssistantContent += next;
+			} else {
+				activeAssistantContent += `\n\n${next}`;
+			}
+		} else {
+			activeAssistantContent = next;
+		}
+	}
+
+	function flushAssistant() {
+		if (activeAssistantContent.trim()) {
+			messages.push({
+				role: "assistant",
+				content: activeAssistantContent.trim(),
+				timestamp: activeAssistantTimestamp,
+			});
+			activeAssistantContent = "";
+			activeAssistantTimestamp = undefined;
+		}
+	}
+
 	// Skip the first line (metadata) — already consumed in readMeta.
 	for (let i = 1; i < lines.length; i++) {
 		const raw = lines[i];
 		if (!raw) continue;
-		let rec: CodexEvent;
+		let rec: Record<string, unknown>;
 		try {
-			rec = JSON.parse(raw) as CodexEvent;
+			rec = JSON.parse(raw);
 		} catch {
 			continue;
 		}
-		if (rec.type !== "event_msg") continue;
-		const payload = rec.payload;
-		if (!payload) continue;
-		const ptype = payload.type;
-		const content = (payload.message ?? payload.text ?? "").trim();
-		if (!content) continue;
-		if (rec.timestamp) {
-			const ts = new Date(rec.timestamp);
+
+		const recTimestamp = textValue(rec.timestamp) || undefined;
+		if (recTimestamp) {
+			const ts = new Date(recTimestamp);
 			if (!Number.isNaN(ts.getTime())) updatedAt = ts;
 		}
-		if (ptype === "user_message") {
-			messages.push({ role: "user", content, timestamp: rec.timestamp });
-			if (!firstUserMessage) firstUserMessage = content;
-		} else if (ptype === "agent_message") {
-			messages.push({ role: "assistant", content, timestamp: rec.timestamp });
+
+		const type = rec.type;
+		const payload =
+			rec.payload && typeof rec.payload === "object"
+				? (rec.payload as Record<string, unknown>)
+				: {};
+		const ptype = payload.type;
+
+		if (type === "event_msg") {
+			if (ptype === "user_message") {
+				flushAssistant();
+				const content = (
+					textValue(payload.message) || textValue(payload.text)
+				).trim();
+				if (content) {
+					messages.push({ role: "user", content, timestamp: recTimestamp });
+					if (!firstUserMessage) firstUserMessage = content;
+				}
+			} else if (ptype === "agent_message") {
+				const content = (
+					textValue(payload.message) || textValue(payload.text)
+				).trim();
+				if (content) {
+					if (!activeAssistantTimestamp)
+						activeAssistantTimestamp = recTimestamp;
+					appendContent(content);
+				}
+			} else if (ptype === "agent_reasoning") {
+				const text = (
+					textValue(payload.text) || textValue(payload.message)
+				).trim();
+				if (text) {
+					if (!activeAssistantTimestamp)
+						activeAssistantTimestamp = recTimestamp;
+					appendContent(
+						`<details><summary>Thought</summary>\n\n${text}\n</details>\n`,
+					);
+				}
+			}
+		} else if (type === "response_item") {
+			if (ptype === "reasoning") {
+				// The reasoning field may be encrypted in some versions (encrypted_content),
+				// but plaintext is in payload.content or summary if available.
+				const contentText =
+					typeof payload.content === "string" ? payload.content.trim() : "";
+				const summaryText = Array.isArray(payload.summary)
+					? payload.summary.join("\n").trim()
+					: "";
+				const thought = contentText || summaryText;
+				if (thought) {
+					if (!activeAssistantTimestamp)
+						activeAssistantTimestamp = recTimestamp;
+					appendContent(
+						`<details><summary>Thought</summary>\n\n${thought}\n</details>\n`,
+					);
+				}
+			} else if (ptype === "message") {
+				const content = (
+					textValue(payload.message) || textValue(payload.text)
+				).trim();
+				if (content) {
+					if (!activeAssistantTimestamp)
+						activeAssistantTimestamp = recTimestamp;
+					appendContent(content);
+				}
+			} else if (ptype === "function_call") {
+				const callId = textValue(payload.call_id);
+				const name = textValue(payload.name);
+				let args: Record<string, unknown> = {};
+				if (typeof payload.arguments === "string") {
+					try {
+						args = JSON.parse(payload.arguments);
+					} catch {
+						args = { rawArguments: payload.arguments };
+					}
+				} else if (payload.arguments && typeof payload.arguments === "object") {
+					args = payload.arguments as Record<string, unknown>;
+				}
+				if (callId && name) {
+					pendingToolUses.set(callId, {
+						name,
+						arguments: args,
+						timestamp: recTimestamp,
+					});
+				}
+			} else if (ptype === "function_call_output") {
+				const callId = textValue(payload.call_id);
+				const toolUse = pendingToolUses.get(callId);
+				let output = typeof payload.output === "string" ? payload.output : "";
+				// Strip system prefix from output if exists for cleaner logs
+				if (output.startsWith("Chunk ID:") && output.includes("Output:\n")) {
+					const index = output.indexOf("Output:\n");
+					output = output.substring(index + "Output:\n".length);
+				}
+				const isError =
+					typeof payload.is_error === "boolean" ? payload.is_error : false;
+				if (toolUse) {
+					const formatted = formatCodexToolUse(
+						toolUse.name,
+						toolUse.arguments,
+						output,
+						isError,
+					);
+					if (!activeAssistantTimestamp)
+						activeAssistantTimestamp = toolUse.timestamp || recTimestamp;
+					appendContent(formatted);
+					pendingToolUses.delete(callId);
+				} else {
+					const formatted = `<tool-use data-tool-type="tool" data-tool-name="generic">\n<details>\n<summary>Tool output</summary>\n\n${output}\n</details>\n</tool-use>\n`;
+					appendContent(formatted);
+				}
+			} else if (ptype === "custom_tool_call") {
+				const callId = textValue(payload.call_id);
+				const name = textValue(payload.name);
+				if (callId && name) {
+					pendingCustomToolUses.set(callId, {
+						name,
+						input: payload.input,
+						timestamp: recTimestamp,
+					});
+				}
+			} else if (ptype === "custom_tool_call_output") {
+				const callId = textValue(payload.call_id);
+				const toolUse = pendingCustomToolUses.get(callId);
+				const output = typeof payload.output === "string" ? payload.output : "";
+				const isError =
+					typeof payload.is_error === "boolean" ? payload.is_error : false;
+				if (toolUse) {
+					const formatted = formatCodexCustomToolUse(
+						toolUse.name,
+						toolUse.input,
+						output,
+						isError,
+					);
+					if (!activeAssistantTimestamp)
+						activeAssistantTimestamp = toolUse.timestamp || recTimestamp;
+					appendContent(formatted);
+					pendingCustomToolUses.delete(callId);
+				}
+			}
 		}
 	}
+
+	for (const toolUse of pendingToolUses.values()) {
+		const formatted = formatCodexToolUse(
+			toolUse.name,
+			toolUse.arguments,
+			"Tool execution aborted (no result recorded)",
+			true,
+		);
+		if (!activeAssistantTimestamp) activeAssistantTimestamp = toolUse.timestamp;
+		appendContent(formatted);
+	}
+
+	for (const toolUse of pendingCustomToolUses.values()) {
+		const formatted = formatCodexCustomToolUse(
+			toolUse.name,
+			toolUse.input,
+			"Tool execution aborted (no result recorded)",
+			true,
+		);
+		if (!activeAssistantTimestamp) activeAssistantTimestamp = toolUse.timestamp;
+		appendContent(formatted);
+	}
+
+	flushAssistant();
 
 	if (messages.length === 0) return null;
 	return {

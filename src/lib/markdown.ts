@@ -18,14 +18,14 @@ export function renderMarkdown(session: Session): string {
 	);
 	lines.push("");
 
-	let prevRole: string | null = null;
+	let isFirst = true;
 	for (const msg of session.messages) {
-		if (prevRole && prevRole !== msg.role) {
+		if (!isFirst) {
 			lines.push("---", "");
 		}
+		isFirst = false;
 		lines.push(`## ${msg.role === "user" ? "User" : "Assistant"}`, "");
 		lines.push(msg.content.trimEnd(), "");
-		prevRole = msg.role;
 	}
 
 	return `${lines.join("\n").trimEnd()}\n`;

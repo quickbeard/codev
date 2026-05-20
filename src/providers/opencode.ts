@@ -153,14 +153,140 @@ function unixToISO(ms: number): string {
 	return new Date(epochMs).toISOString();
 }
 
-// OpenCode parts have many shapes (text, reasoning, tool, ...). For v1 we
-// only surface plain text — tools/reasoning are parsed separately and we drop
-// them rather than trying to render them as markdown.
-function partTextIfPlain(part: PartRow): string | null {
-	const obj = safeParse<{ type?: string; text?: string }>(part.data);
+function formatDuration(ms: number): string {
+	if (ms >= 1000) {
+		return `${(ms / 1000).toFixed(1).replace(/\.0$/, "")}s`;
+	}
+	return `${ms}ms`;
+}
+
+interface ReasoningPart {
+	type: "reasoning";
+	text: string;
+	time?: { start: number; end: number };
+}
+
+interface ToolPart {
+	type: "tool";
+	tool: string;
+	callID: string;
+	state: {
+		status: "completed" | "error";
+		input: Record<string, unknown>;
+		output?: string;
+		error?: string;
+		metadata?: {
+			diff?: string;
+			filediff?: { patch: string };
+		};
+	};
+}
+
+interface TextPart {
+	type: "text";
+	text: string;
+}
+
+function parsePart(part: PartRow): string | null {
+	const obj = safeParse<{ type?: string }>(part.data);
 	if (!obj) return null;
-	if (obj.type !== "text" || typeof obj.text !== "string") return null;
-	return obj.text;
+
+	if (obj.type === "text") {
+		const textPart = obj as TextPart;
+		return typeof textPart.text === "string" ? textPart.text : null;
+	}
+
+	if (obj.type === "reasoning") {
+		const reasonPart = obj as ReasoningPart;
+		if (typeof reasonPart.text !== "string" || !reasonPart.text.trim()) return null;
+		
+		let durationStr = "";
+		if (reasonPart.time && typeof reasonPart.time.start === "number" && typeof reasonPart.time.end === "number") {
+			const diff = reasonPart.time.end - reasonPart.time.start;
+			if (diff >= 0) {
+				durationStr = ` for ${formatDuration(diff)}`;
+			}
+		}
+		return `<details><summary>Thought${durationStr}</summary>\n\n${reasonPart.text.trim()}\n</details>\n`;
+	}
+
+	if (obj.type === "tool") {
+		const toolPart = obj as ToolPart;
+		const toolName = toolPart.tool;
+		const state = toolPart.state || {};
+		const isCompleted = state.status === "completed";
+		const input = state.input || {};
+		const output = state.output || "";
+		const error = state.error || "";
+
+		if (toolName === "bash") {
+			const cmd = typeof input.command === "string" ? input.command : "";
+			const desc = typeof input.description === "string" ? input.description : "";
+			const summary = `Run command: ${cmd}`;
+			const descSection = desc ? `Description: ${desc}\n\n` : "";
+			const body = `${descSection}\`\`\`bash\n$ ${cmd}\n${isCompleted ? output : `Error: ${error || "Tool execution aborted"}`}\n\`\`\``;
+			return `<tool-use data-tool-type="shell" data-tool-name="bash">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+		}
+
+		if (toolName === "read") {
+			const path = typeof input.filePath === "string" ? input.filePath : "";
+			const summary = `Read file: ${path}`;
+			const body = isCompleted ? output : `Error: ${error || "Tool execution aborted"}`;
+			return `<tool-use data-tool-type="read" data-tool-name="read">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+		}
+
+		if (toolName === "glob") {
+			const pattern = typeof input.pattern === "string" ? input.pattern : "";
+			const summary = `Glob files: ${pattern}`;
+			const body = `\`\`\`\nPattern: ${pattern}\nMatches:\n${isCompleted ? output : `Error: ${error || "Tool execution aborted"}`}\n\`\`\``;
+			return `<tool-use data-tool-type="glob" data-tool-name="glob">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+		}
+
+		if (toolName === "grep") {
+			const pattern = typeof input.pattern === "string" ? input.pattern : "";
+			const path = typeof input.path === "string" ? input.path : "";
+			const summary = `Grep search: ${pattern}`;
+			const body = `\`\`\`\nPattern: ${pattern}\nPath: ${path}\nMatches:\n${isCompleted ? output : `Error: ${error || "Tool execution aborted"}`}\n\`\`\``;
+			return `<tool-use data-tool-type="grep" data-tool-name="grep">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+		}
+
+		if (toolName === "write") {
+			const path = typeof input.filePath === "string" ? input.filePath : "";
+			const content = typeof input.content === "string" ? input.content : "";
+			const summary = `Edit file: ${path}`;
+			const body = isCompleted ? `\`\`\`\n${content}\n\`\`\`` : `Error: ${error || "Tool execution aborted"}`;
+			return `<tool-use data-tool-type="write" data-tool-name="write">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+		}
+
+		if (toolName === "edit") {
+			const path = typeof input.filePath === "string" ? input.filePath : "";
+			const summary = `Edit file: ${path}`;
+			let diff = "";
+			if (isCompleted) {
+				diff = state.metadata?.diff || state.metadata?.filediff?.patch || "Edit applied successfully.";
+			} else {
+				diff = `Error: ${error || "Tool execution aborted"}`;
+			}
+			const body = diff.startsWith("Error:") || diff === "Edit applied successfully." ? diff : `\`\`\`diff\n${diff}\n\`\`\``;
+			return `<tool-use data-tool-type="write" data-tool-name="edit">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+		}
+
+		if (toolName === "task") {
+			const desc = typeof input.description === "string" ? input.description : "";
+			const prompt = typeof input.prompt === "string" ? input.prompt : "";
+			const subagent = typeof input.subagent_type === "string" ? input.subagent_type : "";
+			const summary = `Spawn subagent: ${desc || subagent}`;
+			const body = `**Subagent Type**: ${subagent}\n**Prompt**:\n${prompt}\n\n**Result**:\n${isCompleted ? output : `Error: ${error || "Subagent execution aborted"}`}`;
+			return `<tool-use data-tool-type="task" data-tool-name="task">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+		}
+
+		// Fallback for any other/generic tool
+		const summary = `Call tool: ${toolName}`;
+		const body = `\`\`\`json\n${JSON.stringify(state, null, 2)}\n\`\`\``;
+		return `<tool-use data-tool-type="tool" data-tool-name="${toolName}">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+	}
+
+	return null;
 }
 
 function buildSession(row: SessionRow, db: DB): Session | null {
@@ -174,7 +300,7 @@ function buildSession(row: SessionRow, db: DB): Session | null {
 		const parts = readParts(db, row.id, msg.id);
 		const textParts: string[] = [];
 		for (const part of parts) {
-			const text = partTextIfPlain(part);
+			const text = parsePart(part);
 			if (text) textParts.push(text);
 		}
 		const content = textParts.join("\n").trim();

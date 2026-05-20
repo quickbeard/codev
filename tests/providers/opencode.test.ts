@@ -182,7 +182,9 @@ describe("openCodeProvider.listSessions", () => {
 		expect(s.agent).toBe("opencode");
 		expect(s.firstUserMessage).toBe("Refactor the auth module");
 		expect(s.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
-		expect(s.messages[1]?.content).toBe("Sure — let's start.");
+		expect(s.messages[1]?.content).toBe(
+			"Sure — let's start.\n<details><summary>Thought</summary>\n\nInternal thinking\n</details>",
+		);
 	});
 
 	test("returns empty list when no project matches the cwd", async () => {

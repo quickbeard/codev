@@ -108,9 +108,123 @@ describe("codexProvider.listSessions", () => {
 		expect(s.id).toBe("ses-1");
 		expect(s.agent).toBe("codex");
 		expect(s.firstUserMessage).toBe("Refactor the auth module");
-		// Reasoning events are intentionally dropped — only user/agent messages remain.
 		expect(s.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
-		expect(s.messages[1]?.content).toBe("I'll start with auth.ts");
+		expect(s.messages[1]?.content).toBe(
+			"<details><summary>Thought</summary>\n\nThinking...\n</details>\nI'll start with auth.ts",
+		);
+	});
+
+	test("parses tool calls and tool outputs in Codex sessions", async () => {
+		writeSession("session-tool.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-tool",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "Run the tests" },
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:20Z",
+				payload: {
+					type: "function_call",
+					name: "exec_command",
+					arguments: '{"cmd":"npm run test"}',
+					call_id: "c-tool-1",
+				},
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:25Z",
+				payload: {
+					type: "function_call_output",
+					call_id: "c-tool-1",
+					output: "Output:\nAll tests passed!",
+					is_error: false,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:30Z",
+				payload: { type: "agent_message", message: "Done!" },
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		expect(sessions.length).toBe(1);
+		const s = sessions[0];
+		if (!s) throw new Error("expected session");
+		expect(s.messages.length).toBe(2);
+		const assistantContent = s.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="shell" data-tool-name="exec_command">',
+		);
+		expect(assistantContent).toContain("npm run test");
+		expect(assistantContent).toContain("All tests passed!");
+		expect(assistantContent).toContain("Done!");
+	});
+
+	test("parses apply_patch custom tool calls as write diffs", async () => {
+		writeSession("session-patch.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-patch",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "Patch random.ts" },
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:20Z",
+				payload: {
+					type: "custom_tool_call",
+					name: "apply_patch",
+					input:
+						"*** Begin Patch\n*** Update File: /tmp/random.ts\n@@\n-old line\n+new line\n+another line\n*** End Patch\n",
+					call_id: "patch-1",
+				},
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:25Z",
+				payload: {
+					type: "custom_tool_call_output",
+					call_id: "patch-1",
+					output: "Success. Updated the following files:\nM /tmp/random.ts\n",
+					is_error: false,
+				},
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		expect(sessions.length).toBe(1);
+		const s = sessions[0];
+		if (!s) throw new Error("expected session");
+		const assistantContent = s.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="apply_patch">',
+		);
+		expect(assistantContent).toContain(
+			"<summary>Edit file: /tmp/random.ts</summary>",
+		);
+		expect(assistantContent).toContain("```diff\n*** Begin Patch");
+		expect(assistantContent).toContain("-old line");
+		expect(assistantContent).toContain("+new line");
+		expect(assistantContent).toContain("Success. Updated the following files");
 	});
 
 	test("excludes sessions whose cwd does not match", async () => {

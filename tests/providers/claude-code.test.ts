@@ -109,6 +109,139 @@ describe("claudeCodeProvider.listSessions", () => {
 		expect(sessions[0]?.messages[0]?.content).toBe("Read foo.ts");
 	});
 
+	test("parses thinking and tool_use blocks", async () => {
+		const lines = [
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:05Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: { role: "user", content: "Optimize auth" },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				timestamp: "2026-04-27T18:32:10Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "Checking files..." },
+						{
+							type: "tool_use",
+							id: "t-1",
+							name: "view_file",
+							input: { path: "auth.ts" },
+						},
+					],
+				},
+			}),
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:15Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t-1",
+							text: "export const login = () => {}",
+						},
+					],
+				},
+			}),
+			JSON.stringify({
+				type: "assistant",
+				timestamp: "2026-04-27T18:32:20Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "assistant",
+					content: "Done!",
+				},
+			}),
+		];
+		writeFileSync(join(claudeProjectDir, "session.jsonl"), lines.join("\n"));
+
+		const sessions = await claudeCodeProvider.listSessions(projectCwd);
+		expect(sessions.length).toBe(1);
+		const s = sessions[0];
+		if (!s) throw new Error("expected one session");
+		expect(s.messages.length).toBe(2);
+		expect(s.messages[0]?.role).toBe("user");
+		expect(s.messages[1]?.role).toBe("assistant");
+		const assistantContent = s.messages[1]?.content || "";
+		expect(assistantContent).toContain("<details><summary>Thought</summary>");
+		expect(assistantContent).toContain("Checking files...");
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="read" data-tool-name="view_file">',
+		);
+		expect(assistantContent).toContain("export const login");
+		expect(assistantContent).toContain("Done!");
+	});
+
+	test("exports Claude Code edit old/new strings as diff blocks", async () => {
+		const lines = [
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:05Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: { role: "user", content: "Edit random.ts" },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				timestamp: "2026-04-27T18:32:10Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "t-edit",
+							name: "Edit",
+							input: {
+								file_path: "/tmp/random.ts",
+								old_string:
+									"function randomBool(): boolean {\n  return Math.random() > 0.3;\n}",
+								new_string:
+									"function randomBool(): boolean {\n  return Math.random() > 0.5;\n}\n\nfunction randomDate(): Date {\n  return new Date();\n}",
+							},
+						},
+					],
+				},
+			}),
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:15Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t-edit",
+							content: "The file /tmp/random.ts has been updated successfully.",
+						},
+					],
+				},
+			}),
+		];
+		writeFileSync(join(claudeProjectDir, "session.jsonl"), lines.join("\n"));
+
+		const sessions = await claudeCodeProvider.listSessions(projectCwd);
+		expect(sessions.length).toBe(1);
+		const assistantContent = sessions[0]?.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="edit">',
+		);
+		expect(assistantContent).toContain(
+			"<summary>Edit file: /tmp/random.ts</summary>",
+		);
+		expect(assistantContent).toContain("```diff");
+		expect(assistantContent).toContain("-  return Math.random() > 0.3;");
+		expect(assistantContent).toContain("+  return Math.random() > 0.5;");
+		expect(assistantContent).toContain("+function randomDate(): Date {");
+		expect(assistantContent).toContain("has been updated successfully");
+	});
+
 	test("returns empty list when the project dir contains no jsonl files", async () => {
 		const sessions = await claudeCodeProvider.listSessions(projectCwd);
 		expect(sessions).toEqual([]);
