@@ -31,6 +31,7 @@ After install, type `claude`, `codex`, or `opencode` to launch.
 | `codev codex --restore`    | Restore `~/.codex/config.toml` from `~/.codex/config.toml.backup`                                               |
 | `codev opencode --restore` | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup`                       |
 | `codev logout`             | Sign out of SSO                                                                                                 |
+| `codev remove`             | Revert this machine to its pre-CoDev state (add `--yes` / `-y` to skip the confirmation prompt)                 |
 
 ## Restoring a previous configuration
 
@@ -70,3 +71,19 @@ mv ~/.config/opencode/opencode.json.backup ~/.config/opencode/opencode.json
 ```
 
 If you have a session running, you might need to restart it with `claude -c`, `codex resume`, or `opencode -c` to resume your progress.
+
+## Removing CoDev entirely
+
+```bash
+codev remove
+```
+
+After confirmation, this signs you out, uninstalls the PATH shims (cleaning the sentinel block from your shell rc files), restores each agent's pre-CoDev config from its `*.backup` (or deletes the CoDev-written config when no backup exists), and removes `~/.codev`. Add `--yes` (or `-y`) to skip the confirmation prompt.
+
+CoDev itself is still installed globally — finish with:
+
+```bash
+npm uninstall -g codev-ai
+```
+
+Then restart your terminal so the rc-file changes take effect.
