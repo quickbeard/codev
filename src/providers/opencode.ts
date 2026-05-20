@@ -198,10 +198,15 @@ function parsePart(part: PartRow): string | null {
 
 	if (obj.type === "reasoning") {
 		const reasonPart = obj as ReasoningPart;
-		if (typeof reasonPart.text !== "string" || !reasonPart.text.trim()) return null;
-		
+		if (typeof reasonPart.text !== "string" || !reasonPart.text.trim())
+			return null;
+
 		let durationStr = "";
-		if (reasonPart.time && typeof reasonPart.time.start === "number" && typeof reasonPart.time.end === "number") {
+		if (
+			reasonPart.time &&
+			typeof reasonPart.time.start === "number" &&
+			typeof reasonPart.time.end === "number"
+		) {
 			const diff = reasonPart.time.end - reasonPart.time.start;
 			if (diff >= 0) {
 				durationStr = ` for ${formatDuration(diff)}`;
@@ -221,7 +226,8 @@ function parsePart(part: PartRow): string | null {
 
 		if (toolName === "bash") {
 			const cmd = typeof input.command === "string" ? input.command : "";
-			const desc = typeof input.description === "string" ? input.description : "";
+			const desc =
+				typeof input.description === "string" ? input.description : "";
 			const summary = `Run command: ${cmd}`;
 			const descSection = desc ? `Description: ${desc}\n\n` : "";
 			const body = `${descSection}\`\`\`bash\n$ ${cmd}\n${isCompleted ? output : `Error: ${error || "Tool execution aborted"}`}\n\`\`\``;
@@ -231,7 +237,9 @@ function parsePart(part: PartRow): string | null {
 		if (toolName === "read") {
 			const path = typeof input.filePath === "string" ? input.filePath : "";
 			const summary = `Read file: ${path}`;
-			const body = isCompleted ? output : `Error: ${error || "Tool execution aborted"}`;
+			const body = isCompleted
+				? output
+				: `Error: ${error || "Tool execution aborted"}`;
 			return `<tool-use data-tool-type="read" data-tool-name="read">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 		}
 
@@ -254,7 +262,9 @@ function parsePart(part: PartRow): string | null {
 			const path = typeof input.filePath === "string" ? input.filePath : "";
 			const content = typeof input.content === "string" ? input.content : "";
 			const summary = `Edit file: ${path}`;
-			const body = isCompleted ? `\`\`\`\n${content}\n\`\`\`` : `Error: ${error || "Tool execution aborted"}`;
+			const body = isCompleted
+				? `\`\`\`\n${content}\n\`\`\``
+				: `Error: ${error || "Tool execution aborted"}`;
 			return `<tool-use data-tool-type="write" data-tool-name="write">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 		}
 
@@ -263,18 +273,26 @@ function parsePart(part: PartRow): string | null {
 			const summary = `Edit file: ${path}`;
 			let diff = "";
 			if (isCompleted) {
-				diff = state.metadata?.diff || state.metadata?.filediff?.patch || "Edit applied successfully.";
+				diff =
+					state.metadata?.diff ||
+					state.metadata?.filediff?.patch ||
+					"Edit applied successfully.";
 			} else {
 				diff = `Error: ${error || "Tool execution aborted"}`;
 			}
-			const body = diff.startsWith("Error:") || diff === "Edit applied successfully." ? diff : `\`\`\`diff\n${diff}\n\`\`\``;
+			const body =
+				diff.startsWith("Error:") || diff === "Edit applied successfully."
+					? diff
+					: `\`\`\`diff\n${diff}\n\`\`\``;
 			return `<tool-use data-tool-type="write" data-tool-name="edit">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 		}
 
 		if (toolName === "task") {
-			const desc = typeof input.description === "string" ? input.description : "";
+			const desc =
+				typeof input.description === "string" ? input.description : "";
 			const prompt = typeof input.prompt === "string" ? input.prompt : "";
-			const subagent = typeof input.subagent_type === "string" ? input.subagent_type : "";
+			const subagent =
+				typeof input.subagent_type === "string" ? input.subagent_type : "";
 			const summary = `Spawn subagent: ${desc || subagent}`;
 			const body = `**Subagent Type**: ${subagent}\n**Prompt**:\n${prompt}\n\n**Result**:\n${isCompleted ? output : `Error: ${error || "Subagent execution aborted"}`}`;
 			return `<tool-use data-tool-type="task" data-tool-name="task">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
