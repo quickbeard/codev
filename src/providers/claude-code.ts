@@ -242,10 +242,12 @@ function formatToolUse(
 		toolType = "write";
 		const path = filePathFromInput(input) || textValue(input.TargetFile);
 		summary = `Edit file: ${path}`;
+		const diff = diffFromEditInput(input);
 		if (isError) {
-			body = `Error: ${output}`;
+			body = diff
+				? `\`\`\`diff\n${diff}\n\`\`\`\n\nError: ${output}`
+				: `Error: ${output}`;
 		} else {
-			const diff = diffFromEditInput(input);
 			body = diff
 				? `\`\`\`diff\n${diff}\n\`\`\`\n\n${output}`
 				: output.includes("<<<") ||
@@ -270,7 +272,11 @@ function formatToolUse(
 		body = `**Input**:\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
 	}
 
-	return `<tool-use data-tool-type="${toolType}" data-tool-name="${toolName}">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+	const editStatus =
+		toolType === "write"
+			? ` data-edit-status="${isError ? "rejected" : "accepted"}"`
+			: "";
+	return `<tool-use data-tool-type="${toolType}" data-tool-name="${toolName}"${editStatus}>\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 }
 
 async function parseSessionFile(filePath: string): Promise<Session | null> {

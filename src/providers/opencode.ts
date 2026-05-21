@@ -160,6 +160,30 @@ function formatDuration(ms: number): string {
 	return `${ms}ms`;
 }
 
+function buildLineDiff(oldText: string, newText: string): string {
+	const lines: string[] = [];
+	for (const line of oldText.split("\n")) lines.push(`-${line}`);
+	for (const line of newText.split("\n")) lines.push(`+${line}`);
+	return lines.join("\n");
+}
+
+function diffFromEditInput(input: Record<string, unknown>): string {
+	const oldText =
+		typeof input.oldString === "string"
+			? input.oldString
+			: typeof input.old_string === "string"
+				? input.old_string
+				: "";
+	const newText =
+		typeof input.newString === "string"
+			? input.newString
+			: typeof input.new_string === "string"
+				? input.new_string
+				: "";
+	if (!oldText && !newText) return "";
+	return buildLineDiff(oldText, newText);
+}
+
 interface ReasoningPart {
 	type: "reasoning";
 	text: string;
@@ -265,7 +289,7 @@ function parsePart(part: PartRow): string | null {
 			const body = isCompleted
 				? `\`\`\`\n${content}\n\`\`\``
 				: `Error: ${error || "Tool execution aborted"}`;
-			return `<tool-use data-tool-type="write" data-tool-name="write">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+			return `<tool-use data-tool-type="write" data-tool-name="write" data-edit-status="${isCompleted ? "accepted" : "rejected"}">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 		}
 
 		if (toolName === "edit") {
@@ -278,13 +302,18 @@ function parsePart(part: PartRow): string | null {
 					state.metadata?.filediff?.patch ||
 					"Edit applied successfully.";
 			} else {
-				diff = `Error: ${error || "Tool execution aborted"}`;
+				diff =
+					state.metadata?.diff ||
+					state.metadata?.filediff?.patch ||
+					diffFromEditInput(input);
 			}
 			const body =
-				diff.startsWith("Error:") || diff === "Edit applied successfully."
+				diff === "Edit applied successfully."
 					? diff
-					: `\`\`\`diff\n${diff}\n\`\`\``;
-			return `<tool-use data-tool-type="write" data-tool-name="edit">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+					: diff
+						? `\`\`\`diff\n${diff}\n\`\`\`${isCompleted ? "" : `\n\nError: ${error || "Tool execution aborted"}`}`
+						: `Error: ${error || "Tool execution aborted"}`;
+			return `<tool-use data-tool-type="write" data-tool-name="edit" data-edit-status="${isCompleted ? "accepted" : "rejected"}">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 		}
 
 		if (toolName === "task") {

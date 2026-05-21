@@ -118,6 +118,7 @@ function formatCodexToolUse(
 	let toolType = "tool";
 	let summary = `Call tool: ${name}`;
 	let body = "";
+	const editDiff = diffFromEditInput(input);
 
 	if (
 		toolName === "exec_command" ||
@@ -183,13 +184,15 @@ function formatCodexToolUse(
 						? input.path
 						: "";
 		summary = `Edit file: ${path}`;
-		body = isError
-			? `Error: ${output}`
-			: output.includes("<<<") ||
-					output.includes("---") ||
-					output.includes("+++")
-				? `\`\`\`diff\n${output}\n\`\`\``
-				: `\`\`\`\n${output}\n\`\`\``;
+		body = editDiff
+			? `\`\`\`diff\n${editDiff}\n\`\`\`\n\n${isError ? `Error: ${output}` : output}`
+			: isError
+				? `Error: ${output}`
+				: output.includes("<<<") ||
+						output.includes("---") ||
+						output.includes("+++")
+					? `\`\`\`diff\n${output}\n\`\`\``
+					: `\`\`\`\n${output}\n\`\`\``;
 	} else if (
 		toolName === "subagent" ||
 		toolName === "invoke_subagent" ||
@@ -205,7 +208,11 @@ function formatCodexToolUse(
 		body = `**Input**:\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
 	}
 
-	return `<tool-use data-tool-type="${toolType}" data-tool-name="${toolName}">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+	const editStatus =
+		toolType === "write"
+			? ` data-edit-status="${isError ? "rejected" : "accepted"}"`
+			: "";
+	return `<tool-use data-tool-type="${toolType}" data-tool-name="${toolName}"${editStatus}>\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 }
 
 function extractPatchFilePath(patch: string): string {
@@ -215,6 +222,30 @@ function extractPatchFilePath(patch: string): string {
 		patch.match(/^---\s+a\/(.+)$/m) ??
 		patch.match(/^\+\+\+\s+b\/(.+)$/m);
 	return match?.[1]?.trim() ?? "";
+}
+
+function buildLineDiff(oldText: string, newText: string): string {
+	const lines: string[] = [];
+	for (const line of oldText.split("\n")) lines.push(`-${line}`);
+	for (const line of newText.split("\n")) lines.push(`+${line}`);
+	return lines.join("\n");
+}
+
+function diffFromEditInput(input: Record<string, unknown>): string {
+	const oldText =
+		typeof input.old_string === "string"
+			? input.old_string
+			: typeof input.oldString === "string"
+				? input.oldString
+				: "";
+	const newText =
+		typeof input.new_string === "string"
+			? input.new_string
+			: typeof input.newString === "string"
+				? input.newString
+				: "";
+	if (!oldText && !newText) return "";
+	return buildLineDiff(oldText, newText);
 }
 
 function formatCodexCustomToolUse(
@@ -227,10 +258,8 @@ function formatCodexCustomToolUse(
 	if (toolName === "apply_patch") {
 		const patch = typeof input === "string" ? input : "";
 		const path = extractPatchFilePath(patch);
-		const body = isError
-			? `Error: ${output}`
-			: `\`\`\`diff\n${patch}\n\`\`\`\n\n${output}`;
-		return `<tool-use data-tool-type="write" data-tool-name="${toolName}">\n<details>\n<summary>Edit file: ${path}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+		const body = `\`\`\`diff\n${patch}\n\`\`\`\n\n${isError ? `Error: ${output}` : output}`;
+		return `<tool-use data-tool-type="write" data-tool-name="${toolName}" data-edit-status="${isError ? "rejected" : "accepted"}">\n<details>\n<summary>Edit file: ${path}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 	}
 
 	const body = `**Input**:\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;

@@ -216,7 +216,7 @@ describe("codexProvider.listSessions", () => {
 		if (!s) throw new Error("expected session");
 		const assistantContent = s.messages[1]?.content || "";
 		expect(assistantContent).toContain(
-			'<tool-use data-tool-type="write" data-tool-name="apply_patch">',
+			'<tool-use data-tool-type="write" data-tool-name="apply_patch" data-edit-status="accepted">',
 		);
 		expect(assistantContent).toContain(
 			"<summary>Edit file: /tmp/random.ts</summary>",
@@ -225,6 +225,56 @@ describe("codexProvider.listSessions", () => {
 		expect(assistantContent).toContain("-old line");
 		expect(assistantContent).toContain("+new line");
 		expect(assistantContent).toContain("Success. Updated the following files");
+	});
+
+	test("keeps rejected apply_patch custom tool calls as rejected diffs", async () => {
+		writeSession("session-rejected-patch.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-rejected-patch",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "Patch random.ts" },
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:20Z",
+				payload: {
+					type: "custom_tool_call",
+					name: "apply_patch",
+					input:
+						"*** Begin Patch\n*** Update File: /tmp/random.ts\n@@\n-old line\n+new line\n*** End Patch\n",
+					call_id: "patch-1",
+				},
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:25Z",
+				payload: {
+					type: "custom_tool_call_output",
+					call_id: "patch-1",
+					output: "The user rejected this edit.",
+					is_error: true,
+				},
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		const assistantContent = sessions[0]?.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="apply_patch" data-edit-status="rejected">',
+		);
+		expect(assistantContent).toContain("```diff\n*** Begin Patch");
+		expect(assistantContent).toContain("-old line");
+		expect(assistantContent).toContain("+new line");
+		expect(assistantContent).toContain("Error: The user rejected this edit.");
 	});
 
 	test("excludes sessions whose cwd does not match", async () => {

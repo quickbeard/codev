@@ -195,6 +195,69 @@ describe("openCodeProvider.listSessions", () => {
 		expect(sessions).toEqual([]);
 	});
 
+	test("marks completed and errored edit tools with acceptance status", async () => {
+		seedProjectAndSession();
+		const db = new Database(dbPath);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-4",
+				"msg-2",
+				"ses-1",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 33, 2) / 1000),
+				JSON.stringify({
+					type: "tool",
+					tool: "edit",
+					callID: "edit-1",
+					state: {
+						status: "completed",
+						input: { filePath: "/tmp/a.ts" },
+						metadata: { diff: "-old\n+new" },
+					},
+				}),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-5",
+				"msg-2",
+				"ses-1",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 33, 3) / 1000),
+				JSON.stringify({
+					type: "tool",
+					tool: "edit",
+					callID: "edit-2",
+					state: {
+						status: "error",
+						input: {
+							filePath: "/tmp/b.ts",
+							oldString: "const lucky = false;",
+							newString: "const lucky = true;",
+						},
+						error: "Tool execution aborted",
+					},
+				}),
+			],
+		);
+		db.close();
+
+		const sessions = await openCodeProvider.listSessions(projectCwd);
+		const assistantContent = sessions[0]?.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="edit" data-edit-status="accepted">',
+		);
+		expect(assistantContent).toContain("```diff\n-old\n+new\n```");
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="edit" data-edit-status="rejected">',
+		);
+		expect(assistantContent).toContain("-const lucky = false;");
+		expect(assistantContent).toContain("+const lucky = true;");
+		expect(assistantContent).toContain("Error: Tool execution aborted");
+	});
+
 	test("honors XDG_DATA_HOME for the database location", async () => {
 		const xdg = realpathSync(
 			mkdtempSync(join(tmpdir(), "codev-opencode-xdg-")),

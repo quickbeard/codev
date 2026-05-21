@@ -230,7 +230,7 @@ describe("claudeCodeProvider.listSessions", () => {
 		expect(sessions.length).toBe(1);
 		const assistantContent = sessions[0]?.messages[1]?.content || "";
 		expect(assistantContent).toContain(
-			'<tool-use data-tool-type="write" data-tool-name="edit">',
+			'<tool-use data-tool-type="write" data-tool-name="edit" data-edit-status="accepted">',
 		);
 		expect(assistantContent).toContain(
 			"<summary>Edit file: /tmp/random.ts</summary>",
@@ -240,6 +240,64 @@ describe("claudeCodeProvider.listSessions", () => {
 		expect(assistantContent).toContain("+  return Math.random() > 0.5;");
 		expect(assistantContent).toContain("+function randomDate(): Date {");
 		expect(assistantContent).toContain("has been updated successfully");
+	});
+
+	test("keeps rejected edit proposals as rejected diff blocks", async () => {
+		const lines = [
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:05Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: { role: "user", content: "Edit random.ts" },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				timestamp: "2026-04-27T18:32:10Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "t-reject",
+							name: "Edit",
+							input: {
+								file_path: "/tmp/random.ts",
+								old_string: "const lucky = false;",
+								new_string: "const lucky = true;",
+							},
+						},
+					],
+				},
+			}),
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:15Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t-reject",
+							is_error: true,
+							content: "The user rejected this edit.",
+						},
+					],
+				},
+			}),
+		];
+		writeFileSync(join(claudeProjectDir, "session.jsonl"), lines.join("\n"));
+
+		const sessions = await claudeCodeProvider.listSessions(projectCwd);
+		const assistantContent = sessions[0]?.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="edit" data-edit-status="rejected">',
+		);
+		expect(assistantContent).toContain("```diff");
+		expect(assistantContent).toContain("-const lucky = false;");
+		expect(assistantContent).toContain("+const lucky = true;");
+		expect(assistantContent).toContain("Error: The user rejected this edit.");
 	});
 
 	test("returns empty list when the project dir contains no jsonl files", async () => {
