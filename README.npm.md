@@ -16,7 +16,7 @@ Then run:
 codev install
 ```
 
-After install, type `claude`, `codex`, or `opencode` to launch. |
+After install, type `claude`, `codex`, or `opencode` to launch.
 
 ## Restoring a previous configuration
 
