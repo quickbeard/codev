@@ -655,7 +655,9 @@ describe("InstallApp existing-key path", () => {
 		const loadSpy = vi.spyOn(auth, "loadApiKey").mockReturnValue({
 			apiKey: "sk-existing-123",
 			baseUrl: "https://my-gateway.example.com/v1",
-			model: "saved-model",
+			// Saved model matches one in the stubbed /v1/models list so the
+			// "saved model pre-marked as selected" regression can actually fire.
+			model: "m-alpha",
 		});
 		const validateSpy = vi
 			.spyOn(proxy, "validateApiKey")
@@ -694,7 +696,18 @@ describe("InstallApp existing-key path", () => {
 		// Default cursor is on the existing option — Enter selects it directly.
 		stdin.write("\r");
 		// Existing path still routes through model-choice; the user can re-pick.
-		await pickFirstModel(stdin);
+		// Wait for the models list to render and capture the frame BEFORE picking.
+		// Even though the saved model ("m-alpha") matches a row in the list, no
+		// model row should be pre-marked with the green ● — that glyph only
+		// shows AFTER the user has actually picked something on this run.
+		await new Promise((r) => setTimeout(r, 100));
+		const beforePick = frames[frames.length - 1] ?? "";
+		expect(beforePick).toContain("m-alpha");
+		expect(beforePick).not.toContain("● m-alpha");
+		expect(beforePick).not.toContain("● m-beta");
+
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 30));
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);

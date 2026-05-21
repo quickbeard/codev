@@ -237,7 +237,9 @@ export function InstallApp() {
 					baseUrl: savedCreds.baseUrl,
 					model: savedCreds.model,
 				});
-				setChosenModel(savedCreds.model ?? null);
+				// Don't pre-mark the saved model as selected — the green ● should
+				// only appear after the user actually picks a row on this run.
+				// chosenModel stays null until handleModelSelect runs.
 				setStep("model-choice");
 				return;
 			}
