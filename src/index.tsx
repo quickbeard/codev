@@ -55,8 +55,12 @@ switch (command) {
 		break;
 	case "install": {
 		const { waitUntilExit } = render(<InstallApp />);
-		await waitUntilExit();
-		process.exit(0);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
 		break;
 	}
 	case "update": {

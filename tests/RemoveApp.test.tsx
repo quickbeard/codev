@@ -71,14 +71,14 @@ describe("RemoveApp", () => {
 		expect(out).toContain(
 			"Everything will be reverted to the pre-CoDev state. Do you want to proceed?",
 		);
-		expect(out).toContain("Continue? [y/N]");
+		expect(out).toContain("Continue? [Y/n]");
 		expect(spy).not.toHaveBeenCalled();
 	});
 
-	test("'y' starts the remove flow and shows the success message", async () => {
+	test("'y' + Enter starts the remove flow and shows the success message", async () => {
 		stubRunRemove(SUCCESS_RESULT);
 		const { stdin, frames } = render(<RemoveApp />);
-		stdin.write("y");
+		stdin.write("y\r");
 		await tick(50);
 		const out = flat(history(frames));
 		expect(out).toContain(
@@ -86,21 +86,31 @@ describe("RemoveApp", () => {
 		);
 	});
 
-	test("'n' cancels without invoking runRemove", async () => {
-		const spy = stubRunRemove(SUCCESS_RESULT);
-		const { stdin, frames } = render(<RemoveApp />);
-		stdin.write("n");
-		await tick(30);
-		expect(history(frames)).toContain("Cancelled.");
-		expect(spy).not.toHaveBeenCalled();
-	});
-
-	test("Enter at the prompt cancels (default No)", async () => {
+	test("Enter alone at the prompt proceeds (default Yes, apt parity)", async () => {
 		const spy = stubRunRemove(SUCCESS_RESULT);
 		const { stdin, frames } = render(<RemoveApp />);
 		stdin.write("\r");
+		await tick(50);
+		const out = flat(history(frames));
+		expect(out).toContain("Removed successfully.");
+		expect(spy).toHaveBeenCalledOnce();
+	});
+
+	test("'n' + Enter aborts without invoking runRemove", async () => {
+		const spy = stubRunRemove(SUCCESS_RESULT);
+		const { stdin, frames } = render(<RemoveApp />);
+		stdin.write("n\r");
 		await tick(30);
-		expect(history(frames)).toContain("Cancelled.");
+		expect(history(frames)).toContain("Abort.");
+		expect(spy).not.toHaveBeenCalled();
+	});
+
+	test("gibberish + Enter aborts (apt-style)", async () => {
+		const spy = stubRunRemove(SUCCESS_RESULT);
+		const { stdin, frames } = render(<RemoveApp />);
+		stdin.write("maybe\r");
+		await tick(30);
+		expect(history(frames)).toContain("Abort.");
 		expect(spy).not.toHaveBeenCalled();
 	});
 

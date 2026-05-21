@@ -135,7 +135,8 @@ export function InstallApp() {
 	const handleConfirmProceed = useCallback(
 		(proceed: boolean) => {
 			if (!proceed) {
-				exit();
+				process.stderr.write("Abort.\n");
+				exit(new Error("aborted"));
 				return;
 			}
 			setStep("login");

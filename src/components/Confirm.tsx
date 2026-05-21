@@ -1,4 +1,5 @@
-import { Box, Text, useInput } from "ink";
+import { Box, Text } from "ink";
+import { YesNo } from "@/components/YesNo.js";
 import { getBackupStatus, type Tool } from "@/lib/configure.js";
 
 interface ConfirmProps {
@@ -20,18 +21,6 @@ const RESTORE_CMD: Record<Tool, string> = {
 };
 
 export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
-	useInput(
-		(input, key) => {
-			const answer = input.toLowerCase();
-			if (answer === "y") {
-				onConfirm(true);
-			} else if (answer === "n" || key.return) {
-				onConfirm(false);
-			}
-		},
-		{ isActive: !readOnly },
-	);
-
 	return (
 		<Box flexDirection="column">
 			{tools.map((tool) => {
@@ -60,7 +49,7 @@ export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
 			})}
 			{!readOnly && (
 				<Box marginTop={1}>
-					<Text color="cyan">Continue? [y/N]</Text>
+					<YesNo defaultAnswer="yes" onAnswer={onConfirm} />
 				</Box>
 			)}
 		</Box>
