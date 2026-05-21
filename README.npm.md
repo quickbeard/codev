@@ -16,22 +16,7 @@ Then run:
 codev install
 ```
 
-After install, type `claude`, `codex`, or `opencode` to launch.
-
-## Commands
-
-| Command                    | What it does                                                                                                    |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `codev --help`, `-h`       | Show help                                                                                                       |
-| `codev --version`, `-v`    | Show version                                                                                                    |
-| `codev install`            | Install and configure AI coding agents                                                                          |
-| `codev update`             | Update installed AI coding agents                                                                               |
-| `codev upload`             | Export this directory's agent conversations to `~/.codev/logs/<project>/` and upload them to the monitor module |
-| `codev claude --restore`   | Restore `~/.claude/settings.json` from `~/.claude/settings.json.backup`                                         |
-| `codev codex --restore`    | Restore `~/.codex/config.toml` from `~/.codex/config.toml.backup`                                               |
-| `codev opencode --restore` | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup`                       |
-| `codev logout`             | Sign out of SSO                                                                                                 |
-| `codev remove`             | Revert this machine to its pre-CoDev state (add `--yes` / `-y` to skip the confirmation prompt)                 |
+After install, type `claude`, `codex`, or `opencode` to launch. |
 
 ## Restoring a previous configuration
 
@@ -78,7 +63,7 @@ If you have a session running, you might need to restart it with `claude -c`, `c
 codev remove
 ```
 
-After confirmation, this signs you out, uninstalls the PATH shims (cleaning the sentinel block from your shell rc files), restores each agent's pre-CoDev config from its `*.backup` (or deletes the CoDev-written config when no backup exists), and removes `~/.codev`. Add `--yes` (or `-y`) to skip the confirmation prompt.
+After confirmation, this reverts your machine to its pre-CoDev state. Add `--yes` (or `-y`) to skip the confirmation prompt.
 
 CoDev itself is still installed globally — finish with:
 
@@ -86,4 +71,4 @@ CoDev itself is still installed globally — finish with:
 npm uninstall -g codev-ai
 ```
 
-Then restart your terminal so the rc-file changes take effect.
+Then restart your terminal.
