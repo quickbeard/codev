@@ -61,13 +61,13 @@ function fakeAuth(): auth.AuthData {
 }
 
 async function advanceThroughConfirm(stdin: { write: (s: string) => void }) {
-	// Select Claude Code, confirm selection, accept backup-warning confirm.
-	// In the new flow this lands on LOGIN, not Install.
+	// Select Claude Code, confirm selection, accept backup-warning confirm
+	// (apt-style: type "y" then Enter). Lands on LOGIN.
 	stdin.write(" ");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
-	stdin.write("y");
+	stdin.write("y\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
 
@@ -81,7 +81,7 @@ async function advanceThroughConfirmCodex(stdin: {
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
-	stdin.write("y");
+	stdin.write("y\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
 

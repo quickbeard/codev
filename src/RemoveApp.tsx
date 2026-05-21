@@ -1,9 +1,10 @@
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { YesNo } from "@/components/YesNo.js";
 import { type RemoveResult, runRemove } from "@/lib/remove.js";
 
-type Phase = "confirm" | "running" | "done" | "cancelled";
+type Phase = "confirm" | "running" | "done" | "aborted";
 
 interface RemoveAppProps {
 	skipConfirm?: boolean;
@@ -46,26 +47,18 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 
 	// Defer exit() until after the post-completion frame has rendered. Calling
 	// exit() inline with setPhase("done") would unmount before ink flushes the
-	// new frame, hiding the success / failure message.
+	// new frame, hiding the success / failure / abort message.
 	useEffect(() => {
 		if (phase === "done") {
 			exit(result?.anyFailed ? new Error("remove failed") : undefined);
-		} else if (phase === "cancelled") {
-			exit();
+		} else if (phase === "aborted") {
+			exit(new Error("aborted"));
 		}
 	}, [phase, result, exit]);
 
-	useInput(
-		(input, key) => {
-			const answer = input.toLowerCase();
-			if (answer === "y") {
-				setPhase("running");
-			} else if (answer === "n" || key.return) {
-				setPhase("cancelled");
-			}
-		},
-		{ isActive: phase === "confirm" },
-	);
+	const handleAnswer = useCallback((proceed: boolean) => {
+		setPhase(proceed ? "running" : "aborted");
+	}, []);
 
 	if (phase === "confirm") {
 		return (
@@ -75,14 +68,14 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 					proceed?
 				</Text>
 				<Box marginTop={1}>
-					<Text color="cyan">Continue? [y/N]</Text>
+					<YesNo defaultAnswer="yes" onAnswer={handleAnswer} />
 				</Box>
 			</Box>
 		);
 	}
 
-	if (phase === "cancelled") {
-		return <Text>Cancelled.</Text>;
+	if (phase === "aborted") {
+		return <Text>Abort.</Text>;
 	}
 
 	if (phase === "running" || !result) {
