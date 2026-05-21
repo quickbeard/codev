@@ -17,6 +17,7 @@ Commands:
   codex --restore     Restore ~/.codex/config.toml from ~/.codex/config.toml.backup
   opencode --restore  Restore ~/.config/opencode/opencode.json from ~/.config/opencode/opencode.json.backup
   logout              Sign out of SSO
+  remove              Revert this machine to its pre-CoDev state (--yes to skip prompt)
   --version, -v       Show version
   --help, -h          Show this help
 `);

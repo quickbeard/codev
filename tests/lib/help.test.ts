@@ -53,6 +53,11 @@ describe("printHelp", () => {
 		expect(out).toContain("opencode --restore");
 	});
 
+	test("lists the remove command", () => {
+		printHelp();
+		expect(output()).toContain("remove");
+	});
+
 	test("only surfaces agent commands as --restore forms", () => {
 		// Agents (claude/codex/opencode) are launched via PATH shims set up by
 		// `codev install` — the bare `codev <agent>` form is intentionally

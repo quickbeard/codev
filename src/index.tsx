@@ -7,6 +7,7 @@ import { runRestore } from "@/lib/restore.js";
 import { runAgent } from "@/lib/run.js";
 import { activationHint, installShims, uninstallShims } from "@/lib/shims.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
+import { RemoveApp } from "@/RemoveApp.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
 
@@ -72,6 +73,17 @@ switch (command) {
 		const ok = await logout();
 		console.log(ok ? "Logged out." : "Not logged in.");
 		process.exit(0);
+		break;
+	}
+	case "remove": {
+		const skipConfirm = args.includes("--yes") || args.includes("-y");
+		const { waitUntilExit } = render(<RemoveApp skipConfirm={skipConfirm} />);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
 		break;
 	}
 	// Hidden: not surfaced in --help or README. Installs/removes PATH shims
