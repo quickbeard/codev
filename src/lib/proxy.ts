@@ -1,5 +1,9 @@
 import type { CodevConfig } from "@/lib/auth.js";
-import { AI_GATEWAY_URL, PROXY_URL } from "@/lib/const.js";
+import {
+	AI_GATEWAY_OPENAI_URL,
+	AI_GATEWAY_URL,
+	PROXY_URL,
+} from "@/lib/const.js";
 
 interface ExchangeResponse {
 	api_key: string;
@@ -20,6 +24,7 @@ interface ErrorResponse {
 }
 
 const VALIDATE_TIMEOUT_MS = 5_000;
+const MODELS_TIMEOUT_MS = 10_000;
 
 export interface SupabaseSession {
 	access_token: string;
@@ -107,6 +112,45 @@ export async function validateApiKey(
 		throw new Error(`Validation failed (${res.status}): ${res.statusText}`);
 	}
 	return true;
+}
+
+// Hits the OpenAI-compatible /v1/models endpoint. AI_GATEWAY_OPENAI_URL
+// already ends in /v1; manual baseUrls may or may not — normalize either way
+// so we always end up at `<base>/v1/models`.
+function modelsUrl(baseUrl?: string): string {
+	const base = baseUrl ?? AI_GATEWAY_OPENAI_URL;
+	const withV1 = /\/v1\/?$/.test(base)
+		? base.replace(/\/$/, "")
+		: `${base.replace(/\/$/, "")}/v1`;
+	return `${withV1}/models`;
+}
+
+// Fetches the list of model IDs available to the given API key. Throws on
+// non-2xx, network errors, timeout, or an empty result — callers fail-stop
+// (there is no silent fallback to a hardcoded default).
+export async function fetchModels(
+	apiKey: string,
+	baseUrl?: string,
+): Promise<string[]> {
+	const res = await fetch(modelsUrl(baseUrl), {
+		method: "GET",
+		headers: {
+			accept: "application/json",
+			Authorization: `Bearer ${apiKey}`,
+		},
+		signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
+	});
+	if (!res.ok) {
+		const body = (await res.json().catch(() => ({}))) as ErrorResponse;
+		const reason = body.error || res.statusText;
+		throw new Error(`Models fetch failed (${res.status}): ${reason}`);
+	}
+	const data = (await res.json()) as { data?: Array<{ id?: string }> };
+	const ids = (data.data ?? [])
+		.map((m) => m.id)
+		.filter((id): id is string => typeof id === "string" && id.length > 0);
+	if (ids.length === 0) throw new Error("Gateway returned no models");
+	return ids;
 }
 
 export async function fetchSupabaseSession(

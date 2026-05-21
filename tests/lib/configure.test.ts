@@ -84,7 +84,7 @@ describe("bypassClaudeLogin", () => {
 describe("configureClaudeCode", () => {
 	test("creates ~/.claude/settings.json with env block when file does not exist", async () => {
 		const { configureClaudeCode } = await import("@/lib/configure.js");
-		configureClaudeCode({ apiKey: "sk-abc" });
+		configureClaudeCode({ apiKey: "sk-abc", model: "chosen-model" });
 
 		const filePath = join(tempDir, ".claude", "settings.json");
 		expect(existsSync(filePath)).toBe(true);
@@ -96,17 +96,17 @@ describe("configureClaudeCode", () => {
 		expect(config.env).toEqual({
 			ANTHROPIC_BASE_URL: AI_GATEWAY_URL,
 			ANTHROPIC_API_KEY: "sk-abc",
-			ANTHROPIC_MODEL: "MiniMax",
-			ANTHROPIC_DEFAULT_OPUS_MODEL: "MiniMax",
-			ANTHROPIC_DEFAULT_SONNET_MODEL: "MiniMax",
-			ANTHROPIC_DEFAULT_HAIKU_MODEL: "MiniMax",
+			ANTHROPIC_MODEL: "chosen-model",
+			ANTHROPIC_DEFAULT_OPUS_MODEL: "chosen-model",
+			ANTHROPIC_DEFAULT_SONNET_MODEL: "chosen-model",
+			ANTHROPIC_DEFAULT_HAIKU_MODEL: "chosen-model",
 			CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1",
 		});
 	});
 
 	test("also runs bypassClaudeLogin (creates .claude.json)", async () => {
 		const { configureClaudeCode } = await import("@/lib/configure.js");
-		configureClaudeCode({ apiKey: "sk-abc" });
+		configureClaudeCode({ apiKey: "sk-abc", model: "m" });
 
 		const claudeJson = join(tempDir, ".claude.json");
 		expect(existsSync(claudeJson)).toBe(true);
@@ -128,7 +128,7 @@ describe("configureClaudeCode", () => {
 		);
 
 		const { configureClaudeCode } = await import("@/lib/configure.js");
-		const results = configureClaudeCode({ apiKey: "sk-new" });
+		const results = configureClaudeCode({ apiKey: "sk-new", model: "m" });
 
 		const result = results.find((r) => r.kind === "claude-settings");
 		expect(result?.backupPath).toBe(backupPath);
@@ -151,7 +151,7 @@ describe("configureClaudeCode", () => {
 		writeFileSync(join(dir, "CLAUDE.md"), "user notes");
 
 		const { configureClaudeCode } = await import("@/lib/configure.js");
-		configureClaudeCode({ apiKey: "sk-new" });
+		configureClaudeCode({ apiKey: "sk-new", model: "m" });
 
 		expect(readFileSync(join(dir, "CLAUDE.md"), "utf-8")).toBe("user notes");
 		expect(existsSync(join(dir, "CLAUDE.md.backup"))).toBe(false);
@@ -169,7 +169,7 @@ describe("configureClaudeCode", () => {
 		);
 
 		const { configureClaudeCode } = await import("@/lib/configure.js");
-		configureClaudeCode({ apiKey: "sk-new" });
+		configureClaudeCode({ apiKey: "sk-new", model: "m" });
 
 		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
 		expect(backup.marker).toBe("original");
@@ -179,7 +179,7 @@ describe("configureClaudeCode", () => {
 describe("configureOpenCode", () => {
 	test("creates ~/.config/opencode/opencode.json with aigateway provider when file does not exist", async () => {
 		const { configureOpenCode } = await import("@/lib/configure.js");
-		configureOpenCode({ apiKey: "sk-xyz" });
+		configureOpenCode({ apiKey: "sk-xyz", model: "chosen-model" });
 
 		const filePath = join(tempDir, ".config", "opencode", "opencode.json");
 		expect(existsSync(filePath)).toBe(true);
@@ -191,12 +191,14 @@ describe("configureOpenCode", () => {
 			AI_GATEWAY_OPENAI_URL,
 		);
 		expect(config.provider.aigateway.options.apiKey).toBe("sk-xyz");
-		expect(config.provider.aigateway.models.MiniMax.name).toBe("MiniMax");
+		expect(config.provider.aigateway.models["chosen-model"].name).toBe(
+			"chosen-model",
+		);
 	});
 
 	test("does not touch ~/.claude.json (OpenCode-only install)", async () => {
 		const { configureOpenCode } = await import("@/lib/configure.js");
-		configureOpenCode({ apiKey: "sk-xyz" });
+		configureOpenCode({ apiKey: "sk-xyz", model: "m" });
 
 		expect(existsSync(join(tempDir, ".claude.json"))).toBe(false);
 	});
@@ -215,7 +217,7 @@ describe("configureOpenCode", () => {
 		);
 
 		const { configureOpenCode } = await import("@/lib/configure.js");
-		const results = configureOpenCode({ apiKey: "sk-new" });
+		const results = configureOpenCode({ apiKey: "sk-new", model: "m" });
 
 		expect(results[0]?.backupPath).toBe(backupPath);
 		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
@@ -242,7 +244,7 @@ describe("configureOpenCode", () => {
 		);
 
 		const { configureOpenCode } = await import("@/lib/configure.js");
-		const results = configureOpenCode({ apiKey: "sk-new" });
+		const results = configureOpenCode({ apiKey: "sk-new", model: "m" });
 
 		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
 		expect(backup.marker).toBe("original");
@@ -274,13 +276,13 @@ describe("configureCodex", () => {
 
 	test("creates ~/.codex/config.toml with aigateway provider when file does not exist", async () => {
 		const { configureCodex } = await import("@/lib/configure.js");
-		configureCodex({ apiKey: "sk-codex" });
+		configureCodex({ apiKey: "sk-codex", model: "chosen-model" });
 
 		const filePath = join(tempDir, ".codex", "config.toml");
 		expect(existsSync(filePath)).toBe(true);
 
 		const config = readCodexToml();
-		expect(config.model).toBe("Qwen/Qwen3.5-122B-A10B-FP8");
+		expect(config.model).toBe("chosen-model");
 		expect(config.model_provider).toBe("aigateway");
 		expect(config.model_providers.aigateway).toBeDefined();
 		expect(config.model_providers.aigateway?.name).toBe("AI Gateway");
@@ -295,7 +297,7 @@ describe("configureCodex", () => {
 
 	test("does not touch ~/.claude.json (Codex-only install)", async () => {
 		const { configureCodex } = await import("@/lib/configure.js");
-		configureCodex({ apiKey: "sk-codex" });
+		configureCodex({ apiKey: "sk-codex", model: "m" });
 
 		expect(existsSync(join(tempDir, ".claude.json"))).toBe(false);
 	});
@@ -308,7 +310,7 @@ describe("configureCodex", () => {
 		writeFileSync(filePath, 'model = "old"\nother = "keep"\n');
 
 		const { configureCodex } = await import("@/lib/configure.js");
-		const results = configureCodex({ apiKey: "sk-new" });
+		const results = configureCodex({ apiKey: "sk-new", model: "m" });
 
 		expect(results[0]?.backupPath).toBe(backupPath);
 		expect(existsSync(backupPath)).toBe(true);
@@ -332,7 +334,7 @@ describe("configureCodex", () => {
 		writeFileSync(filePath, 'marker = "prev-codev-run"\n');
 
 		const { configureCodex } = await import("@/lib/configure.js");
-		configureCodex({ apiKey: "sk-new" });
+		configureCodex({ apiKey: "sk-new", model: "m" });
 
 		const backup = readFileSync(backupPath, "utf-8");
 		expect(backup).toContain('marker = "original"');

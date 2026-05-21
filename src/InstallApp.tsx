@@ -18,6 +18,7 @@ import {
 	type ManualCredentialsValue,
 	manualCredentialsTitle,
 } from "@/components/ManualCredentials.js";
+import { ModelSelect, modelSelectTitle } from "@/components/ModelSelect.js";
 import {
 	ProxyUrl,
 	type ProxyUrlChoice,
@@ -33,7 +34,7 @@ import {
 	saveApiKey,
 	saveProxyUrl,
 } from "@/lib/auth.js";
-import type { Credentials, Tool } from "@/lib/configure.js";
+import { type Credentials, DEFAULT_MODEL, type Tool } from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 
@@ -49,6 +50,7 @@ type Phase =
 	| "key-choice"
 	| "fetching-key"
 	| "manual-creds"
+	| "model-choice"
 	| "configuring"
 	| "configure-failed"
 	| "done";
@@ -62,6 +64,7 @@ const POST_LOGIN: Phase[] = [
 	"key-choice",
 	"fetching-key",
 	"manual-creds",
+	"model-choice",
 	"configuring",
 	"configure-failed",
 	"done",
@@ -73,6 +76,7 @@ const POST_INSTALL: Phase[] = [
 	"key-choice",
 	"fetching-key",
 	"manual-creds",
+	"model-choice",
 	"configuring",
 	"configure-failed",
 	"done",
@@ -83,6 +87,7 @@ const POST_PROXY_CHOICE: Phase[] = [
 	"key-choice",
 	"fetching-key",
 	"manual-creds",
+	"model-choice",
 	"configuring",
 	"configure-failed",
 	"done",
@@ -92,6 +97,7 @@ const POST_REFRESH: Phase[] = [
 	"key-choice",
 	"fetching-key",
 	"manual-creds",
+	"model-choice",
 	"configuring",
 	"configure-failed",
 	"done",
@@ -100,6 +106,7 @@ const POST_VALIDATE: Phase[] = [
 	"key-choice",
 	"fetching-key",
 	"manual-creds",
+	"model-choice",
 	"configuring",
 	"configure-failed",
 	"done",
@@ -107,11 +114,12 @@ const POST_VALIDATE: Phase[] = [
 const POST_KEY_CHOICE: Phase[] = [
 	"fetching-key",
 	"manual-creds",
+	"model-choice",
 	"configuring",
 	"configure-failed",
 	"done",
 ];
-const POST_AUTH: Phase[] = ["configuring", "configure-failed", "done"];
+const POST_MODEL_CHOICE: Phase[] = ["configuring", "configure-failed", "done"];
 
 export function InstallApp() {
 	const { exit } = useApp();
@@ -126,6 +134,8 @@ export function InstallApp() {
 	const [shimsInstalled, setShimsInstalled] = useState(false);
 	const [proxyChoice, setProxyChoice] = useState<ProxyUrlChoice | null>(null);
 	const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+	const [chosenModel, setChosenModel] = useState<string | null>(null);
+	const [modelsError, setModelsError] = useState<string | null>(null);
 
 	const handleConfirm = (selected: Tool[]) => {
 		setTools(selected);
@@ -227,7 +237,8 @@ export function InstallApp() {
 					baseUrl: savedCreds.baseUrl,
 					model: savedCreds.model,
 				});
-				setStep("configuring");
+				setChosenModel(savedCreds.model ?? null);
+				setStep("model-choice");
 				return;
 			}
 			if (choice === "skip") {
@@ -242,7 +253,7 @@ export function InstallApp() {
 
 	const handleFetchKeyDone = useCallback((key: string) => {
 		setCreds({ apiKey: key });
-		setStep("configuring");
+		setStep("model-choice");
 	}, []);
 
 	const handleFetchKeyFallback = useCallback(() => {
@@ -250,18 +261,48 @@ export function InstallApp() {
 	}, []);
 
 	const handleManualDone = useCallback((value: ManualCredentialsValue) => {
-		saveApiKey({
-			apiKey: value.apiKey,
-			baseUrl: value.baseUrl,
-			model: value.model,
-		});
+		// Defer saveApiKey to the model-choice step so we only persist a
+		// complete tuple (apiKey + baseUrl + model) to ~/.codev/auth.json.
 		setCreds({
 			apiKey: value.apiKey,
 			baseUrl: value.baseUrl,
-			model: value.model,
 		});
-		setStep("configuring");
+		setStep("model-choice");
 	}, []);
+
+	const handleModelSelect = useCallback(
+		(model: string) => {
+			setChosenModel(model);
+			setCreds((prev) => (prev ? { ...prev, model } : prev));
+			// Persist the full tuple so loadApiKey() returns it on next install.
+			if (creds) {
+				saveApiKey({ apiKey: creds.apiKey, baseUrl: creds.baseUrl, model });
+			}
+			setStep("configuring");
+		},
+		[creds],
+	);
+
+	// Models fetch failed (network error, timeout, auth error, or empty list).
+	// Fall back to DEFAULT_MODEL and continue — install must not block on a
+	// transient gateway issue. The yellow warning in the model-choice step
+	// tells the user what happened.
+	const handleModelsFailed = useCallback(
+		(err: Error) => {
+			setModelsError(err.message);
+			setChosenModel(DEFAULT_MODEL);
+			setCreds((prev) => (prev ? { ...prev, model: DEFAULT_MODEL } : prev));
+			if (creds) {
+				saveApiKey({
+					apiKey: creds.apiKey,
+					baseUrl: creds.baseUrl,
+					model: DEFAULT_MODEL,
+				});
+			}
+			setStep("configuring");
+		},
+		[creds],
+	);
 
 	const handleConfigureDone = useCallback(
 		(success: boolean) => {
@@ -392,19 +433,43 @@ export function InstallApp() {
 							/>
 						</Step>
 					)}
-				{POST_AUTH.includes(step) && (creds || authMethod === "skip") && (
-					<Step
-						active={step === "configuring"}
-						title={configureTitle(authMethod === "skip")}
-					>
-						<Configure
-							tools={tools}
-							creds={creds}
-							shimsInstalled={shimsInstalled}
-							onDone={handleConfigureDone}
-						/>
-					</Step>
-				)}
+				{POST_KEY_CHOICE.includes(step) &&
+					authMethod !== "skip" &&
+					creds &&
+					step !== "fetching-key" &&
+					step !== "manual-creds" && (
+						<Step
+							active={step === "model-choice"}
+							title={modelSelectTitle(step !== "model-choice")}
+						>
+							{modelsError ? (
+								<Text color="yellow">{`Failed to fetch models (${modelsError}). Using default model.`}</Text>
+							) : (
+								<ModelSelect
+									apiKey={creds.apiKey}
+									baseUrl={creds.baseUrl}
+									onSelect={handleModelSelect}
+									onError={handleModelsFailed}
+									readOnly={step !== "model-choice"}
+									selected={chosenModel}
+								/>
+							)}
+						</Step>
+					)}
+				{POST_MODEL_CHOICE.includes(step) &&
+					(creds || authMethod === "skip") && (
+						<Step
+							active={step === "configuring"}
+							title={configureTitle(authMethod === "skip")}
+						>
+							<Configure
+								tools={tools}
+								creds={creds}
+								shimsInstalled={shimsInstalled}
+								onDone={handleConfigureDone}
+							/>
+						</Step>
+					)}
 			</Frame>
 		</Box>
 	);
