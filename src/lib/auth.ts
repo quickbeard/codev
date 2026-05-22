@@ -318,7 +318,16 @@ export async function login(
 		}
 	}
 
-	const forceLogin = existsSync(forceLoginPath());
+	// Force re-auth via the IdP login form (prompt=login) when:
+	//   1. ~/.codev/ doesn't exist — typically the user just ran `codev remove`
+	//      (which wipes the dir), or this is a truly fresh install. We have no
+	//      record of prior consent on this machine, so don't silently ride any
+	//      IdP browser-session cookie that might still be valid from another
+	//      app on the same SSO realm.
+	//   2. The force-login sentinel is set — `codev logout` writes it because
+	//      revoking tokens does not terminate the IdP's session cookie.
+	const forceLogin =
+		!existsSync(join(homedir(), ".codev")) || existsSync(forceLoginPath());
 
 	const verifier = generateCodeVerifier();
 	const challenge = await generateCodeChallenge(verifier);
