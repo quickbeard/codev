@@ -103,7 +103,7 @@ switch (command) {
 	}
 	// Hidden: not surfaced in --help or README. Installs/removes PATH shims
 	// that route `claude`/`codex`/`opencode` through codev.
-	case "block": {
+	case "hook": {
 		const r = installShims();
 		console.log(`Installed shims in ${r.shimDir}`);
 		for (const path of r.rcFilesUpdated) console.log(`  patched ${path}`);
@@ -112,7 +112,7 @@ switch (command) {
 		process.exit(0);
 		break;
 	}
-	case "unblock": {
+	case "unhook": {
 		const r = uninstallShims();
 		if (r.shimsRemoved.length === 0 && r.rcFilesUpdated.length === 0) {
 			console.log("No codev shims installed.");
