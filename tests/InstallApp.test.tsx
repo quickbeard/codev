@@ -286,6 +286,7 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-test-123",
 			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
 		});
 	});
 
@@ -318,6 +319,7 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(configureCodexSpy).toHaveBeenCalledWith({
 			apiKey: "sk-codex-123",
 			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
 		});
 	});
 
@@ -362,6 +364,7 @@ describe("InstallApp fail-stop invariant", () => {
 			apiKey: "sk-manual-123",
 			baseUrl: "https://my-gateway.example.com/v1",
 			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
 		});
 	});
 
@@ -427,6 +430,7 @@ describe("InstallApp fail-stop invariant", () => {
 			apiKey: "sk-fallback-123",
 			baseUrl: "https://fallback.example.com/v1",
 			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
 		});
 	});
 
@@ -478,6 +482,7 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-retry-ok",
 			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
 		});
 	});
 
@@ -641,9 +646,12 @@ describe("InstallApp fail-stop invariant", () => {
 		// The default model name itself must not leak into the TUI.
 		expect(history).not.toContain(configure.DEFAULT_MODEL);
 		expect(history).toContain("Happy coding");
+		// Fallback: models becomes a one-entry list so OpenCode's map still
+		// gets exactly one valid entry.
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-test-123",
 			model: configure.DEFAULT_MODEL,
+			models: [configure.DEFAULT_MODEL],
 		});
 	});
 });
@@ -725,6 +733,7 @@ describe("InstallApp existing-key path", () => {
 			apiKey: "sk-existing-123",
 			baseUrl: "https://my-gateway.example.com/v1",
 			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
 		});
 	});
 

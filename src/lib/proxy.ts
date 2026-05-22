@@ -114,6 +114,14 @@ export async function validateApiKey(
 	return true;
 }
 
+// Detects whether a thrown error from fetchModels was caused by an invalid
+// key (401/403) — as opposed to a network/5xx/timeout. Used by `codev model`
+// to decide whether to trigger the re-auth flow.
+export function isInvalidKeyError(err: unknown): boolean {
+	const msg = err instanceof Error ? err.message : String(err);
+	return /Models fetch failed \((?:401|403)\)/.test(msg);
+}
+
 // Hits the OpenAI-compatible /v1/models endpoint. AI_GATEWAY_OPENAI_URL
 // already ends in /v1; manual baseUrls may or may not — normalize either way
 // so we always end up at `<base>/v1/models`.

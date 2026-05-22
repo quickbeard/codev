@@ -7,6 +7,7 @@ import { runRestore } from "@/lib/restore.js";
 import { runAgent } from "@/lib/run.js";
 import { activationHint, installShims, uninstallShims } from "@/lib/shims.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
+import { ModelApp } from "@/ModelApp.js";
 import { RemoveApp } from "@/RemoveApp.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
@@ -82,6 +83,16 @@ switch (command) {
 	case "remove": {
 		const skipConfirm = args.includes("--yes") || args.includes("-y");
 		const { waitUntilExit } = render(<RemoveApp skipConfirm={skipConfirm} />);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
+		break;
+	}
+	case "model": {
+		const { waitUntilExit } = render(<ModelApp />);
 		try {
 			await waitUntilExit();
 			process.exit(0);

@@ -48,7 +48,7 @@ describe("ModelSelect", () => {
 		await tick(50);
 		stdin.write("\r");
 		await tick();
-		expect(onSelect).toHaveBeenCalledWith("alpha");
+		expect(onSelect).toHaveBeenCalledWith("alpha", ["alpha", "beta"]);
 	});
 
 	test("down-arrow then Enter selects the second model", async () => {
@@ -62,7 +62,7 @@ describe("ModelSelect", () => {
 		await tick();
 		stdin.write("\r");
 		await tick();
-		expect(onSelect).toHaveBeenCalledWith("beta");
+		expect(onSelect).toHaveBeenCalledWith("beta", ["alpha", "beta"]);
 	});
 
 	test("fetch rejection calls onError exactly once", async () => {

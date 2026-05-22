@@ -36,7 +36,15 @@ export interface ConfigureResult {
 export interface Credentials {
 	apiKey: string;
 	baseUrl?: string;
+	// The chosen default. Required at the configure-time boundary (enforced
+	// via `requireModel`); optional in the type so the in-flight install
+	// state can carry partial credentials before the model-choice step.
 	model?: string;
+	// The full list of fetched model IDs. Tools that support an explicit
+	// model list (OpenCode today) get every entry; tools with a single
+	// model field (Claude Code, Codex) ignore this and use only `model`.
+	// Absent ⇒ treat as [model], so older call sites stay valid.
+	models?: string[];
 }
 
 // Claude Code's ANTHROPIC_BASE_URL is a server root, not an OpenAI-style /v1
@@ -98,6 +106,7 @@ const OPENCODE_SCHEMA_URL = atob(
 );
 const OPENCODE_K = {
 	schema: atob("JHNjaGVtYQ=="),
+	model: atob("bW9kZWw="),
 	provider: atob("cHJvdmlkZXI="),
 	providerKey: atob("YWlnYXRld2F5"),
 	npm: atob("bnBt"),
@@ -141,6 +150,59 @@ export function getBackupStatus(tool: Tool): BackupStatus[] {
 		return [statusFor("codex-config")];
 	}
 	return [statusFor("opencode-config")];
+}
+
+// Detect which AI tools currently have a CoDev-managed config on disk. Used
+// by `codev model` to know whose configs to rewrite when the user switches
+// the default model. Each marker is something CoDev distinctly writes — the
+// `aigateway` provider id (codex/opencode) or `ANTHROPIC_DEFAULT_OPUS_MODEL`
+// (claude-code) — none of which would appear in a user-authored config.
+export function detectConfiguredTools(): Tool[] {
+	const tools: Tool[] = [];
+	if (isCodevClaudeConfig()) tools.push("claude-code");
+	if (isCodevCodexConfig()) tools.push("codex");
+	if (isCodevOpenCodeConfig()) tools.push("opencode");
+	return tools;
+}
+
+function hasNestedKey(obj: unknown, outer: string, inner: string): boolean {
+	if (!obj || typeof obj !== "object") return false;
+	const next = (obj as Record<string, unknown>)[outer];
+	if (!next || typeof next !== "object") return false;
+	return inner in (next as Record<string, unknown>);
+}
+
+function isCodevClaudeConfig(): boolean {
+	const path = sourcePathOf("claude-settings");
+	if (!existsSync(path)) return false;
+	try {
+		const config = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		return hasNestedKey(config, CLAUDE_K.env, CLAUDE_K.opus);
+	} catch {
+		return false;
+	}
+}
+
+function isCodevCodexConfig(): boolean {
+	const path = sourcePathOf("codex-config");
+	if (!existsSync(path)) return false;
+	try {
+		const config = TOML.parse(readFileSync(path, "utf-8")) as unknown;
+		return hasNestedKey(config, CODEX_K.modelProviders, CODEX_K.providerId);
+	} catch {
+		return false;
+	}
+}
+
+function isCodevOpenCodeConfig(): boolean {
+	const path = sourcePathOf("opencode-config");
+	if (!existsSync(path)) return false;
+	try {
+		const config = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		return hasNestedKey(config, OPENCODE_K.provider, OPENCODE_K.providerKey);
+	} catch {
+		return false;
+	}
 }
 
 function kindForTool(tool: Tool): BackupKind {
@@ -296,10 +358,22 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
 		: AI_GATEWAY_OPENAI_URL;
-	const model = requireModel(creds);
+	const defaultModel = requireModel(creds);
+	// Fall back to [defaultModel] when `models` is unset so callers that don't
+	// know about the list (e.g. older fixtures, the fallback path with no
+	// fetched list) still produce a valid one-entry map.
+	const allModels =
+		creds.models && creds.models.length > 0 ? creds.models : [defaultModel];
+
+	const modelsMap = Object.fromEntries(
+		allModels.map((id) => [id, { [OPENCODE_K.name]: id }]),
+	);
 
 	writeJson(sourcePath, {
 		[OPENCODE_K.schema]: OPENCODE_SCHEMA_URL,
+		// Top-level `model` pins the initial active model OpenCode uses on
+		// launch. Format is `<provider>/<modelId>` per OpenCode's schema.
+		[OPENCODE_K.model]: `${OPENCODE_K.providerKey}/${defaultModel}`,
 		[OPENCODE_K.provider]: {
 			[OPENCODE_K.providerKey]: {
 				[OPENCODE_K.npm]: OPENCODE_K.npmPkg,
@@ -308,11 +382,7 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 					[OPENCODE_K.baseURL]: baseUrl,
 					[OPENCODE_K.apiKey]: creds.apiKey,
 				},
-				[OPENCODE_K.models]: {
-					[model]: {
-						[OPENCODE_K.name]: model,
-					},
-				},
+				[OPENCODE_K.models]: modelsMap,
 			},
 		},
 	});

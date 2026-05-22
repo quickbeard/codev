@@ -174,6 +174,25 @@ describe("configureClaudeCode", () => {
 		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
 		expect(backup.marker).toBe("original");
 	});
+
+	test("uses only `creds.model` even when `models` lists more — Claude Code has no list slot", async () => {
+		const { configureClaudeCode } = await import("@/lib/configure.js");
+		configureClaudeCode({
+			apiKey: "sk-abc",
+			model: "primary",
+			models: ["primary", "secondary", "tertiary"],
+		});
+
+		const filePath = join(tempDir, ".claude", "settings.json");
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		expect(config.env.ANTHROPIC_MODEL).toBe("primary");
+		expect(config.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("primary");
+		expect(config.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("primary");
+		expect(config.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("primary");
+		// No secondary/tertiary should land anywhere in the settings blob.
+		expect(JSON.stringify(config)).not.toContain("secondary");
+		expect(JSON.stringify(config)).not.toContain("tertiary");
+	});
 });
 
 describe("configureOpenCode", () => {
@@ -194,6 +213,51 @@ describe("configureOpenCode", () => {
 		expect(config.provider.aigateway.models["chosen-model"].name).toBe(
 			"chosen-model",
 		);
+		// Top-level `model` pins the active default in <provider>/<modelId> form.
+		expect(config.model).toBe("aigateway/chosen-model");
+	});
+
+	test("writes every fetched model into the provider's models map", async () => {
+		const { configureOpenCode } = await import("@/lib/configure.js");
+		configureOpenCode({
+			apiKey: "sk-xyz",
+			model: "model-a",
+			models: ["model-a", "model-b", "model-c"],
+		});
+
+		const filePath = join(tempDir, ".config", "opencode", "opencode.json");
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		const map = config.provider.aigateway.models;
+		expect(Object.keys(map).sort()).toEqual(["model-a", "model-b", "model-c"]);
+		for (const id of ["model-a", "model-b", "model-c"]) {
+			expect(map[id].name).toBe(id);
+		}
+		// Top-level default still points at the chosen one.
+		expect(config.model).toBe("aigateway/model-a");
+	});
+
+	test("falls back to [model] when `models` is absent (older call sites)", async () => {
+		const { configureOpenCode } = await import("@/lib/configure.js");
+		configureOpenCode({ apiKey: "sk-xyz", model: "solo-model" });
+
+		const filePath = join(tempDir, ".config", "opencode", "opencode.json");
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		const map = config.provider.aigateway.models;
+		expect(Object.keys(map)).toEqual(["solo-model"]);
+	});
+
+	test("treats an empty `models` array as 'no list' and falls back to [model]", async () => {
+		const { configureOpenCode } = await import("@/lib/configure.js");
+		configureOpenCode({
+			apiKey: "sk-xyz",
+			model: "solo-model",
+			models: [],
+		});
+
+		const filePath = join(tempDir, ".config", "opencode", "opencode.json");
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		const map = config.provider.aigateway.models;
+		expect(Object.keys(map)).toEqual(["solo-model"]);
 	});
 
 	test("does not touch ~/.claude.json (OpenCode-only install)", async () => {
@@ -338,6 +402,22 @@ describe("configureCodex", () => {
 
 		const backup = readFileSync(backupPath, "utf-8");
 		expect(backup).toContain('marker = "original"');
+	});
+
+	test("uses only `creds.model` even when `models` lists more — Codex has no list slot", async () => {
+		const { configureCodex } = await import("@/lib/configure.js");
+		configureCodex({
+			apiKey: "sk-codex",
+			model: "primary",
+			models: ["primary", "secondary", "tertiary"],
+		});
+
+		const filePath = join(tempDir, ".codex", "config.toml");
+		const raw = readFileSync(filePath, "utf-8");
+		const config = readCodexToml();
+		expect(config.model).toBe("primary");
+		expect(raw).not.toContain("secondary");
+		expect(raw).not.toContain("tertiary");
 	});
 
 	test("uses supplied baseUrl with /v1 already present", async () => {
@@ -695,5 +775,117 @@ describe("configureOpenCode with manual credentials", () => {
 		expect(config.provider.aigateway.options.baseURL).toBe(
 			"https://example.com/v1",
 		);
+	});
+});
+
+describe("detectConfiguredTools", () => {
+	function seedClaudeWithCodevMarkers() {
+		const dir = join(tempDir, ".claude");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "settings.json"),
+			JSON.stringify({
+				env: {
+					ANTHROPIC_BASE_URL: AI_GATEWAY_URL,
+					ANTHROPIC_API_KEY: "sk",
+					ANTHROPIC_MODEL: "m",
+					ANTHROPIC_DEFAULT_OPUS_MODEL: "m",
+					ANTHROPIC_DEFAULT_SONNET_MODEL: "m",
+					ANTHROPIC_DEFAULT_HAIKU_MODEL: "m",
+				},
+			}),
+		);
+	}
+
+	function seedCodexWithCodevMarkers() {
+		const dir = join(tempDir, ".codex");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			'model = "m"\nmodel_provider = "aigateway"\n[model_providers.aigateway]\nname = "AI Gateway"\n',
+		);
+	}
+
+	function seedOpenCodeWithCodevMarkers() {
+		const dir = join(tempDir, ".config", "opencode");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "opencode.json"),
+			JSON.stringify({
+				$schema: "https://opencode.ai/config.json",
+				model: "aigateway/m",
+				provider: {
+					aigateway: { npm: "@ai-sdk/openai-compatible" },
+				},
+			}),
+		);
+	}
+
+	test("returns [] when no config files exist", async () => {
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools()).toEqual([]);
+	});
+
+	test("detects all three when each tool has CoDev markers", async () => {
+		seedClaudeWithCodevMarkers();
+		seedCodexWithCodevMarkers();
+		seedOpenCodeWithCodevMarkers();
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools().sort()).toEqual([
+			"claude-code",
+			"codex",
+			"opencode",
+		]);
+	});
+
+	test("ignores user-authored configs lacking CoDev markers", async () => {
+		// Claude settings without the ANTHROPIC_DEFAULT_OPUS_MODEL env var that
+		// CoDev distinctively writes.
+		mkdirSync(join(tempDir, ".claude"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".claude", "settings.json"),
+			JSON.stringify({ env: { OTHER_KEY: "x" } }),
+		);
+		// Codex config without the aigateway provider.
+		mkdirSync(join(tempDir, ".codex"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".codex", "config.toml"),
+			'model = "claude-sonnet"\n[model_providers.openai]\nname = "OpenAI"\n',
+		);
+		// OpenCode config without the aigateway provider.
+		mkdirSync(join(tempDir, ".config", "opencode"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".config", "opencode", "opencode.json"),
+			JSON.stringify({ provider: { other: { name: "Other" } } }),
+		);
+
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools()).toEqual([]);
+	});
+
+	test("returns only the subset that has CoDev markers", async () => {
+		seedClaudeWithCodevMarkers();
+		// Codex is user-authored (no aigateway).
+		mkdirSync(join(tempDir, ".codex"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".codex", "config.toml"),
+			'model = "x"\n[model_providers.openai]\nname = "OpenAI"\n',
+		);
+		// OpenCode missing entirely.
+
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools()).toEqual(["claude-code"]);
+	});
+
+	test("malformed config files are treated as unconfigured", async () => {
+		mkdirSync(join(tempDir, ".claude"), { recursive: true });
+		writeFileSync(join(tempDir, ".claude", "settings.json"), "not json{{{");
+		mkdirSync(join(tempDir, ".codex"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".codex", "config.toml"),
+			"this is = not [ valid toml",
+		);
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools()).toEqual([]);
 	});
 });
