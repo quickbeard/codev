@@ -5,7 +5,14 @@ import { printHelp, printVersion } from "@/lib/help.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
 import { runRestore } from "@/lib/restore.js";
 import { runAgent } from "@/lib/run.js";
-import { activationHint, installShims, uninstallShims } from "@/lib/shims.js";
+import {
+	activationHint,
+	detectCodevTools,
+	installShims,
+	SHIM_AGENTS,
+	type ShimAgent,
+	uninstallShims,
+} from "@/lib/shims.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
 import { ModelApp } from "@/ModelApp.js";
 import { RemoveApp } from "@/RemoveApp.js";
@@ -104,7 +111,29 @@ switch (command) {
 	// Hidden: not surfaced in --help or README. Installs/removes PATH shims
 	// that route `claude`/`codex`/`opencode` through codev.
 	case "hook": {
-		const r = installShims();
+		let agents: readonly ShimAgent[];
+		if (args.length === 0) {
+			agents = detectCodevTools();
+			if (agents.length === 0) {
+				console.log(
+					"No CoDev-installed tools found. Run `codev install` first, " +
+						"or specify agents explicitly: `codev hook claude|codex|opencode`.",
+				);
+				process.exit(0);
+			}
+		} else {
+			const invalid = args.filter(
+				(a) => !(SHIM_AGENTS as readonly string[]).includes(a),
+			);
+			if (invalid.length > 0) {
+				console.error(
+					`Unknown agent(s): ${invalid.join(", ")}. Valid: ${SHIM_AGENTS.join(", ")}.`,
+				);
+				process.exit(1);
+			}
+			agents = args as ShimAgent[];
+		}
+		const r = installShims(agents);
 		console.log(`Installed shims in ${r.shimDir}`);
 		for (const path of r.rcFilesUpdated) console.log(`  patched ${path}`);
 		if (r.windowsUserPathUpdated) console.log("  updated user PATH");
