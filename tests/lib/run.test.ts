@@ -80,9 +80,7 @@ describe("runAgent", () => {
 			process.stderr.write = original;
 		}
 		// Unknown commands fall back to the bare cmd as their label.
-		expect(calls.some((m) => m.includes("Starting node with CoDev..."))).toBe(
-			true,
-		);
+		expect(calls.some((m) => m.includes("Starting node..."))).toBe(true);
 	});
 
 	test("uses the friendly product label for known agents", async () => {
@@ -99,8 +97,6 @@ describe("runAgent", () => {
 		} finally {
 			process.stderr.write = original;
 		}
-		expect(
-			calls.some((m) => m.includes("Starting Claude Code with CoDev...")),
-		).toBe(true);
+		expect(calls.some((m) => m.includes("Starting Claude Code..."))).toBe(true);
 	});
 });

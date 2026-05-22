@@ -40,9 +40,9 @@ codev codex --restore
 codev opencode --restore
 ```
 
-Each command removes the active config file and renames the corresponding `*.backup` back into place. If no backup exists, the command prints a "No backup found" message and exits with code 1.
+Each command removes the active config file and renames the corresponding `*.backup` back into place. If you have a session running, you might need to restart it with `claude -c`, `codex resume`, or `opencode -c` to resume your progress.
 
-Or do it manually:
+You can also do it manually:
 
 ```bash
 # Claude Code
@@ -54,8 +54,6 @@ mv ~/.codex/config.toml.backup ~/.codex/config.toml
 # OpenCode
 mv ~/.config/opencode/opencode.json.backup ~/.config/opencode/opencode.json
 ```
-
-If you have a session running, you might need to restart it with `claude -c`, `codex resume`, or `opencode -c` to resume your progress.
 
 ## Removing CoDev entirely
 
