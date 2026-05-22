@@ -6,7 +6,10 @@ import { fetchModels } from "@/lib/proxy.js";
 interface ModelSelectProps {
 	apiKey: string;
 	baseUrl?: string;
-	onSelect: (model: string) => void;
+	// The picked id becomes the default; the full list is passed alongside so
+	// the caller can register every model with the AI tool that supports a
+	// model list (today, OpenCode).
+	onSelect: (model: string, models: string[]) => void;
 	onError: (err: Error) => void;
 	readOnly?: boolean;
 	selected?: string | null;
@@ -57,7 +60,7 @@ export function ModelSelect({
 				setCursor((c) => Math.min(models.length - 1, c + 1));
 			} else if (key.return) {
 				const choice = models[cursor];
-				if (choice) onSelect(choice);
+				if (choice) onSelect(choice, models);
 			}
 		},
 		{ isActive: !readOnly && phase === "ready" },
@@ -103,7 +106,7 @@ export function ModelSelect({
 export function modelSelectTitle(readOnly = false) {
 	return (
 		<Text bold>
-			{"Choose model "}
+			{"Choose default model "}
 			{!readOnly && <Text dimColor>(↑/↓ to move, Enter to confirm)</Text>}
 		</Text>
 	);

@@ -36,7 +36,15 @@ export interface ConfigureResult {
 export interface Credentials {
 	apiKey: string;
 	baseUrl?: string;
+	// The chosen default. Required at the configure-time boundary (enforced
+	// via `requireModel`); optional in the type so the in-flight install
+	// state can carry partial credentials before the model-choice step.
 	model?: string;
+	// The full list of fetched model IDs. Tools that support an explicit
+	// model list (OpenCode today) get every entry; tools with a single
+	// model field (Claude Code, Codex) ignore this and use only `model`.
+	// Absent ⇒ treat as [model], so older call sites stay valid.
+	models?: string[];
 }
 
 // Claude Code's ANTHROPIC_BASE_URL is a server root, not an OpenAI-style /v1
@@ -98,6 +106,7 @@ const OPENCODE_SCHEMA_URL = atob(
 );
 const OPENCODE_K = {
 	schema: atob("JHNjaGVtYQ=="),
+	model: atob("bW9kZWw="),
 	provider: atob("cHJvdmlkZXI="),
 	providerKey: atob("YWlnYXRld2F5"),
 	npm: atob("bnBt"),
@@ -296,10 +305,22 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
 		: AI_GATEWAY_OPENAI_URL;
-	const model = requireModel(creds);
+	const defaultModel = requireModel(creds);
+	// Fall back to [defaultModel] when `models` is unset so callers that don't
+	// know about the list (e.g. older fixtures, the fallback path with no
+	// fetched list) still produce a valid one-entry map.
+	const allModels =
+		creds.models && creds.models.length > 0 ? creds.models : [defaultModel];
+
+	const modelsMap = Object.fromEntries(
+		allModels.map((id) => [id, { [OPENCODE_K.name]: id }]),
+	);
 
 	writeJson(sourcePath, {
 		[OPENCODE_K.schema]: OPENCODE_SCHEMA_URL,
+		// Top-level `model` pins the initial active model OpenCode uses on
+		// launch. Format is `<provider>/<modelId>` per OpenCode's schema.
+		[OPENCODE_K.model]: `${OPENCODE_K.providerKey}/${defaultModel}`,
 		[OPENCODE_K.provider]: {
 			[OPENCODE_K.providerKey]: {
 				[OPENCODE_K.npm]: OPENCODE_K.npmPkg,
@@ -308,11 +329,7 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 					[OPENCODE_K.baseURL]: baseUrl,
 					[OPENCODE_K.apiKey]: creds.apiKey,
 				},
-				[OPENCODE_K.models]: {
-					[model]: {
-						[OPENCODE_K.name]: model,
-					},
-				},
+				[OPENCODE_K.models]: modelsMap,
 			},
 		},
 	});

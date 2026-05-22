@@ -273,10 +273,12 @@ export function InstallApp() {
 	}, []);
 
 	const handleModelSelect = useCallback(
-		(model: string) => {
+		(model: string, models: string[]) => {
 			setChosenModel(model);
-			setCreds((prev) => (prev ? { ...prev, model } : prev));
-			// Persist the full tuple so loadApiKey() returns it on next install.
+			setCreds((prev) => (prev ? { ...prev, model, models } : prev));
+			// Persist apiKey/baseUrl/model to ~/.codev/auth.json. The full list
+			// isn't persisted — it's re-fetched on every install so reinstalls
+			// always see the current set.
 			if (creds) {
 				saveApiKey({ apiKey: creds.apiKey, baseUrl: creds.baseUrl, model });
 			}
@@ -287,13 +289,18 @@ export function InstallApp() {
 
 	// Models fetch failed (network error, timeout, auth error, or empty list).
 	// Fall back to DEFAULT_MODEL and continue — install must not block on a
-	// transient gateway issue. The yellow warning in the model-choice step
-	// tells the user what happened.
+	// transient gateway issue. `models` becomes a one-entry list so OpenCode's
+	// models map ends up with exactly one valid entry. The yellow warning in
+	// the model-choice step tells the user what happened.
 	const handleModelsFailed = useCallback(
 		(err: Error) => {
 			setModelsError(err.message);
 			setChosenModel(DEFAULT_MODEL);
-			setCreds((prev) => (prev ? { ...prev, model: DEFAULT_MODEL } : prev));
+			setCreds((prev) =>
+				prev
+					? { ...prev, model: DEFAULT_MODEL, models: [DEFAULT_MODEL] }
+					: prev,
+			);
 			if (creds) {
 				saveApiKey({
 					apiKey: creds.apiKey,
