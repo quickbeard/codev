@@ -9,6 +9,7 @@ import {
 	fetchCodevConfig,
 	fetchModels,
 	fetchSupabaseSession,
+	isInvalidKeyError,
 	validateApiKey,
 } from "@/lib/proxy.js";
 
@@ -351,5 +352,35 @@ describe("fetchCodevConfig", () => {
 		await expect(fetchCodevConfig("token")).rejects.toThrow(
 			/incomplete payload/,
 		);
+	});
+});
+
+describe("isInvalidKeyError", () => {
+	test("returns true for fetchModels 401 errors", () => {
+		expect(
+			isInvalidKeyError(new Error("Models fetch failed (401): invalid key")),
+		).toBe(true);
+	});
+
+	test("returns true for fetchModels 403 errors", () => {
+		expect(
+			isInvalidKeyError(new Error("Models fetch failed (403): forbidden")),
+		).toBe(true);
+	});
+
+	test("returns false for 5xx errors", () => {
+		expect(
+			isInvalidKeyError(new Error("Models fetch failed (500): Server Error")),
+		).toBe(false);
+	});
+
+	test("returns false for network errors", () => {
+		expect(isInvalidKeyError(new Error("fetch failed"))).toBe(false);
+	});
+
+	test("returns false for non-Error values", () => {
+		expect(isInvalidKeyError("oops")).toBe(false);
+		expect(isInvalidKeyError(null)).toBe(false);
+		expect(isInvalidKeyError(undefined)).toBe(false);
 	});
 });

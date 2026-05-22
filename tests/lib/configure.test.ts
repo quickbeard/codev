@@ -777,3 +777,115 @@ describe("configureOpenCode with manual credentials", () => {
 		);
 	});
 });
+
+describe("detectConfiguredTools", () => {
+	function seedClaudeWithCodevMarkers() {
+		const dir = join(tempDir, ".claude");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "settings.json"),
+			JSON.stringify({
+				env: {
+					ANTHROPIC_BASE_URL: AI_GATEWAY_URL,
+					ANTHROPIC_API_KEY: "sk",
+					ANTHROPIC_MODEL: "m",
+					ANTHROPIC_DEFAULT_OPUS_MODEL: "m",
+					ANTHROPIC_DEFAULT_SONNET_MODEL: "m",
+					ANTHROPIC_DEFAULT_HAIKU_MODEL: "m",
+				},
+			}),
+		);
+	}
+
+	function seedCodexWithCodevMarkers() {
+		const dir = join(tempDir, ".codex");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.toml"),
+			'model = "m"\nmodel_provider = "aigateway"\n[model_providers.aigateway]\nname = "AI Gateway"\n',
+		);
+	}
+
+	function seedOpenCodeWithCodevMarkers() {
+		const dir = join(tempDir, ".config", "opencode");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "opencode.json"),
+			JSON.stringify({
+				$schema: "https://opencode.ai/config.json",
+				model: "aigateway/m",
+				provider: {
+					aigateway: { npm: "@ai-sdk/openai-compatible" },
+				},
+			}),
+		);
+	}
+
+	test("returns [] when no config files exist", async () => {
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools()).toEqual([]);
+	});
+
+	test("detects all three when each tool has CoDev markers", async () => {
+		seedClaudeWithCodevMarkers();
+		seedCodexWithCodevMarkers();
+		seedOpenCodeWithCodevMarkers();
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools().sort()).toEqual([
+			"claude-code",
+			"codex",
+			"opencode",
+		]);
+	});
+
+	test("ignores user-authored configs lacking CoDev markers", async () => {
+		// Claude settings without the ANTHROPIC_DEFAULT_OPUS_MODEL env var that
+		// CoDev distinctively writes.
+		mkdirSync(join(tempDir, ".claude"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".claude", "settings.json"),
+			JSON.stringify({ env: { OTHER_KEY: "x" } }),
+		);
+		// Codex config without the aigateway provider.
+		mkdirSync(join(tempDir, ".codex"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".codex", "config.toml"),
+			'model = "claude-sonnet"\n[model_providers.openai]\nname = "OpenAI"\n',
+		);
+		// OpenCode config without the aigateway provider.
+		mkdirSync(join(tempDir, ".config", "opencode"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".config", "opencode", "opencode.json"),
+			JSON.stringify({ provider: { other: { name: "Other" } } }),
+		);
+
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools()).toEqual([]);
+	});
+
+	test("returns only the subset that has CoDev markers", async () => {
+		seedClaudeWithCodevMarkers();
+		// Codex is user-authored (no aigateway).
+		mkdirSync(join(tempDir, ".codex"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".codex", "config.toml"),
+			'model = "x"\n[model_providers.openai]\nname = "OpenAI"\n',
+		);
+		// OpenCode missing entirely.
+
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools()).toEqual(["claude-code"]);
+	});
+
+	test("malformed config files are treated as unconfigured", async () => {
+		mkdirSync(join(tempDir, ".claude"), { recursive: true });
+		writeFileSync(join(tempDir, ".claude", "settings.json"), "not json{{{");
+		mkdirSync(join(tempDir, ".codex"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".codex", "config.toml"),
+			"this is = not [ valid toml",
+		);
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools()).toEqual([]);
+	});
+});

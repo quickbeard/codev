@@ -152,6 +152,59 @@ export function getBackupStatus(tool: Tool): BackupStatus[] {
 	return [statusFor("opencode-config")];
 }
 
+// Detect which AI tools currently have a CoDev-managed config on disk. Used
+// by `codev model` to know whose configs to rewrite when the user switches
+// the default model. Each marker is something CoDev distinctly writes — the
+// `aigateway` provider id (codex/opencode) or `ANTHROPIC_DEFAULT_OPUS_MODEL`
+// (claude-code) — none of which would appear in a user-authored config.
+export function detectConfiguredTools(): Tool[] {
+	const tools: Tool[] = [];
+	if (isCodevClaudeConfig()) tools.push("claude-code");
+	if (isCodevCodexConfig()) tools.push("codex");
+	if (isCodevOpenCodeConfig()) tools.push("opencode");
+	return tools;
+}
+
+function hasNestedKey(obj: unknown, outer: string, inner: string): boolean {
+	if (!obj || typeof obj !== "object") return false;
+	const next = (obj as Record<string, unknown>)[outer];
+	if (!next || typeof next !== "object") return false;
+	return inner in (next as Record<string, unknown>);
+}
+
+function isCodevClaudeConfig(): boolean {
+	const path = sourcePathOf("claude-settings");
+	if (!existsSync(path)) return false;
+	try {
+		const config = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		return hasNestedKey(config, CLAUDE_K.env, CLAUDE_K.opus);
+	} catch {
+		return false;
+	}
+}
+
+function isCodevCodexConfig(): boolean {
+	const path = sourcePathOf("codex-config");
+	if (!existsSync(path)) return false;
+	try {
+		const config = TOML.parse(readFileSync(path, "utf-8")) as unknown;
+		return hasNestedKey(config, CODEX_K.modelProviders, CODEX_K.providerId);
+	} catch {
+		return false;
+	}
+}
+
+function isCodevOpenCodeConfig(): boolean {
+	const path = sourcePathOf("opencode-config");
+	if (!existsSync(path)) return false;
+	try {
+		const config = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		return hasNestedKey(config, OPENCODE_K.provider, OPENCODE_K.providerKey);
+	} catch {
+		return false;
+	}
+}
+
 function kindForTool(tool: Tool): BackupKind {
 	if (tool === "claude-code") return "claude-settings";
 	if (tool === "codex") return "codex-config";
