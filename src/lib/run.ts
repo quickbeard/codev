@@ -11,7 +11,7 @@ const AGENT_LABEL: Record<string, string> = {
 export function runAgent(cmd: string, args: string[]): Promise<number> {
 	return new Promise((resolve) => {
 		const label = AGENT_LABEL[cmd] ?? cmd;
-		process.stderr.write(`Starting ${label} with CoDev...\n`);
+		process.stderr.write(`Starting ${label}...\n`);
 		// Strip ~/.codev/bin from the child's PATH so spawning `claude` resolves
 		// the real npm-installed binary, not our shim — otherwise the shim would
 		// re-exec `codev claude` and infinite-loop.

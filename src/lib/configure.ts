@@ -52,8 +52,18 @@ function normalizeOpenCodeBaseUrl(url: string): string {
 	return url.endsWith("/") ? `${url}v1` : `${url}/v1`;
 }
 
-const MODEL1 = atob("TWluaU1heA==");
-const MODEL2 = atob("UXdlbi9Rd2VuMy41LTEyMkItQTEwQi1GUDg=");
+// Fallback model used when the `/v1/models` fetch fails (network error,
+// timeout, auth error, or empty response). Install proceeds with this model
+// rather than blocking. Base64-encoded to keep the literal name out of the
+// shipped source.
+export const DEFAULT_MODEL = atob("TWluaU1heA==");
+
+function requireModel(creds: Credentials): string {
+	if (!creds.model) {
+		throw new Error("Credentials.model is required");
+	}
+	return creds.model;
+}
 
 const CLAUDE_SCHEMA_URL = atob(
 	"aHR0cHM6Ly9qc29uLnNjaGVtYXN0b3JlLm9yZy9jbGF1ZGUtY29kZS1zZXR0aW5ncy5qc29u",
@@ -207,7 +217,7 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 	const baseUrl = creds.baseUrl
 		? normalizeClaudeBaseUrl(creds.baseUrl)
 		: AI_GATEWAY_URL;
-	const model = creds.model ?? MODEL1;
+	const model = requireModel(creds);
 
 	writeJson(sourcePath, {
 		[CLAUDE_K.schema]: CLAUDE_SCHEMA_URL,
@@ -260,7 +270,7 @@ export function configureCodex(creds: Credentials): ConfigureResult[] {
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
 		: AI_GATEWAY_OPENAI_URL;
-	const model = creds.model ?? MODEL2;
+	const model = requireModel(creds);
 
 	writeToml(sourcePath, {
 		[CODEX_K.model]: model,
@@ -286,7 +296,7 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
 		: AI_GATEWAY_OPENAI_URL;
-	const model = creds.model ?? MODEL1;
+	const model = requireModel(creds);
 
 	writeJson(sourcePath, {
 		[OPENCODE_K.schema]: OPENCODE_SCHEMA_URL,

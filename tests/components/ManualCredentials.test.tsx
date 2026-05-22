@@ -13,13 +13,12 @@ afterEach(() => {
 });
 
 describe("ManualCredentials", () => {
-	test("renders all three field labels", () => {
+	test("renders both field labels", () => {
 		const onDone = vi.fn();
 		const { lastFrame } = render(<ManualCredentials onDone={onDone} />);
 		const output = lastFrame() ?? "";
 		expect(output).toContain("API URL");
 		expect(output).toContain("API Key");
-		expect(output).toContain("Model");
 	});
 
 	test("typed characters appear in the active field", async () => {
@@ -32,7 +31,7 @@ describe("ManualCredentials", () => {
 		expect(lastFrame() ?? "").toContain("https://example.com/v1");
 	});
 
-	test("Enter advances through all three fields and submits", async () => {
+	test("Enter advances through both fields and submits", async () => {
 		const onDone = vi.fn();
 		const { stdin } = render(<ManualCredentials onDone={onDone} />);
 
@@ -44,16 +43,11 @@ describe("ManualCredentials", () => {
 		await tick();
 		stdin.write("\r");
 		await tick();
-		stdin.write("my-model");
-		await tick();
-		stdin.write("\r");
-		await tick();
 
 		expect(onDone).toHaveBeenCalledTimes(1);
 		expect(onDone).toHaveBeenCalledWith({
 			baseUrl: "https://example.com/v1",
 			apiKey: "sk-test",
-			model: "my-model",
 		});
 	});
 
@@ -69,15 +63,10 @@ describe("ManualCredentials", () => {
 		await tick();
 		stdin.write("\r");
 		await tick();
-		stdin.write(" some-model ");
-		await tick();
-		stdin.write("\r");
-		await tick();
 
 		expect(onDone).toHaveBeenCalledWith({
 			baseUrl: "https://example.com",
 			apiKey: "sk-key",
-			model: "some-model",
 		});
 	});
 

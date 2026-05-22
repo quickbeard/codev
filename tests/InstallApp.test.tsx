@@ -9,6 +9,12 @@ import * as auth from "@/lib/auth.js";
 import * as configure from "@/lib/configure.js";
 import * as proxy from "@/lib/proxy.js";
 
+function stubModels() {
+	return vi
+		.spyOn(proxy, "fetchModels")
+		.mockResolvedValue(["m-alpha", "m-beta"]);
+}
+
 vi.mock("node:child_process", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:child_process")>();
 	return { ...actual, execFile: vi.fn() };
@@ -130,7 +136,6 @@ async function typeManualCreds(
 	stdin: { write: (s: string) => void },
 	baseUrl: string,
 	apiKey: string,
-	model: string,
 ) {
 	stdin.write(baseUrl);
 	await new Promise((r) => setTimeout(r, 30));
@@ -140,8 +145,13 @@ async function typeManualCreds(
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
-	stdin.write(model);
-	await new Promise((r) => setTimeout(r, 30));
+}
+
+// After credentials are known, the model-choice step runs ModelSelect. The
+// component fires fetchModels on mount; this helper waits for the list and
+// picks the first option (Enter on default cursor).
+async function pickFirstModel(stdin: { write: (s: string) => void }) {
+	await new Promise((r) => setTimeout(r, 100));
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
@@ -230,6 +240,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("configure failure does not reach the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
 		vi.spyOn(configure, "configureClaudeCode").mockImplementation(() => {
@@ -239,6 +250,7 @@ describe("InstallApp fail-stop invariant", () => {
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin);
 		await pickNewKey(stdin);
+		await pickFirstModel(stdin);
 		await new Promise((r) => setTimeout(r, 300));
 
 		const history = allFrames(frames);
@@ -249,6 +261,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("successful flow reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
 		const configureSpy = vi
@@ -265,15 +278,20 @@ describe("InstallApp fail-stop invariant", () => {
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin);
 		await pickNewKey(stdin);
+		await pickFirstModel(stdin);
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
-		expect(configureSpy).toHaveBeenCalledWith({ apiKey: "sk-test-123" });
+		expect(configureSpy).toHaveBeenCalledWith({
+			apiKey: "sk-test-123",
+			model: "m-alpha",
+		});
 	});
 
 	test("Codex selection routes to configureCodex and reaches done", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-codex-123");
 		const configureCodexSpy = vi
@@ -291,16 +309,21 @@ describe("InstallApp fail-stop invariant", () => {
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirmCodex(stdin);
 		await pickNewKey(stdin);
+		await pickFirstModel(stdin);
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
 		expect(configureCodexSpy).toHaveBeenCalledTimes(1);
-		expect(configureCodexSpy).toHaveBeenCalledWith({ apiKey: "sk-codex-123" });
+		expect(configureCodexSpy).toHaveBeenCalledWith({
+			apiKey: "sk-codex-123",
+			model: "m-alpha",
+		});
 	});
 
 	test("manual-credentials flow reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		const loginSpy = vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = vi
 			.spyOn(proxy, "fetchApiKey")
@@ -326,8 +349,8 @@ describe("InstallApp fail-stop invariant", () => {
 			stdin,
 			"https://my-gateway.example.com/v1",
 			"sk-manual-123",
-			"custom-model",
 		);
+		await pickFirstModel(stdin);
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);
@@ -338,12 +361,13 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-manual-123",
 			baseUrl: "https://my-gateway.example.com/v1",
-			model: "custom-model",
+			model: "m-alpha",
 		});
 	});
 
 	test("empty-key retry then second empty falls back into manual creds", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("");
 		const configureSpy = vi
@@ -391,8 +415,8 @@ describe("InstallApp fail-stop invariant", () => {
 			stdin,
 			"https://fallback.example.com/v1",
 			"sk-fallback-123",
-			"fallback-model",
 		);
+		await pickFirstModel(stdin);
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);
@@ -402,12 +426,13 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-fallback-123",
 			baseUrl: "https://fallback.example.com/v1",
-			model: "fallback-model",
+			model: "m-alpha",
 		});
 	});
 
 	test("fetch-key retry after failure reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = vi
 			.spyOn(proxy, "fetchApiKey")
@@ -440,15 +465,20 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(allFrames(frames)).toContain("Press Enter to retry, Ctrl-C to quit");
 		expect(configureSpy).not.toHaveBeenCalled();
 
-		// Press Enter to retry; second attempt resolves.
+		// Press Enter to retry; second attempt resolves and the model-choice
+		// step renders.
 		stdin.write("\r");
+		await pickFirstModel(stdin);
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
 		expect(fetchApiKeySpy).toHaveBeenCalledTimes(2);
 		expect(configureSpy).toHaveBeenCalledTimes(1);
-		expect(configureSpy).toHaveBeenCalledWith({ apiKey: "sk-retry-ok" });
+		expect(configureSpy).toHaveBeenCalledWith({
+			apiKey: "sk-retry-ok",
+			model: "m-alpha",
+		});
 	});
 
 	test("skip-configuration flow backs up but does not write configs", async () => {
@@ -540,6 +570,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("login retry after failure reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		const loginSpy = vi
 			.spyOn(auth, "login")
 			.mockImplementationOnce(() => Promise.reject(new Error("network down")))
@@ -570,6 +601,7 @@ describe("InstallApp fail-stop invariant", () => {
 		// Press Enter to retry login.
 		stdin.write("\r");
 		await pickNewKey(stdin);
+		await pickFirstModel(stdin);
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);
@@ -577,15 +609,55 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(loginSpy).toHaveBeenCalledTimes(2);
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 	});
+
+	test("models fetch failure falls back to DEFAULT_MODEL and reaches done", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		vi.spyOn(proxy, "fetchModels").mockRejectedValue(
+			new Error("Models fetch failed (502): boom"),
+		);
+		const configureSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/x",
+					backupPath: "/tmp/x.b",
+					created: true,
+				},
+			]);
+		configureSpy.mockClear();
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin);
+		await pickNewKey(stdin);
+		await new Promise((r) => setTimeout(r, 1_300));
+
+		const history = allFrames(frames);
+		expect(history).toContain("Failed to fetch models");
+		expect(history).toContain("Models fetch failed (502): boom");
+		expect(history).toContain("Using default model");
+		// The default model name itself must not leak into the TUI.
+		expect(history).not.toContain(configure.DEFAULT_MODEL);
+		expect(history).toContain("Happy coding");
+		expect(configureSpy).toHaveBeenCalledWith({
+			apiKey: "sk-test-123",
+			model: configure.DEFAULT_MODEL,
+		});
+	});
 });
 
 describe("InstallApp existing-key path", () => {
 	test("validating an existing key shows it, surfaces the option, and reuses saved creds", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		const loadSpy = vi.spyOn(auth, "loadApiKey").mockReturnValue({
 			apiKey: "sk-existing-123",
 			baseUrl: "https://my-gateway.example.com/v1",
-			model: "saved-model",
+			// Saved model matches one in the stubbed /v1/models list so the
+			// "saved model pre-marked as selected" regression can actually fire.
+			model: "m-alpha",
 		});
 		const validateSpy = vi
 			.spyOn(proxy, "validateApiKey")
@@ -623,6 +695,19 @@ describe("InstallApp existing-key path", () => {
 
 		// Default cursor is on the existing option — Enter selects it directly.
 		stdin.write("\r");
+		// Existing path still routes through model-choice; the user can re-pick.
+		// Wait for the models list to render and capture the frame BEFORE picking.
+		// Even though the saved model ("m-alpha") matches a row in the list, no
+		// model row should be pre-marked with the green ● — that glyph only
+		// shows AFTER the user has actually picked something on this run.
+		await new Promise((r) => setTimeout(r, 100));
+		const beforePick = frames[frames.length - 1] ?? "";
+		expect(beforePick).toContain("m-alpha");
+		expect(beforePick).not.toContain("● m-alpha");
+		expect(beforePick).not.toContain("● m-beta");
+
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 30));
 		await new Promise((r) => setTimeout(r, 1_300));
 
 		const history = allFrames(frames);
@@ -634,10 +719,12 @@ describe("InstallApp existing-key path", () => {
 			"sk-existing-123",
 			"https://my-gateway.example.com/v1",
 		);
+		// Model from the model-choice step overrides the saved model — confirms
+		// existing users can change their model on reinstall.
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-existing-123",
 			baseUrl: "https://my-gateway.example.com/v1",
-			model: "saved-model",
+			model: "m-alpha",
 		});
 	});
 

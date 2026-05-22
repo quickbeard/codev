@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { AI_GATEWAY_URL, PROXY_URL } from "@/lib/const.js";
+import {
+	AI_GATEWAY_OPENAI_URL,
+	AI_GATEWAY_URL,
+	PROXY_URL,
+} from "@/lib/const.js";
 import {
 	fetchApiKey,
 	fetchCodevConfig,
+	fetchModels,
 	fetchSupabaseSession,
 	validateApiKey,
 } from "@/lib/proxy.js";
@@ -159,6 +164,103 @@ describe("validateApiKey", () => {
 		await validateApiKey("sk-w");
 		const [url] = fetchSpy.mock.calls[0] as [string];
 		expect(url.endsWith("/gateway/key/info")).toBe(true);
+	});
+});
+
+describe("fetchModels", () => {
+	test("returns the list of model ids from the gateway /v1/models", async () => {
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, {
+				data: [{ id: "model-a" }, { id: "model-b" }],
+			}),
+		);
+		await expect(fetchModels("sk-test")).resolves.toEqual([
+			"model-a",
+			"model-b",
+		]);
+
+		const [url, init] = fetchSpy.mock.calls[0] as [
+			string,
+			{ method?: string; headers?: Record<string, string> },
+		];
+		expect(url).toBe(`${AI_GATEWAY_OPENAI_URL}/models`);
+		expect(init.method).toBe("GET");
+		expect(init.headers?.Authorization).toBe("Bearer sk-test");
+		expect(init.headers?.accept).toBe("application/json");
+	});
+
+	test("throws on 401 with the gateway-supplied error", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(401, { error: "invalid key" }),
+		);
+		await expect(fetchModels("sk-bad")).rejects.toThrow(
+			"Models fetch failed (401): invalid key",
+		);
+	});
+
+	test("throws on 5xx using statusText when no JSON body", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response("oops", { status: 503, statusText: "Service Unavailable" }),
+		);
+		await expect(fetchModels("sk-x")).rejects.toThrow(
+			"Models fetch failed (503): Service Unavailable",
+		);
+	});
+
+	test("throws on network error", async () => {
+		vi.spyOn(globalThis, "fetch").mockRejectedValue(
+			new Error("fetch failed: ECONNREFUSED"),
+		);
+		await expect(fetchModels("sk-x")).rejects.toThrow("ECONNREFUSED");
+	});
+
+	test("throws when the gateway returns an empty model list", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, { data: [] }),
+		);
+		await expect(fetchModels("sk-x")).rejects.toThrow(
+			"Gateway returned no models",
+		);
+	});
+
+	test("throws when data is missing entirely", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(200, {}));
+		await expect(fetchModels("sk-x")).rejects.toThrow(
+			"Gateway returned no models",
+		);
+	});
+
+	test("filters out entries without an id string", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, {
+				data: [
+					{ id: "good" },
+					{ id: "" },
+					{ id: null },
+					{},
+					{ id: "also-good" },
+				],
+			}),
+		);
+		await expect(fetchModels("sk-x")).resolves.toEqual(["good", "also-good"]);
+	});
+
+	test("uses a manual baseUrl that already has /v1", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, { data: [{ id: "m1" }] }));
+		await fetchModels("sk-y", "https://my-gw.example.com/v1");
+		const [url] = fetchSpy.mock.calls[0] as [string];
+		expect(url).toBe("https://my-gw.example.com/v1/models");
+	});
+
+	test("appends /v1 when the baseUrl lacks it", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, { data: [{ id: "m1" }] }));
+		await fetchModels("sk-z", "https://gw.example.com/");
+		const [url] = fetchSpy.mock.calls[0] as [string];
+		expect(url).toBe("https://gw.example.com/v1/models");
 	});
 });
 

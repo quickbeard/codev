@@ -42,7 +42,7 @@ describe("Configure resume message", () => {
 		const { frames } = render(
 			<Configure
 				tools={["opencode"]}
-				creds={{ apiKey: "sk-test" }}
+				creds={{ apiKey: "sk-test", model: "m" }}
 				shimsInstalled={false}
 				onDone={() => {}}
 			/>,
@@ -62,7 +62,7 @@ describe("Configure resume message", () => {
 			const { frames } = render(
 				<Configure
 					tools={["opencode"]}
-					creds={{ apiKey: "sk-test" }}
+					creds={{ apiKey: "sk-test", model: "m" }}
 					shimsInstalled
 					onDone={() => {}}
 				/>,
@@ -87,7 +87,7 @@ describe("Configure resume message", () => {
 			const { frames } = render(
 				<Configure
 					tools={["opencode"]}
-					creds={{ apiKey: "sk-test" }}
+					creds={{ apiKey: "sk-test", model: "m" }}
 					shimsInstalled
 					onDone={() => {}}
 				/>,
@@ -108,7 +108,7 @@ describe("Configure resume message", () => {
 			const { frames } = render(
 				<Configure
 					tools={["claude-code", "opencode"]}
-					creds={{ apiKey: "sk-test" }}
+					creds={{ apiKey: "sk-test", model: "m" }}
 					shimsInstalled
 					onDone={() => {}}
 				/>,
