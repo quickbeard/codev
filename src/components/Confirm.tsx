@@ -49,7 +49,7 @@ export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
 			})}
 			{!readOnly && (
 				<Box marginTop={1}>
-					<YesNo defaultAnswer="yes" onAnswer={onConfirm} />
+					<YesNo defaultAnswer="no" onAnswer={onConfirm} />
 				</Box>
 			)}
 		</Box>

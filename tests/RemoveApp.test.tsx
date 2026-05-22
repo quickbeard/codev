@@ -71,7 +71,7 @@ describe("RemoveApp", () => {
 		expect(out).toContain(
 			"Everything will be reverted to the pre-CoDev state. Do you want to proceed?",
 		);
-		expect(out).toContain("Continue? [Y/n]");
+		expect(out).toContain("Continue? [y/N]");
 		expect(spy).not.toHaveBeenCalled();
 	});
 
@@ -86,14 +86,13 @@ describe("RemoveApp", () => {
 		);
 	});
 
-	test("Enter alone at the prompt proceeds (default Yes, apt parity)", async () => {
+	test("Enter alone at the prompt aborts (default No)", async () => {
 		const spy = stubRunRemove(SUCCESS_RESULT);
 		const { stdin, frames } = render(<RemoveApp />);
 		stdin.write("\r");
-		await tick(50);
-		const out = flat(history(frames));
-		expect(out).toContain("Removed successfully.");
-		expect(spy).toHaveBeenCalledOnce();
+		await tick(30);
+		expect(history(frames)).toContain("Abort.");
+		expect(spy).not.toHaveBeenCalled();
 	});
 
 	test("'n' + Enter aborts without invoking runRemove", async () => {

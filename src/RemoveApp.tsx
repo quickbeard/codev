@@ -68,7 +68,7 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 					proceed?
 				</Text>
 				<Box marginTop={1}>
-					<YesNo defaultAnswer="yes" onAnswer={handleAnswer} />
+					<YesNo defaultAnswer="no" onAnswer={handleAnswer} />
 				</Box>
 			</Box>
 		);
