@@ -26,17 +26,17 @@ const TOOL_LABEL: Record<Tool, string> = {
 	opencode: "OpenCode config",
 };
 
-// Composes the four reversal steps (logout → unblock → restore-or-delete each
+// Composes the four reversal steps (logout → unhook → restore-or-delete each
 // tool → wipe ~/.codev). Order matters: logout runs first because it reads
 // ~/.codev/auth.json to revoke tokens, and the final step deletes that dir;
-// unblock runs before the wipe because it cleans rc-file sentinel blocks and
+// unhook runs before the wipe because it cleans rc-file sentinel blocks and
 // (on Windows) the user PATH registry entry — state that lives OUTSIDE ~/.codev
 // and wouldn't be reached by rmSync(~/.codev).
 export async function runRemove(): Promise<RemoveResult> {
 	const steps: StepResult[] = [];
 
 	steps.push(await runLogout());
-	steps.push(runUnblock());
+	steps.push(runUnhook());
 	for (const tool of TOOLS) {
 		steps.push(runRestoreOrDelete(tool));
 	}
@@ -56,7 +56,7 @@ async function runLogout(): Promise<StepResult> {
 	}
 }
 
-function runUnblock(): StepResult {
+function runUnhook(): StepResult {
 	try {
 		const r = uninstallShims();
 		const removed = r.shimsRemoved.length;
