@@ -50,6 +50,11 @@ describe("printHelp", () => {
 		expect(output()).toContain("restore [agent]");
 	});
 
+	test("lists the login command", () => {
+		printHelp();
+		expect(output()).toContain("login");
+	});
+
 	test("lists the remove command", () => {
 		printHelp();
 		expect(output()).toContain("remove");
