@@ -23,6 +23,9 @@ beforeEach(() => {
 	// we hand to homedir() — on macOS /var → /private/var.
 	tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-paths-")));
 	vi.stubEnv("HOME", tempHome);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempHome);
 });
 
 afterEach(() => {

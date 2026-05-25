@@ -24,6 +24,9 @@ let errorSpy: MockInstance;
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-restore-test-"));
 	vi.stubEnv("HOME", tempDir);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempDir);
 	logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 	errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });

@@ -218,6 +218,11 @@ export function InstallApp() {
 	);
 
 	const handleFetchKeyDone = useCallback((key: string) => {
+		// Persist the apiKey immediately so a Ctrl-C between here and
+		// model-choice preserves partial progress. base_url/model are still
+		// undefined on this branch (SSO-fetched key uses the default gateway);
+		// the model step will re-save with the full tuple.
+		saveApiKey({ apiKey: key });
 		setCreds({ apiKey: key });
 		setStep("model-choice");
 	}, []);

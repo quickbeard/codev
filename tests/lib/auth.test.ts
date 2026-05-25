@@ -46,6 +46,9 @@ const EXPIRED_AUTH: AuthData = {
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-auth-test-"));
 	vi.stubEnv("HOME", tempDir);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempDir);
 });
 
 afterEach(() => {
@@ -265,14 +268,20 @@ describe("saveCodevConfig", () => {
 		expect(loadApiKey()?.apiKey).toBe("sk-merged");
 	});
 
-	test("file is written with mode 0600", () => {
-		saveCodevConfig({
-			supabaseUrl: "u",
-			supabaseAnonKey: "a",
-		});
-		const stat = statSync(join(tempDir, ".codev", "auth.json"));
-		expect(stat.mode & 0o777).toBe(0o600);
-	});
+	// Skipped on Windows: NTFS has no POSIX permission bits, so fs.chmod's 0o600
+	// becomes 0o666 once read back. The auth file is still ACL-protected to the
+	// user — the assertion is the POSIX-only piece.
+	test.skipIf(process.platform === "win32")(
+		"file is written with mode 0600",
+		() => {
+			saveCodevConfig({
+				supabaseUrl: "u",
+				supabaseAnonKey: "a",
+			});
+			const stat = statSync(join(tempDir, ".codev", "auth.json"));
+			expect(stat.mode & 0o777).toBe(0o600);
+		},
+	);
 });
 
 describe("refreshCodevConfig", () => {
@@ -351,11 +360,16 @@ describe("saveApiKey / loadApiKey", () => {
 		});
 	});
 
-	test("file is written with mode 0600", () => {
-		saveApiKey({ apiKey: "sk-perms" });
-		const stat = statSync(join(tempDir, ".codev", "auth.json"));
-		expect(stat.mode & 0o777).toBe(0o600);
-	});
+	// Skipped on Windows: NTFS has no POSIX permission bits — see the matching
+	// saveCodevConfig case above.
+	test.skipIf(process.platform === "win32")(
+		"file is written with mode 0600",
+		() => {
+			saveApiKey({ apiKey: "sk-perms" });
+			const stat = statSync(join(tempDir, ".codev", "auth.json"));
+			expect(stat.mode & 0o777).toBe(0o600);
+		},
+	);
 });
 
 describe("login CODEV_BYPASS_LOGIN", () => {

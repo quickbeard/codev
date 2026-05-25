@@ -122,12 +122,19 @@ describe("activationHint", () => {
 });
 
 describe("stripShimDirFromPath", () => {
-	test("removes the shim dir entry from a colon-separated PATH", async () => {
-		const { shimDir, stripShimDirFromPath } = await import("@/lib/shims.js");
-		const dir = shimDir();
-		const path = ["/usr/local/bin", dir, "/usr/bin"].join(":");
-		expect(stripShimDirFromPath(path, ":")).toBe("/usr/local/bin:/usr/bin");
-	});
+	// Skipped on Windows: shimDir() returns a path with a drive-letter colon
+	// (e.g. `C:\Users\…\.codev\bin`), which would split into pieces under the
+	// `":"` delimiter and never match. The next test (platform default delimiter)
+	// covers Windows.
+	test.skipIf(process.platform === "win32")(
+		"removes the shim dir entry from a colon-separated PATH",
+		async () => {
+			const { shimDir, stripShimDirFromPath } = await import("@/lib/shims.js");
+			const dir = shimDir();
+			const path = ["/usr/local/bin", dir, "/usr/bin"].join(":");
+			expect(stripShimDirFromPath(path, ":")).toBe("/usr/local/bin:/usr/bin");
+		},
+	);
 
 	test("returns the input untouched when shim dir is absent", async () => {
 		const { stripShimDirFromPath } = await import("@/lib/shims.js");

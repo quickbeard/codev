@@ -1,5 +1,6 @@
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
 	detectInstalledViaNpm,
@@ -40,15 +41,32 @@ interface StubOptions {
 	};
 }
 
+// Normalize execFile call shapes: production code uses `(file, args, opts,
+// cb)` on POSIX and the single-string `(cmdString, opts, cb)` form on Windows
+// (the latter to avoid Node 22's DEP0190 — passing args with shell:true is
+// deprecated). Tests assert on (file, args) regardless of platform.
+function normalizeExecFileCall(callArgs: unknown[]): {
+	file: string;
+	args: string[];
+	cb: ExecCb;
+} {
+	const cb = callArgs[callArgs.length - 1] as ExecCb;
+	const first = callArgs[0] as string;
+	const second = callArgs[1];
+	if (Array.isArray(second)) {
+		return { file: first, args: second as string[], cb };
+	}
+	const tokens = first.split(/\s+/).filter(Boolean);
+	return { file: tokens[0] ?? "", args: tokens.slice(1), cb };
+}
+
 function stubExecFile(opts: StubOptions): ExecCall[] {
 	const calls: ExecCall[] = [];
 	vi.mocked(child_process.execFile).mockImplementation(((
-		file: string,
-		args: string[],
-		...rest: unknown[]
+		...callArgs: unknown[]
 	) => {
+		const { file, args, cb } = normalizeExecFileCall(callArgs);
 		calls.push({ file, args });
-		const cb = rest[rest.length - 1] as ExecCb;
 		const r = opts.handler(file, args);
 		setImmediate(() => cb(r.error ?? null, r.stdout ?? "", r.stderr ?? ""));
 		return {} as unknown as child_process.ChildProcess;
@@ -442,7 +460,7 @@ describe("npm.ts", () => {
 				.mocked(fs.existsSync)
 				.mockImplementation(
 					(p: fs.PathLike) =>
-						String(p) === "/fake/root/@anthropic-ai/claude-code",
+						String(p) === join("/fake/root", "@anthropic-ai", "claude-code"),
 				);
 			const got = await detectInstalledViaNpm("claude-code");
 			expect(got).toBe(true);

@@ -128,10 +128,8 @@ export function ModelApp() {
 
 	const handleFetchKeyDone = useCallback(
 		(apiKey: string) => {
-			// FetchApiKey already wrote `{ apiKey }` to auth.json, clobbering
-			// base_url and model. Re-save with the previous baseUrl/model
-			// preserved so a Ctrl-C between here and `configuring` leaves
-			// auth.json coherent (or as close as it can be).
+			// Persist the new key alongside the previous baseUrl/model so a
+			// Ctrl-C between here and `configuring` leaves auth.json coherent.
 			saveApiKey({
 				apiKey,
 				baseUrl: creds?.baseUrl,

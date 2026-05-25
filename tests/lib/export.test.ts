@@ -82,6 +82,9 @@ beforeEach(() => {
 	projectCwd = join(tempHome, "works", "myapp");
 	mkdirSync(projectCwd, { recursive: true });
 	vi.stubEnv("HOME", tempHome);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempHome);
 	cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(projectCwd);
 });
 

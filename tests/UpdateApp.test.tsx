@@ -1,5 +1,6 @@
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
+import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { UpdateApp } from "@/UpdateApp.js";
@@ -15,6 +16,9 @@ vi.mock("node:fs", async (importOriginal) => {
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
 
+// Normalize execFile call shapes: production code uses (file, args, opts, cb)
+// on POSIX and the single-string (cmdString, opts, cb) form on Windows (to
+// avoid Node 22's DEP0190). The handler always gets (file, args).
 function stubExecFile(
 	handler: (
 		file: string,
@@ -22,11 +26,21 @@ function stubExecFile(
 	) => { error?: Error | null; stdout?: string; stderr?: string },
 ) {
 	vi.mocked(child_process.execFile).mockImplementation(((
-		file: string,
-		args: string[],
-		...rest: unknown[]
+		...callArgs: unknown[]
 	) => {
-		const cb = rest[rest.length - 1] as ExecCb;
+		const cb = callArgs[callArgs.length - 1] as ExecCb;
+		const first = callArgs[0] as string;
+		const second = callArgs[1];
+		let file: string;
+		let args: string[];
+		if (Array.isArray(second)) {
+			file = first;
+			args = second as string[];
+		} else {
+			const tokens = first.split(/\s+/).filter(Boolean);
+			file = tokens[0] ?? "";
+			args = tokens.slice(1);
+		}
 		const r = handler(file, args);
 		setImmediate(() => cb(r.error ?? null, r.stdout ?? "", r.stderr ?? ""));
 		return {} as unknown as child_process.ChildProcess;
@@ -52,7 +66,7 @@ describe("UpdateApp", () => {
 		const existsSpy = vi
 			.mocked(fs.existsSync)
 			.mockImplementation(
-				(p: fs.PathLike) => String(p) === "/fake/root/opencode-ai",
+				(p: fs.PathLike) => String(p) === join("/fake/root", "opencode-ai"),
 			);
 
 		const { frames } = render(<UpdateApp />);
@@ -91,7 +105,7 @@ describe("UpdateApp", () => {
 		const existsSpy = vi
 			.mocked(fs.existsSync)
 			.mockImplementation(
-				(p: fs.PathLike) => String(p) === "/fake/root/opencode-ai",
+				(p: fs.PathLike) => String(p) === join("/fake/root", "opencode-ai"),
 			);
 
 		const { frames } = render(<UpdateApp />);

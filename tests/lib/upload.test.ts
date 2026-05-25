@@ -26,6 +26,9 @@ beforeEach(() => {
 	projectCwd = join(tempHome, "project");
 	mkdirSync(projectCwd, { recursive: true });
 	vi.stubEnv("HOME", tempHome);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempHome);
 	cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(projectCwd);
 });
 
@@ -428,6 +431,77 @@ describe("runUpload", () => {
 		}
 	});
 
+	test("pages conversations via Range headers until a short page arrives", async () => {
+		writeAuth();
+		const path = writeLog("paginated.md", "hello");
+		const abs = realpathSync(path);
+		const hash = fileSha256(path);
+
+		let conversationCalls = 0;
+		const ranges: string[] = [];
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+			input: string | URL | Request,
+			init?: RequestInit,
+		) => {
+			const url =
+				typeof input === "string" || input instanceof URL
+					? String(input)
+					: input.url;
+			if (url.includes("/codev-proxy/supabase/exchange")) {
+				return new Response(
+					JSON.stringify({
+						access_token: "supabase-upload-token",
+						user: { id: "u", email: "u@example.com" },
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/rest/v1/conversations")) {
+				conversationCalls++;
+				const range = (init?.headers as Record<string, string>).Range;
+				if (range) ranges.push(range);
+				// Page 1: a full 1000-row page → loop continues.
+				if (conversationCalls === 1) {
+					const rows = Array.from({ length: 1000 }, (_, i) => ({
+						id: `prev-${i}`,
+						local_file_path: `/tmp/old-${i}.md`,
+						local_content_hash: "old",
+						uploaded_at: null,
+					}));
+					return new Response(JSON.stringify(rows), {
+						headers: { "Content-Type": "application/json" },
+					});
+				}
+				// Page 2: short → contains the row we care about; loop exits.
+				return new Response(
+					JSON.stringify([
+						{
+							id: "match",
+							local_file_path: abs,
+							local_content_hash: hash,
+							uploaded_at: null,
+						},
+					]),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			return new Response("not found", { status: 404 });
+		}) as typeof fetch);
+
+		try {
+			const summary = await runUpload();
+			// The matching row landed on page 2 — filterNewFiles must have seen it
+			// and skipped the upload. With a single-page implementation it would
+			// have been missed and re-uploaded.
+			expect(summary.uploaded).toBe(0);
+			expect(summary.skipped).toBe(1);
+			expect(conversationCalls).toBe(2);
+			expect(ranges).toEqual(["0-999", "1000-1999"]);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
 	test("propagates the second error if refresh-and-retry also fails", async () => {
 		writeAuth();
 		writeLog("doomed.md", "hello");
@@ -525,5 +599,18 @@ describe("isRefreshableError", () => {
 	test("false on non-Error values", () => {
 		expect(isRefreshableError("random string")).toBe(false);
 		expect(isRefreshableError(null)).toBe(false);
+	});
+
+	test("anchors to `failed (NNN)` and ignores stray (NNN) in error bodies", () => {
+		// A 500 whose body happens to contain a literal `(401)` must not be
+		// mistaken for a 401 — the anchor guarantees we only key off the status
+		// thrown by our own callers.
+		expect(
+			isRefreshableError(
+				new Error(
+					"conversations API failed (500): downstream returned (401) for related id",
+				),
+			),
+		).toBe(false);
 	});
 });

@@ -37,13 +37,36 @@ export interface ExecResult {
 
 export function execAsync(file: string, args: string[]): Promise<ExecResult> {
 	return new Promise((resolve) => {
-		execFile(file, args, { shell: USE_SHELL }, (error, stdout, stderr) => {
+		const done = (
+			error: NodeJS.ErrnoException | null,
+			stdout: string,
+			stderr: string,
+		) => {
 			resolve({
-				stdout: stdout?.toString() ?? "",
-				stderr: stderr?.toString() ?? "",
-				error: error as NodeJS.ErrnoException | null,
+				stdout: stdout ?? "",
+				stderr: stderr ?? "",
+				error,
 			});
-		});
+		};
+		// Node 22's DEP0190 deprecates the (file, args, { shell: true })
+		// signature: with shell:true the args are concatenated, not escaped,
+		// so passing them separately implies an escaping that isn't
+		// happening. The fix is to compose the command string ourselves and
+		// pass it as the only positional argument. Our args are simple npm
+		// flags + package names with no whitespace, so naive concatenation
+		// matches what Node was already doing — same semantics, no warning.
+		if (USE_SHELL) {
+			execFile(
+				`${file} ${args.join(" ")}`,
+				{ shell: true, encoding: "utf-8" },
+				(err, stdout, stderr) =>
+					done(err as NodeJS.ErrnoException | null, stdout, stderr),
+			);
+		} else {
+			execFile(file, args, { encoding: "utf-8" }, (err, stdout, stderr) =>
+				done(err as NodeJS.ErrnoException | null, stdout, stderr),
+			);
+		}
 	});
 }
 

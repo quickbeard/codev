@@ -90,10 +90,15 @@ describe("runRemove", () => {
 				readFileSync(join(tempDir, ".config/opencode/opencode.json"), "utf-8"),
 			),
 		).toEqual({ original: "opencode" });
-		// Sentinel block stripped from .zshrc.
-		expect(readFileSync(join(tempDir, ".zshrc"), "utf-8")).not.toContain(
-			"codev shims (managed)",
-		);
+		// Sentinel block stripped from .zshrc. On Windows, uninstallShims
+		// patches the PowerShell profile instead — the .zshrc cleanup is the
+		// POSIX-only contract; check the PS profile (if it was seeded) on
+		// Windows.
+		if (process.platform !== "win32") {
+			expect(readFileSync(join(tempDir, ".zshrc"), "utf-8")).not.toContain(
+				"codev shims (managed)",
+			);
+		}
 	});
 
 	test("no backup but live config exists: deletes live config", async () => {
