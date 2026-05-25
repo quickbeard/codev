@@ -112,7 +112,6 @@ export function InstallApp() {
 	const [existingValid, setExistingValid] = useState(false);
 	const [existingMessage, setExistingMessage] = useState<string | null>(null);
 	const [shimsInstalled, setShimsInstalled] = useState(false);
-	const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
 	const [modelsError, setModelsError] = useState<string | null>(null);
 
@@ -182,15 +181,18 @@ export function InstallApp() {
 			} catch {
 				// Leave shimsInstalled=false so the resume message stays simple.
 			}
+			// Refresh runs invisibly between `installing` and the next visible
+			// step. The user sees install complete, a brief pause, then the
+			// key-choice (or validating-existing) panel — no spinner for the
+			// network call itself. Errors are swallowed by refreshCodevConfig,
+			// so install always advances.
 			setStep("refreshing-config");
 			if (!auth) {
 				// login() runs before this phase, so this is defensive only.
 				advancePastInstall();
 				return;
 			}
-			refreshCodevConfig(auth.access_token, (msg) => {
-				setRefreshMessage(msg);
-			}).finally(() => {
+			refreshCodevConfig(auth.access_token, () => {}).finally(() => {
 				advancePastInstall();
 			});
 		},
@@ -325,23 +327,6 @@ export function InstallApp() {
 						title={<Text bold>Installing packages</Text>}
 					>
 						<Install tools={tools} onDone={handleInstallDone} />
-					</Step>
-				)}
-				{POST_INSTALL.includes(step) && (
-					<Step
-						active={step === "refreshing-config"}
-						title={<Text bold>Refreshing CoDev config</Text>}
-					>
-						{step === "refreshing-config" ? (
-							<Box>
-								<Text color="cyan">
-									<Spinner />
-								</Text>
-								<Text> Fetching Supabase coordinates from proxy...</Text>
-							</Box>
-						) : (
-							<Text dimColor>{refreshMessage ?? "Refreshed."}</Text>
-						)}
 					</Step>
 				)}
 				{POST_REFRESH.includes(step) && savedCreds && (

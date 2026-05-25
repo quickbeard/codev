@@ -378,7 +378,9 @@ export async function login(
 // that's actionable for the user.
 //
 // Callers are responsible for invoking this after a successful login:
-//   - InstallApp runs it as a `refreshing-config` phase right after install
+//   - InstallApp awaits it inline after the npm install completes (no visible
+//     Step — the call blocks the transition to `validating-existing`/
+//     `key-choice` but doesn't render a spinner of its own).
 //   - upload.ts's ensureAuth runs it on the fresh-login branch, and again
 //     in the retry path after a 401/403 from Supabase (config may have
 //     rotated since the last login).

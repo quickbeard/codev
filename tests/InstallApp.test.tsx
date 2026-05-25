@@ -29,7 +29,7 @@ beforeEach(() => {
 	installAppTempHome = mkdtempSync(join(tmpdir(), "codev-installapp-test-"));
 	vi.stubEnv("HOME", installAppTempHome);
 	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
-	// new `refreshing-config` phase doesn't block the test on real fetch.
+	// inline post-install refresh doesn't block tests on a real fetch.
 	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);
 });
 
