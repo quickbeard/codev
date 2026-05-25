@@ -3,7 +3,13 @@ import { InstallApp } from "@/InstallApp.js";
 import { logout } from "@/lib/auth.js";
 import { printHelp, printVersion } from "@/lib/help.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
-import { runRestore } from "@/lib/restore.js";
+import {
+	RESTORE_AGENTS,
+	type RestoreAgent,
+	runRestore,
+	runRestoreAll,
+	toolForRestoreAgent,
+} from "@/lib/restore.js";
 import { runAgent } from "@/lib/run.js";
 import {
 	activationHint,
@@ -168,24 +174,29 @@ switch (command) {
 		}
 		break;
 	}
-	case "claude":
-		if (args[0] === "--restore") {
-			process.exit(runRestore("claude-code"));
+	case "restore": {
+		const agent = args[0];
+		if (agent === undefined) {
+			process.exit(runRestoreAll());
 		}
+		if (!(RESTORE_AGENTS as readonly string[]).includes(agent)) {
+			console.error(
+				`Unknown agent: ${agent}. Valid: ${RESTORE_AGENTS.join(", ")}.`,
+			);
+			process.exit(1);
+		}
+		process.exit(runRestore(toolForRestoreAgent(agent as RestoreAgent)));
+		break;
+	}
+	case "claude":
 		spawnUploadDaemon();
 		process.exit(await runAgent("claude", args));
 		break;
 	case "codex":
-		if (args[0] === "--restore") {
-			process.exit(runRestore("codex"));
-		}
 		spawnUploadDaemon();
 		process.exit(await runAgent("codex", args));
 		break;
 	case "opencode":
-		if (args[0] === "--restore") {
-			process.exit(runRestore("opencode"));
-		}
 		spawnUploadDaemon();
 		process.exit(await runAgent("opencode", args));
 		break;

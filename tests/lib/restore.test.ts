@@ -10,7 +10,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { runRestore } from "@/lib/restore.js";
+import {
+	RESTORE_AGENTS,
+	runRestore,
+	runRestoreAll,
+	toolForRestoreAgent,
+} from "@/lib/restore.js";
 
 let tempDir: string;
 let logSpy: MockInstance;
@@ -154,5 +159,61 @@ describe("runRestore", () => {
 					e.includes(join(tempDir, ".codex", "config.toml.backup")),
 			),
 		).toBe(true);
+	});
+});
+
+describe("toolForRestoreAgent", () => {
+	test("maps launch names to internal Tool names", () => {
+		expect(toolForRestoreAgent("claude")).toBe("claude-code");
+		expect(toolForRestoreAgent("codex")).toBe("codex");
+		expect(toolForRestoreAgent("opencode")).toBe("opencode");
+	});
+
+	test("RESTORE_AGENTS exposes the three launch names", () => {
+		expect([...RESTORE_AGENTS]).toEqual(["claude", "codex", "opencode"]);
+	});
+});
+
+describe("runRestoreAll", () => {
+	test("restores every tool that has a backup and skips the rest", () => {
+		const claude = seedBackup(".claude/settings.json", "c");
+		const opencode = seedBackup(".config/opencode/opencode.json", "o");
+		// Codex intentionally has no backup — should be silently skipped.
+
+		const code = runRestoreAll();
+
+		expect(code).toBe(0);
+		expect(existsSync(claude.backupPath)).toBe(false);
+		expect(existsSync(opencode.backupPath)).toBe(false);
+		// Two "Restored …" lines, no error output.
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(logs.filter((l: string) => l.startsWith("Restored "))).toHaveLength(
+			2,
+		);
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	test("returns 1 and prints a 'nothing to restore' error when no backups exist", () => {
+		const code = runRestoreAll();
+
+		expect(code).toBe(1);
+		const errors = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(errors).toContain("No backups found. Nothing to restore.");
+		expect(logSpy).not.toHaveBeenCalled();
+	});
+
+	test("does not surface a per-tool no-backup error for partial state", () => {
+		// One tool with a backup, two without — restore the one, skip the rest
+		// quietly. No "No backup found at …" lines (those belong to the
+		// single-tool runRestore path).
+		seedBackup(".claude/settings.json", "c");
+
+		const code = runRestoreAll();
+
+		expect(code).toBe(0);
+		const errors = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(errors.some((e: string) => e.startsWith("No backup found at"))).toBe(
+			false,
+		);
 	});
 });
