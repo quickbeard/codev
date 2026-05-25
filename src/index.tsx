@@ -1,5 +1,6 @@
 import { render } from "ink";
 import { InstallApp } from "@/InstallApp.js";
+import { LoginApp } from "@/LoginApp.js";
 import { logout } from "@/lib/auth.js";
 import { printHelp, printVersion } from "@/lib/help.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
@@ -79,6 +80,17 @@ switch (command) {
 	}
 	case "update": {
 		const { waitUntilExit } = render(<UpdateApp />);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
+		break;
+	}
+	case "login": {
+		const force = args.includes("--force") || args.includes("-f");
+		const { waitUntilExit } = render(<LoginApp force={force} />);
 		try {
 			await waitUntilExit();
 			process.exit(0);
