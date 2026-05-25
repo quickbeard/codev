@@ -51,9 +51,13 @@ function allFrames(frames: string[]): string {
 	return frames.join("\n");
 }
 
+// `cleanup()` from ink-testing-library can take >10 s on a heavily-loaded
+// Windows CI runner (vitest's default hookTimeout). Bumping the hook to 30 s
+// covers the worst-case observed (~19 s wall-clock); genuine hangs still
+// surface.
 afterEach(() => {
 	cleanup();
-});
+}, 30_000);
 
 describe("Update", () => {
 	test("renders 'Checking installed agents...' during detection", async () => {

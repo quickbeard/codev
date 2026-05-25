@@ -616,6 +616,10 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(history).not.toContain("Backed up Claude Code");
 	});
 
+	// This test chains advanceThroughConfirm → pickSkip → waitForFrame, each
+	// of which polls up to 3 s. On a heavily-loaded Windows CI runner that
+	// total can exceed vitest's 5 s default test timeout. Bumping to 30 s
+	// matches the worst-case duration observed in CI.
 	test("skip-configuration with no live config reports nothing to back up", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
@@ -639,7 +643,7 @@ describe("InstallApp fail-stop invariant", () => {
 		const history = allFrames(frames);
 		expect(history).toContain("Nothing to back up for Claude Code");
 		expect(history).not.toContain("Backed up Claude Code");
-	});
+	}, 30_000);
 
 	test("login retry after failure reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));

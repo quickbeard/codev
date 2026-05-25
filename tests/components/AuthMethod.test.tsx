@@ -5,9 +5,13 @@ import { AuthMethod } from "@/components/AuthMethod.js";
 const DOWN = `${String.fromCharCode(27)}[B`;
 const UP = `${String.fromCharCode(27)}[A`;
 
+// `cleanup()` from ink-testing-library can take >10 s on a heavily-loaded
+// Windows CI runner (vitest's default hookTimeout). Bumping the hook to 30 s
+// covers the worst-case observed (~19 s wall-clock); genuine hangs still
+// surface.
 afterEach(() => {
 	cleanup();
-});
+}, 30_000);
 
 describe("AuthMethod", () => {
 	test("renders all options", () => {
