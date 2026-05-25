@@ -25,6 +25,9 @@ interface ErrorResponse {
 
 const VALIDATE_TIMEOUT_MS = 5_000;
 const MODELS_TIMEOUT_MS = 10_000;
+// Proxy endpoints are quick: token exchange, a tiny config blob, a Supabase
+// session exchange. Cap so a stalled gateway doesn't hang the CLI.
+const PROXY_TIMEOUT_MS = 10_000;
 
 export interface SupabaseSession {
 	access_token: string;
@@ -41,6 +44,7 @@ export async function fetchApiKey(accessToken: string): Promise<string> {
 	const res = await fetch(`${PROXY_URL()}/auth/exchange`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
+		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {
@@ -63,6 +67,7 @@ export async function fetchCodevConfig(
 	const res = await fetch(`${PROXY_URL()}/config`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
+		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {
@@ -167,6 +172,7 @@ export async function fetchSupabaseSession(
 	const res = await fetch(`${PROXY_URL()}/supabase/exchange`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
+		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {

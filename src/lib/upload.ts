@@ -141,10 +141,16 @@ async function runSupabaseUpload(
 // Narrow refresh trigger: empty cache, or Supabase/proxy returning 401/403.
 // 5xx, network errors, and timeouts are NOT retried — refreshing config won't
 // help and we'd just amplify the outage.
+//
+// The pattern is anchored to `failed (NNN)` — the exact shape every thrower in
+// upload.ts/proxy.ts/auth.ts emits for HTTP errors. A bare `\((\d{3})\)` match
+// would pick up any 3-digit number in parens anywhere in the message (e.g. an
+// id like `(401abc)` is fine — that one doesn't actually match — but a 500 body
+// containing a literal `(403)` reference would falsely trigger a refresh).
 export function isRefreshableError(err: unknown): boolean {
 	const msg = err instanceof Error ? err.message : String(err);
 	if (msg.includes("Missing supabase_")) return true;
-	const match = msg.match(/\((\d{3})\)/);
+	const match = msg.match(/failed \((\d{3})\)/);
 	if (!match?.[1]) return false;
 	const status = Number.parseInt(match[1], 10);
 	return status === 401 || status === 403;
@@ -195,34 +201,51 @@ async function ensureAuth(onStatus: (message: string) => void) {
 	return fresh;
 }
 
+// PostgREST caps responses at a per-deployment max (commonly 1000). Without
+// paging, heavy users miss prior-upload rows and re-upload every daemon tick.
+// Walk Range pages until the server reports we've consumed the whole set, or
+// a safety cap trips.
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 100;
+
 async function fetchExistingUploads(
 	config: SupabaseConfig,
 	accessToken: string,
 ): Promise<Map<string, ExistingConversation>> {
-	const url = new URL(`${config.url}/rest/v1/conversations`);
-	url.searchParams.set(
-		"select",
-		"id,local_file_path,local_content_hash,uploaded_at",
-	);
-	url.searchParams.set("order", "uploaded_at.desc");
-	const res = await fetch(url, {
-		headers: {
-			apikey: config.anonKey,
-			Authorization: `Bearer ${accessToken}`,
-			Accept: "application/json",
-		},
-	});
-	if (!res.ok) {
-		throw new Error(
-			`conversations API failed (${res.status}): ${await res.text()}`,
-		);
-	}
-	const rows = (await res.json()) as ExistingConversation[];
 	const byPath = new Map<string, ExistingConversation>();
-	for (const row of rows) {
-		if (row.local_file_path && !byPath.has(row.local_file_path)) {
-			byPath.set(row.local_file_path, row);
+	for (let page = 0; page < MAX_PAGES; page++) {
+		const from = page * PAGE_SIZE;
+		const to = from + PAGE_SIZE - 1;
+		const url = new URL(`${config.url}/rest/v1/conversations`);
+		url.searchParams.set(
+			"select",
+			"id,local_file_path,local_content_hash,uploaded_at",
+		);
+		url.searchParams.set("order", "uploaded_at.desc");
+		const res = await fetch(url, {
+			headers: {
+				apikey: config.anonKey,
+				Authorization: `Bearer ${accessToken}`,
+				Accept: "application/json",
+				// `count=exact` is expensive on big tables; the Content-Range upper
+				// bound is enough to know when we're done. `*` means "don't count".
+				Prefer: "count=none",
+				Range: `${from}-${to}`,
+			},
+		});
+		if (!res.ok) {
+			throw new Error(
+				`conversations API failed (${res.status}): ${await res.text()}`,
+			);
 		}
+		const rows = (await res.json()) as ExistingConversation[];
+		for (const row of rows) {
+			if (row.local_file_path && !byPath.has(row.local_file_path)) {
+				byPath.set(row.local_file_path, row);
+			}
+		}
+		// A short page means we've drained the table — no further request needed.
+		if (rows.length < PAGE_SIZE) break;
 	}
 	return byPath;
 }

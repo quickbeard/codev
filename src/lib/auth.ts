@@ -1,8 +1,10 @@
+import { randomBytes } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	renameSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -16,6 +18,9 @@ import { fetchCodevConfig } from "@/lib/proxy.js";
 
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
 const REVOKE_TIMEOUT_MS = 3_000;
+// Token/userinfo endpoints are quick handshakes — cap them so a hung IdP
+// surfaces as an error instead of wedging the install flow indefinitely.
+const SSO_FETCH_TIMEOUT_MS = 10_000;
 
 function authFilePath() {
 	return join(homedir(), ".codev", "auth.json");
@@ -112,7 +117,27 @@ function writeAuthFile(data: AuthFileContents): void {
 	// writeFileSync's mode is ignored when the file already exists, so
 	// re-apply permissions explicitly to tighten any pre-existing loose perms.
 	chmodSync(dir, 0o700);
-	writeFileSync(path, JSON.stringify(data, null, 2), { mode: 0o600 });
+	// Atomic write: stage to a per-process tmp sibling, chmod 0o600 *before*
+	// rename so the published file never appears world-readable, then rename
+	// over the live path. A daemon and a foreground command racing to update
+	// auth.json now end up with one whole write or the other — never a torn
+	// merge. The random suffix prevents two concurrent writers from clobbering
+	// each other's temp file mid-flight.
+	const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+	try {
+		writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+		chmodSync(tmp, 0o600);
+		renameSync(tmp, path);
+	} catch (err) {
+		try {
+			unlinkSync(tmp);
+		} catch {
+			// tmp may already be absent.
+		}
+		throw err;
+	}
+	// Re-apply mode after rename for the EXDEV / overwrite case where the
+	// renamed inode inherits the destination's prior mode on some platforms.
 	chmodSync(path, 0o600);
 }
 
@@ -526,6 +551,7 @@ async function exchangeCode(
 			client_id: CLIENT_ID,
 			code_verifier: codeVerifier,
 		}),
+		signal: AbortSignal.timeout(SSO_FETCH_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {
@@ -545,6 +571,7 @@ async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
 			refresh_token: refreshToken,
 			client_id: CLIENT_ID,
 		}),
+		signal: AbortSignal.timeout(SSO_FETCH_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {
@@ -557,6 +584,7 @@ async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
 async function fetchUserInfo(accessToken: string) {
 	const res = await fetch(`${SSO_URL}/userinfo`, {
 		headers: { Authorization: `Bearer ${accessToken}` },
+		signal: AbortSignal.timeout(SSO_FETCH_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {

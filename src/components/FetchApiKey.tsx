@@ -1,7 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useState } from "react";
-import { type AuthData, saveApiKey } from "@/lib/auth.js";
+import type { AuthData } from "@/lib/auth.js";
 import { fetchApiKey } from "@/lib/proxy.js";
 
 interface FetchApiKeyProps {
@@ -10,6 +10,11 @@ interface FetchApiKeyProps {
 	onFallback: () => void;
 }
 
+// Persisting the key is the caller's responsibility — only the caller knows
+// what shape the full credential tuple (apiKey + baseUrl + model) should take
+// at this moment. A previous version called saveApiKey({apiKey}) here, which
+// clobbered base_url/model on disk and forced every caller to immediately
+// re-save with the preserved fields.
 export function FetchApiKey({ auth, onDone, onFallback }: FetchApiKeyProps) {
 	const [pending, setPending] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -30,7 +35,6 @@ export function FetchApiKey({ auth, onDone, onFallback }: FetchApiKeyProps) {
 					setEmptyCount((n) => n + 1);
 					return;
 				}
-				saveApiKey({ apiKey: key });
 				setSucceeded(true);
 				onDone(key);
 			})
