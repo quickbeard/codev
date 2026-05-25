@@ -32,15 +32,21 @@ CoDev will replace `~/.claude/settings.json`, `~/.codex/config.toml`, and `~/.co
 
 ### Restore
 
-Use the built-in restore shortcut:
+Use the built-in `restore` subcommand:
 
 ```bash
-codev claude --restore
-codev codex --restore
-codev opencode --restore
+codev restore claude
+codev restore codex
+codev restore opencode
 ```
 
-Each command removes the active config file and renames the corresponding `*.backup` back into place. If you have a session running, you might need to restart it with `claude -c`, `codex resume`, or `opencode -c` to resume your progress.
+Each command removes the active config file and renames the corresponding `*.backup` back into place. Run it with no agent to restore every agent that has a backup at once:
+
+```bash
+codev restore
+```
+
+If you have a session running, you might need to restart it with `claude -c`, `codex resume`, or `opencode -c` to resume your progress.
 
 You can also do it manually:
 
