@@ -54,7 +54,7 @@ describe("TaskList", () => {
 				onDone={onDone}
 			/>,
 		);
-		await new Promise((r) => setTimeout(r, 50));
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
 		expect(allFrames(frames)).toContain("Installed pkg-a");
 		expect(onDone).toHaveBeenCalledTimes(1);
 		expect(onDone).toHaveBeenCalledWith(true);
