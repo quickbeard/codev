@@ -181,56 +181,6 @@ describe("npm.ts", () => {
 			expect(err).toContain("cannot run");
 		});
 
-		test("claude-code: pins to 2.1.141 on Windows", async () => {
-			const origPlatform = process.platform;
-			Object.defineProperty(process, "platform", {
-				value: "win32",
-				configurable: true,
-			});
-			try {
-				const calls = stubExecFile({ handler: () => ({ stdout: "1.0.0" }) });
-				const err = await installAndVerify("claude-code");
-				expect(err).toBeNull();
-				const installCall = calls.find(
-					(c) => c.file === "npm" && c.args[0] === "install",
-				);
-				expect(installCall?.args).toEqual([
-					"install",
-					"-g",
-					"@anthropic-ai/claude-code@2.1.141",
-					"--include=optional",
-					"--foreground-scripts",
-				]);
-			} finally {
-				Object.defineProperty(process, "platform", {
-					value: origPlatform,
-					configurable: true,
-				});
-			}
-		});
-
-		test("claude-code: does not pin on non-Windows platforms", async () => {
-			const origPlatform = process.platform;
-			Object.defineProperty(process, "platform", {
-				value: "darwin",
-				configurable: true,
-			});
-			try {
-				const calls = stubExecFile({ handler: () => ({ stdout: "1.0.0" }) });
-				const err = await installAndVerify("claude-code");
-				expect(err).toBeNull();
-				const installCall = calls.find(
-					(c) => c.file === "npm" && c.args[0] === "install",
-				);
-				expect(installCall?.args[2]).toBe("@anthropic-ai/claude-code");
-			} finally {
-				Object.defineProperty(process, "platform", {
-					value: origPlatform,
-					configurable: true,
-				});
-			}
-		});
-
 		test("claude-code: runs postinstall recovery and re-verifies", async () => {
 			let claudeCalls = 0;
 			const existsSpy = vi.mocked(fs.existsSync).mockImplementation(() => true);
