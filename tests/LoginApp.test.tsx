@@ -97,13 +97,12 @@ describe("LoginApp", () => {
 		const loginSpy = vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 
 		const { lastFrame } = render(<LoginApp force={true} />);
-		await new Promise((r) => setTimeout(r, 20));
-
-		expect(lastFrame() ?? "").toContain("Signing out previous session");
+		await vi.waitFor(() =>
+			expect(lastFrame() ?? "").toContain("Signing out previous session"),
+		);
 		expect(loginSpy).not.toHaveBeenCalled();
 
 		releaseLogout();
-		await new Promise((r) => setTimeout(r, 50));
-		expect(loginSpy).toHaveBeenCalled();
+		await vi.waitFor(() => expect(loginSpy).toHaveBeenCalled());
 	});
 });
