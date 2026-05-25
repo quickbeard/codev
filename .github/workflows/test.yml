@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  matrix:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -22,3 +22,18 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: node dist/index.js --version
+
+  # Aggregator so the branch-protection rule (which requires a check named
+  # `test`) has something stable to match against — without this, adding/
+  # removing matrix OSes would silently change required check names.
+  test:
+    needs: matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify matrix succeeded
+        run: |
+          if [[ "${{ needs.matrix.result }}" != "success" ]]; then
+            echo "matrix job result: ${{ needs.matrix.result }}"
+            exit 1
+          fi
