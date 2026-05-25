@@ -1,9 +1,11 @@
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { runAgent } from "@/lib/run.js";
+import { runAgent, spawner } from "@/lib/run.js";
 
 let tempDir: string;
 let errorSpy: MockInstance;
@@ -84,6 +86,19 @@ describe("runAgent", () => {
 	});
 
 	test("uses the friendly product label for known agents", async () => {
+		// Stub spawn so we don't launch a real `claude` binary on dev machines
+		// that have Claude Code installed — its stdin handshake would otherwise
+		// hang the test for ~3s (and intermittently exceed the 5s timeout under
+		// full-suite parallelism). The banner write fires before spawn, so
+		// returning a fake child that immediately emits `exit(0)` is enough.
+		const fakeChild = new EventEmitter() as unknown as ChildProcess;
+		const spawnSpy = vi.spyOn(spawner, "spawn").mockImplementation(((
+			..._args: unknown[]
+		) => {
+			queueMicrotask(() => fakeChild.emit("exit", 0, null));
+			return fakeChild;
+		}) as unknown as typeof spawner.spawn);
+
 		const original = process.stderr.write.bind(process.stderr);
 		const calls: string[] = [];
 		process.stderr.write = ((chunk: string | Uint8Array) => {
@@ -91,11 +106,10 @@ describe("runAgent", () => {
 			return true;
 		}) as typeof process.stderr.write;
 		try {
-			// `claude` isn't installed in CI; the spawn will ENOENT after the
-			// banner is already printed.
 			await runAgent("claude", []);
 		} finally {
 			process.stderr.write = original;
+			spawnSpy.mockRestore();
 		}
 		expect(calls.some((m) => m.includes("Starting Claude Code..."))).toBe(true);
 	});
