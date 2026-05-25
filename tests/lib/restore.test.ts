@@ -164,7 +164,7 @@ describe("runRestore", () => {
 		).toBe(true);
 	});
 
-	test("restores VSCode/Continue from backup and prints success", () => {
+	test("restores VS Code/Continue from backup and prints success", () => {
 		const { livePath, backupPath } = seedBackup(
 			".continue/config.yaml",
 			"continue-backup",
@@ -187,7 +187,7 @@ describe("runRestore", () => {
 		).toBe(true);
 	});
 
-	test("returns 1 and prints no-backup error for VSCode/Continue", () => {
+	test("returns 1 and prints no-backup error for VS Code/Continue", () => {
 		const code = runRestore("vscode-continue");
 
 		expect(code).toBe(1);
@@ -207,7 +207,10 @@ describe("toolForRestoreAgent", () => {
 		expect(toolForRestoreAgent("claude")).toBe("claude-code");
 		expect(toolForRestoreAgent("codex")).toBe("codex");
 		expect(toolForRestoreAgent("opencode")).toBe("opencode");
-		expect(toolForRestoreAgent("vscode")).toBe("vscode-continue");
+		// One editor-neutral alias for the shared Continue config — `continue`
+		// routes to `vscode-continue` canonically; the backup file is shared
+		// between VS Code and JetBrains, so either editor Tool would have done.
+		expect(toolForRestoreAgent("continue")).toBe("vscode-continue");
 	});
 
 	test("RESTORE_AGENTS exposes the launch names", () => {
@@ -215,7 +218,7 @@ describe("toolForRestoreAgent", () => {
 			"claude",
 			"codex",
 			"opencode",
-			"vscode",
+			"continue",
 		]);
 	});
 });
@@ -263,7 +266,7 @@ describe("runRestoreAll", () => {
 		);
 	});
 
-	test("sweeps the VSCode/Continue backup alongside the other agents", () => {
+	test("sweeps the Continue backup alongside the other agents", () => {
 		const claude = seedBackup(".claude/settings.json", "c");
 		const cont = seedBackup(".continue/config.yaml", "v");
 
@@ -273,8 +276,30 @@ describe("runRestoreAll", () => {
 		expect(existsSync(claude.backupPath)).toBe(false);
 		expect(existsSync(cont.backupPath)).toBe(false);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		// Two restores total — Claude + Continue. Even though the sweep
+		// iterates both editor Tools (`vscode-continue` + `jetbrains-continue`),
+		// only one of them actually has a backup at any moment: the first
+		// run renames the shared `~/.continue/config.yaml.backup` away and
+		// the second sees no backup and is silently skipped.
 		expect(logs.filter((l: string) => l.startsWith("Restored "))).toHaveLength(
 			2,
 		);
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	test("the `continue` alias rolls back the shared Continue file", () => {
+		// One alias for both editors — `codev restore continue` rolls back
+		// ~/.continue/config.yaml regardless of which editor (or both) the
+		// user actually has installed.
+		const { livePath, backupPath } = seedBackup(
+			".continue/config.yaml",
+			"continue-backup",
+		);
+
+		const code = runRestore(toolForRestoreAgent("continue"));
+
+		expect(code).toBe(0);
+		expect(existsSync(backupPath)).toBe(false);
+		expect(existsSync(livePath)).toBe(true);
 	});
 });

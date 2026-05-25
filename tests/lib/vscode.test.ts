@@ -3,7 +3,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
 	CONTINUE_EXTENSION_ID,
 	installContinueExtension,
-	isCodeCliAvailable,
 } from "@/lib/vscode.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -71,11 +70,11 @@ afterEach(() => {
 });
 
 describe("installContinueExtension", () => {
-	test("invokes `code --install-extension continue.continue --force`", async () => {
+	test("invokes `code --install-extension continue.continue --force` and resolves null on success", async () => {
 		const calls = stubExecFile({ handler: () => ({}) });
-		const err = await installContinueExtension();
+		const result = await installContinueExtension();
 
-		expect(err).toBeNull();
+		expect(result).toBeNull();
 		expect(calls).toEqual([
 			{
 				file: "code",
@@ -84,41 +83,35 @@ describe("installContinueExtension", () => {
 		]);
 	});
 
-	test("returns null silently when `code` is not on PATH (ENOENT)", async () => {
-		// ENOENT == VSCode CLI not installed or not on PATH. That's a soft fail:
-		// the install proceeds, the YAML config is still written, and Configure's
-		// resume hint nudges the user to run the extension install manually.
+	test("returns a soft warning when `code` is not on PATH (ENOENT)", async () => {
+		// ENOENT == VS Code CLI not installed or not on PATH. With option B,
+		// this is a soft fail: the install flow advances, the YAML config is
+		// still written, and Configure surfaces the warning as a manual-install
+		// hint. The warning text mentions `code` so the user knows what to fix.
 		const enoent = Object.assign(new Error("spawn code ENOENT"), {
 			code: "ENOENT",
 		}) as NodeJS.ErrnoException;
 		stubExecFile({ handler: () => ({ error: enoent }) });
-		const err = await installContinueExtension();
-		expect(err).toBeNull();
+		const result = await installContinueExtension();
+		expect(result).toEqual({ warning: "VS Code launcher not found on PATH" });
 	});
 
-	test("surfaces non-ENOENT errors so the install task fails visibly", async () => {
-		// Non-ENOENT errno: a real `code` invocation that returned non-zero
-		// (marketplace down, network failure, …) — `code` field is left unset.
+	test("returns a soft warning on non-ENOENT failures (proxy / marketplace / etc.)", async () => {
+		// A real `code` invocation that returned non-zero. With option B this
+		// is no longer a hard failure — it rides forward as a warning the
+		// Configure step can surface, instead of aborting `codev install`.
 		const fail: NodeJS.ErrnoException = new Error("nope");
 		stubExecFile({
 			handler: () => ({ error: fail, stderr: "marketplace unreachable" }),
 		});
-		const err = await installContinueExtension();
-		expect(err).toBe("marketplace unreachable");
-	});
-});
-
-describe("isCodeCliAvailable", () => {
-	test("returns true when `code --version` succeeds", async () => {
-		stubExecFile({ handler: () => ({ stdout: "1.96.0\n" }) });
-		expect(await isCodeCliAvailable()).toBe(true);
+		const result = await installContinueExtension();
+		expect(result).toEqual({ warning: "marketplace unreachable" });
 	});
 
-	test("returns false when `code` is missing (ENOENT)", async () => {
-		const enoent = Object.assign(new Error("spawn code ENOENT"), {
-			code: "ENOENT",
-		}) as NodeJS.ErrnoException;
-		stubExecFile({ handler: () => ({ error: enoent }) });
-		expect(await isCodeCliAvailable()).toBe(false);
+	test("falls back to error message when stderr is empty", async () => {
+		const fail: NodeJS.ErrnoException = new Error("ECONNRESET");
+		stubExecFile({ handler: () => ({ error: fail, stderr: "" }) });
+		const result = await installContinueExtension();
+		expect(result).toEqual({ warning: "ECONNRESET" });
 	});
 });

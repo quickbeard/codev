@@ -9,8 +9,9 @@ import {
 	PKG,
 } from "@/lib/npm.js";
 
-// `codev update` only manages npm-installed agents. VSCode/Continue updates
-// flow through the VSCode marketplace (autoupdate) — not CoDev's concern.
+// `codev update` only manages npm-installed agents. Continue updates flow
+// through the VS Code Marketplace / JetBrains Marketplace (autoupdate) —
+// not CoDev's concern.
 const ALL_TOOLS: NpmTool[] = ["claude-code", "codex", "opencode"];
 
 type Phase =

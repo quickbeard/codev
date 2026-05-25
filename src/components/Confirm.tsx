@@ -1,6 +1,11 @@
 import { Box, Text } from "ink";
 import { YesNo } from "@/components/YesNo.js";
-import { getBackupStatus, type Tool } from "@/lib/configure.js";
+import {
+	type BackupKind,
+	getBackupStatus,
+	kindForTool,
+	type Tool,
+} from "@/lib/configure.js";
 
 interface ConfirmProps {
 	tools: Tool[];
@@ -8,29 +13,41 @@ interface ConfirmProps {
 	readOnly?: boolean;
 }
 
-const TOOL_LABEL: Record<Tool, string> = {
-	"claude-code": "Claude Code",
-	codex: "Codex",
-	opencode: "OpenCode",
-	"vscode-continue": "VSCode (Continue)",
+// Both Continue editor tools share ~/.continue/config.yaml, so we dedupe
+// rows by BackupKind. That keeps the Confirm view from showing two
+// identical Path/Backup lines and from suggesting two restore commands
+// (which would race each other — the first rolls the shared file back,
+// the second sees no backup and errors).
+const KIND_LABEL: Record<BackupKind, string> = {
+	"claude-settings": "Claude Code",
+	"codex-config": "Codex",
+	"opencode-config": "OpenCode",
+	"continue-config": "Continue",
 };
 
-const RESTORE_CMD: Record<Tool, string> = {
-	"claude-code": "codev restore claude",
-	codex: "codev restore codex",
-	opencode: "codev restore opencode",
-	"vscode-continue": "codev restore vscode",
+// `continue-config` is shared across VS Code + JetBrains, so the restore
+// alias is editor-neutral (`codev restore continue`) rather than naming
+// either editor.
+const KIND_RESTORE_CMD: Record<BackupKind, string> = {
+	"claude-settings": "codev restore claude",
+	"codex-config": "codev restore codex",
+	"opencode-config": "codev restore opencode",
+	"continue-config": "codev restore continue",
 };
 
 export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
+	const seen = new Set<BackupKind>();
 	return (
 		<Box flexDirection="column">
 			{tools.map((tool) => {
+				const kind = kindForTool(tool);
+				if (seen.has(kind)) return null;
+				seen.add(kind);
 				const [status] = getBackupStatus(tool);
 				if (!status) return null;
 				return (
 					<Box key={tool} flexDirection="column">
-						<Text>{`• ${TOOL_LABEL[tool]}`}</Text>
+						<Text>{`• ${KIND_LABEL[kind]}`}</Text>
 						<Text>{`  Path: ${status.sourcePath}`}</Text>
 						{status.hasBackup ? (
 							<Text>
@@ -43,7 +60,7 @@ export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
 						) : null}
 						<Text>
 							{"  You can revert to your previous settings by running "}
-							<Text color="cyan">{RESTORE_CMD[tool]}</Text>
+							<Text color="cyan">{KIND_RESTORE_CMD[kind]}</Text>
 							{". You might need to restart your current session."}
 						</Text>
 					</Box>

@@ -467,14 +467,14 @@ describe("configureCodex", () => {
 	});
 });
 
-describe("configureVscodeContinue", () => {
+describe("configureContinue", () => {
 	function readContinueYaml(): string {
 		return readFileSync(join(tempDir, ".continue", "config.yaml"), "utf-8");
 	}
 
 	test("creates ~/.continue/config.yaml with CoDev marker when file does not exist", async () => {
-		const { configureVscodeContinue } = await import("@/lib/configure.js");
-		configureVscodeContinue({ apiKey: "sk-vscode", model: "chosen-model" });
+		const { configureContinue } = await import("@/lib/configure.js");
+		configureContinue({ apiKey: "sk-vscode", model: "chosen-model" });
 
 		const filePath = join(tempDir, ".continue", "config.yaml");
 		expect(existsSync(filePath)).toBe(true);
@@ -489,8 +489,8 @@ describe("configureVscodeContinue", () => {
 	});
 
 	test("emits one model entry per fetched model", async () => {
-		const { configureVscodeContinue } = await import("@/lib/configure.js");
-		configureVscodeContinue({
+		const { configureContinue } = await import("@/lib/configure.js");
+		configureContinue({
 			apiKey: "sk",
 			model: "model-a",
 			models: ["model-a", "model-b", "model-c"],
@@ -505,8 +505,8 @@ describe("configureVscodeContinue", () => {
 	});
 
 	test("falls back to [model] when `models` is absent", async () => {
-		const { configureVscodeContinue } = await import("@/lib/configure.js");
-		configureVscodeContinue({ apiKey: "sk", model: "solo-model" });
+		const { configureContinue } = await import("@/lib/configure.js");
+		configureContinue({ apiKey: "sk", model: "solo-model" });
 
 		const raw = readContinueYaml();
 		expect(raw.match(/^\s*-\s+name:\s+"solo-model"$/m)).not.toBeNull();
@@ -516,8 +516,8 @@ describe("configureVscodeContinue", () => {
 	});
 
 	test("appends /v1 to a user-supplied base URL with no v1 suffix", async () => {
-		const { configureVscodeContinue } = await import("@/lib/configure.js");
-		configureVscodeContinue({
+		const { configureContinue } = await import("@/lib/configure.js");
+		configureContinue({
 			apiKey: "sk",
 			baseUrl: "https://example.com",
 			model: "m",
@@ -528,8 +528,8 @@ describe("configureVscodeContinue", () => {
 	});
 
 	test("preserves a base URL that already ends with /v1", async () => {
-		const { configureVscodeContinue } = await import("@/lib/configure.js");
-		configureVscodeContinue({
+		const { configureContinue } = await import("@/lib/configure.js");
+		configureContinue({
 			apiKey: "sk",
 			baseUrl: "https://example.com/v1",
 			model: "m",
@@ -547,8 +547,8 @@ describe("configureVscodeContinue", () => {
 		const original = 'name: "User Config"\nmodels:\n  - name: "old"\n';
 		writeFileSync(filePath, original);
 
-		const { configureVscodeContinue } = await import("@/lib/configure.js");
-		const results = configureVscodeContinue({
+		const { configureContinue } = await import("@/lib/configure.js");
+		const results = configureContinue({
 			apiKey: "sk-new",
 			model: "m",
 		});
@@ -570,24 +570,24 @@ describe("configureVscodeContinue", () => {
 		writeFileSync(backupPath, 'name: "original-user-config"\n');
 		writeFileSync(filePath, 'name: "prev-codev-run"\n');
 
-		const { configureVscodeContinue } = await import("@/lib/configure.js");
-		configureVscodeContinue({ apiKey: "sk-new", model: "m" });
+		const { configureContinue } = await import("@/lib/configure.js");
+		configureContinue({ apiKey: "sk-new", model: "m" });
 
 		expect(readFileSync(backupPath, "utf-8")).toContain("original-user-config");
 	});
 
-	test("does not touch ~/.claude.json (VSCode-only install)", async () => {
-		const { configureVscodeContinue } = await import("@/lib/configure.js");
-		configureVscodeContinue({ apiKey: "sk", model: "m" });
+	test("does not touch ~/.claude.json (VS Code-only install)", async () => {
+		const { configureContinue } = await import("@/lib/configure.js");
+		configureContinue({ apiKey: "sk", model: "m" });
 
 		expect(existsSync(join(tempDir, ".claude.json"))).toBe(false);
 	});
 
 	test("escapes embedded double quotes and backslashes in scalar values", async () => {
-		const { configureVscodeContinue } = await import("@/lib/configure.js");
+		const { configureContinue } = await import("@/lib/configure.js");
 		// API keys can in theory contain any byte; the YAML emitter must not
 		// produce a malformed scalar for a key that includes `"` or `\`.
-		configureVscodeContinue({
+		configureContinue({
 			apiKey: 'sk-with-"quote"-and-\\back',
 			model: "m",
 		});
@@ -616,10 +616,10 @@ describe("getBackupStatus", () => {
 		expect(statuses.map((s) => s.kind)).toEqual(["codex-config"]);
 	});
 
-	test("returns vscode-continue-config for vscode-continue", async () => {
+	test("returns continue-config for vscode-continue", async () => {
 		const { getBackupStatus } = await import("@/lib/configure.js");
 		const statuses = getBackupStatus("vscode-continue");
-		expect(statuses.map((s) => s.kind)).toEqual(["vscode-continue-config"]);
+		expect(statuses.map((s) => s.kind)).toEqual(["continue-config"]);
 		expect(statuses[0]?.sourcePath).toBe(
 			join(tempDir, ".continue", "config.yaml"),
 		);
@@ -779,7 +779,7 @@ describe("backupOnly", () => {
 		const results = backupOnly("vscode-continue");
 
 		const result = results[0];
-		expect(result?.kind).toBe("vscode-continue-config");
+		expect(result?.kind).toBe("continue-config");
 		expect(result?.backupPath).toBe(backupPath);
 		expect(result?.created).toBe(true);
 		expect(readFileSync(backupPath, "utf-8")).toBe(original);

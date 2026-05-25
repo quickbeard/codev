@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { Configure } from "@/components/Configure.js";
+import { JETBRAINS_HINT, VSCODE_HINT } from "@/components/Install.js";
 
 let tempHome: string;
 
@@ -125,5 +126,118 @@ describe("Configure resume message", () => {
 		expect(text).toContain("opencode");
 		expect(text).not.toContain("codev claude");
 		expect(text).not.toContain("codev opencode");
+	});
+
+	test("JetBrains entry renders as plain text, not a shell command", async () => {
+		// `your JetBrains IDE` is descriptive prose, not a literal command to
+		// type — keep it out of the cyan code-block styling reserved for
+		// real shell invocations like `claude` / `code` / `exec $SHELL`.
+		const { frames } = render(
+			<Configure
+				tools={["jetbrains-continue"]}
+				creds={{ apiKey: "sk-test", model: "m" }}
+				shimsInstalled={false}
+				onDone={() => {}}
+			/>,
+		);
+		await new Promise((r) => setTimeout(r, 30));
+		const out = lastFrame(frames);
+		expect(out).toContain("your JetBrains IDE");
+		expect(out).toContain("to get started.");
+	});
+});
+
+describe("Configure soft-fail install warnings", () => {
+	test("renders the manual-install hint when a vscode-continue warning is plumbed in", async () => {
+		const { frames } = render(
+			<Configure
+				tools={["vscode-continue"]}
+				creds={{ apiKey: "sk-test", model: "m" }}
+				shimsInstalled={false}
+				installWarnings={[
+					{
+						tool: "vscode-continue",
+						message: "VS Code launcher not found on PATH",
+					},
+				]}
+				onDone={() => {}}
+			/>,
+		);
+		await new Promise((r) => setTimeout(r, 30));
+		// Ink wraps long lines; normalize whitespace before substring-matching
+		// so wrap points don't break the assertion.
+		const out = lastFrame(frames).replace(/\s+/g, " ");
+		expect(out).toContain("Continue extension auto-install did not complete");
+		expect(out).toContain("VS Code launcher not found on PATH");
+		// Shared with the install row (Install.tsx's VSCODE_HINT). Reword
+		// either the constant or this rendering and a different test fails —
+		// the single source of truth is the export from Install.tsx.
+		expect(out).toContain(VSCODE_HINT);
+		expect(out).toContain("code --install-extension continue.continue");
+	});
+
+	test("renders the manual-install hint when a jetbrains-continue warning is plumbed in", async () => {
+		const { frames } = render(
+			<Configure
+				tools={["jetbrains-continue"]}
+				creds={{ apiKey: "sk-test", model: "m" }}
+				shimsInstalled={false}
+				installWarnings={[
+					{
+						tool: "jetbrains-continue",
+						message:
+							"JetBrains launcher not found on PATH (PyCharm / IntelliJ IDEA / GoLand)",
+					},
+				]}
+				onDone={() => {}}
+			/>,
+		);
+		await new Promise((r) => setTimeout(r, 30));
+		// Ink wraps long lines inside the rendered frame, so the warning text
+		// can be split across multiple physical rows. Normalize whitespace
+		// before substring-matching so the assertion stays robust to wrapping.
+		const out = lastFrame(frames).replace(/\s+/g, " ");
+		expect(out).toContain("Continue plugin auto-install did not complete");
+		expect(out).toContain(
+			"JetBrains launcher not found on PATH (PyCharm / IntelliJ IDEA / GoLand)",
+		);
+		expect(out).toContain(JETBRAINS_HINT);
+		expect(out).toContain("installPlugins");
+		expect(out).toContain("com.github.continuedev.continueintellijextension");
+	});
+
+	test("no warning props → no hint rendered", async () => {
+		// Successful auto-install path: install reported null, so no warning
+		// rides forward. Configure must not invent a hint of its own.
+		const { frames } = render(
+			<Configure
+				tools={["vscode-continue"]}
+				creds={{ apiKey: "sk-test", model: "m" }}
+				shimsInstalled={false}
+				onDone={() => {}}
+			/>,
+		);
+		await new Promise((r) => setTimeout(r, 30));
+		const out = lastFrame(frames);
+		expect(out).not.toContain("auto-install did not complete");
+		expect(out).not.toContain(VSCODE_HINT);
+	});
+
+	test("dual-editor selection writes the shared Continue config once", async () => {
+		// Both editor Tools map to the same `continue-config` BackupKind.
+		// Configure's per-kind dedupe must emit a single `Configured Continue`
+		// row rather than two.
+		const { frames } = render(
+			<Configure
+				tools={["vscode-continue", "jetbrains-continue"]}
+				creds={{ apiKey: "sk-test", model: "m" }}
+				shimsInstalled={false}
+				onDone={() => {}}
+			/>,
+		);
+		await new Promise((r) => setTimeout(r, 30));
+		const out = lastFrame(frames);
+		const matches = out.match(/Configured Continue/g) ?? [];
+		expect(matches).toHaveLength(1);
 	});
 });

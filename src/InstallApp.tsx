@@ -9,9 +9,14 @@ import {
 import { Banner } from "@/components/Banner.js";
 import { Configure, configureTitle } from "@/components/Configure.js";
 import { Confirm, confirmTitle } from "@/components/Confirm.js";
+import {
+	type ContinueEditor,
+	ContinueEditorSelect,
+	continueEditorSelectTitle,
+} from "@/components/ContinueEditorSelect.js";
 import { FetchApiKey, fetchApiKeyTitle } from "@/components/FetchApiKey.js";
 import { Frame } from "@/components/Frame.js";
-import { Install } from "@/components/Install.js";
+import { Install, type InstallWarning } from "@/components/Install.js";
 import { Login, loginTitle } from "@/components/Login.js";
 import {
 	ManualCredentials,
@@ -20,7 +25,12 @@ import {
 } from "@/components/ManualCredentials.js";
 import { ModelSelect, modelSelectTitle } from "@/components/ModelSelect.js";
 import { Step } from "@/components/Step.js";
-import { ToolSelect, toolSelectTitle } from "@/components/ToolSelect.js";
+import {
+	CONTINUE_SENTINEL,
+	ToolSelect,
+	type ToolSelectValue,
+	toolSelectTitle,
+} from "@/components/ToolSelect.js";
 import {
 	type ApiKeyCreds,
 	type AuthData,
@@ -34,6 +44,7 @@ import { installShims, toolToShimAgent } from "@/lib/shims.js";
 
 type Phase =
 	| "select"
+	| "continue-editor-select"
 	| "confirm"
 	| "login"
 	| "installing"
@@ -94,6 +105,11 @@ export function InstallApp() {
 	const { exit } = useApp();
 	const [step, setStep] = useState<Phase>("select");
 	const [tools, setTools] = useState<Tool[]>([]);
+	// Whether the user picked the Continue row in ToolSelect — drives
+	// whether ContinueEditorSelect is shown (active or readOnly) in later
+	// phases. Stored separately from `tools` so the readOnly editor sub-step
+	// keeps mounting after the sentinel has been expanded into editor Tools.
+	const [continueSelected, setContinueSelected] = useState(false);
 	const [auth, setAuth] = useState<AuthData | null>(null);
 	const [authMethod, setAuthMethod] = useState<AuthMethodChoice | null>(null);
 	const [creds, setCreds] = useState<Credentials | null>(null);
@@ -103,9 +119,24 @@ export function InstallApp() {
 	const [shimsInstalled, setShimsInstalled] = useState(false);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
 	const [modelsError, setModelsError] = useState<string | null>(null);
+	const [installWarnings, setInstallWarnings] = useState<InstallWarning[]>([]);
 
-	const handleConfirm = (selected: Tool[]) => {
-		setTools(selected);
+	const handleToolSelectConfirm = (selected: ToolSelectValue[]) => {
+		const hasContinue = selected.includes(CONTINUE_SENTINEL);
+		setContinueSelected(hasContinue);
+		if (hasContinue) {
+			// Park the non-sentinel picks until the editor sub-select resolves;
+			// the sub-step appends editor-specific Tools to this base.
+			setTools(selected.filter((v): v is Tool => v !== CONTINUE_SENTINEL));
+			setStep("continue-editor-select");
+			return;
+		}
+		setTools(selected as Tool[]);
+		setStep("confirm");
+	};
+
+	const handleContinueEditorsConfirm = (editors: ContinueEditor[]) => {
+		setTools((prev) => [...prev, ...editors]);
 		setStep("confirm");
 	};
 
@@ -155,9 +186,12 @@ export function InstallApp() {
 	// On failure we set a terminal `*-failed` phase and stop advancing. The
 	// step's error frame stays rendered so the user can read it; exiting the
 	// app is left to the user (Ctrl-C), matching Login/Configure's prior
-	// hang-on-error behavior.
+	// hang-on-error behavior. Soft warnings (Continue extension/plugin
+	// install couldn't run cleanly) ride forward via `warnings` — they
+	// don't block the flow; Configure surfaces them as manual-install hints.
 	const handleInstallDone = useCallback(
-		(success: boolean) => {
+		(success: boolean, warnings: InstallWarning[]) => {
+			setInstallWarnings(warnings);
 			if (!success) {
 				setStep("install-failed");
 				return;
@@ -302,9 +336,23 @@ export function InstallApp() {
 					active={step === "select"}
 					title={toolSelectTitle(step !== "select")}
 				>
-					<ToolSelect onConfirm={handleConfirm} readOnly={step !== "select"} />
+					<ToolSelect
+						onConfirm={handleToolSelectConfirm}
+						readOnly={step !== "select"}
+					/>
 				</Step>
-				{step !== "select" && (
+				{continueSelected && step !== "select" && (
+					<Step
+						active={step === "continue-editor-select"}
+						title={continueEditorSelectTitle(step !== "continue-editor-select")}
+					>
+						<ContinueEditorSelect
+							onConfirm={handleContinueEditorsConfirm}
+							readOnly={step !== "continue-editor-select"}
+						/>
+					</Step>
+				)}
+				{step !== "select" && step !== "continue-editor-select" && (
 					<Step active={step === "confirm"} title={confirmTitle()}>
 						<Confirm
 							tools={tools}
@@ -313,11 +361,13 @@ export function InstallApp() {
 						/>
 					</Step>
 				)}
-				{step !== "select" && step !== "confirm" && (
-					<Step active={step === "login"} title={loginTitle()}>
-						<Login onDone={handleLoginDone} />
-					</Step>
-				)}
+				{step !== "select" &&
+					step !== "continue-editor-select" &&
+					step !== "confirm" && (
+						<Step active={step === "login"} title={loginTitle()}>
+							<Login onDone={handleLoginDone} />
+						</Step>
+					)}
 				{POST_LOGIN.includes(step) && (
 					<Step
 						active={step === "installing"}
@@ -415,6 +465,7 @@ export function InstallApp() {
 								tools={tools}
 								creds={creds}
 								shimsInstalled={shimsInstalled}
+								installWarnings={installWarnings}
 								onDone={handleConfigureDone}
 							/>
 						</Step>

@@ -181,6 +181,59 @@ describe("TaskList", () => {
 		expect(onDone).toHaveBeenCalledWith(false);
 	});
 
+	test("renders a yellow warning row when a task returns `{ warning }`", async () => {
+		// Soft-fail outcome: the install couldn't complete cleanly but isn't
+		// a hard error — `vscode-continue` returns this when `code` isn't on
+		// PATH or the extension install ran and failed. Row paints yellow ⚠
+		// with the warning text, and onDone(true) still fires so the parent
+		// (InstallApp) advances to Configure.
+		const onDone = vi.fn(() => {});
+		const { frames } = render(
+			<TaskList
+				tasks={[
+					{
+						key: "a",
+						label: "pkg-a",
+						run: () => Promise.resolve({ warning: "marketplace unreachable" }),
+					},
+				]}
+				verb={VERB}
+				onDone={onDone}
+			/>,
+		);
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+		const out = allFrames(frames);
+		// Warned row does NOT claim "Installed pkg-a" — the install didn't
+		// actually run cleanly, so the row just surfaces the warning text.
+		expect(out).toContain("Warning: marketplace unreachable");
+		expect(out).not.toContain("Installed pkg-a");
+		expect(onDone).toHaveBeenCalledWith(true);
+	});
+
+	test("warned + done coexist; only hard `failed` flips onDone(false)", async () => {
+		// A mixed run: one warn, one success. The flow keeps moving because
+		// nothing hard-failed. onDone fires with true exactly once after both
+		// rows settle.
+		const onDone = vi.fn(() => {});
+		render(
+			<TaskList
+				tasks={[
+					{
+						key: "a",
+						label: "pkg-a",
+						run: () => Promise.resolve({ warning: "soft" }),
+					},
+					{ key: "b", label: "pkg-b", run: () => Promise.resolve(null) },
+				]}
+				verb={VERB}
+				onDone={onDone}
+			/>,
+		);
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+		expect(onDone).toHaveBeenCalledTimes(1);
+		expect(onDone).toHaveBeenCalledWith(true);
+	});
+
 	test("runs tasks in parallel", async () => {
 		const order: string[] = [];
 		const makeTask = (key: string, delay: number) => ({

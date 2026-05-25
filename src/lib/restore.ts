@@ -1,15 +1,17 @@
 import { getBackupStatus, restoreTool, type Tool } from "@/lib/configure.js";
 
-// Launch-name aliases that `codev restore <name>` accepts. These match what
-// users type to launch agents (`codev claude`, `codev codex`, `codev opencode`)
-// — `claude-code` is an internal Tool name and isn't exposed here. `vscode`
-// has no `codev vscode` launcher (the user opens VSCode directly), but
-// `codev restore vscode` still maps to the vscode-continue Tool for symmetry.
+// Launch-name aliases that `codev restore <name>` accepts. The first three
+// match the agent launchers (`codev claude`, `codev codex`, `codev opencode`)
+// — `claude-code` is an internal Tool name and isn't exposed here. `continue`
+// has no launcher (the user opens VS Code or a JetBrains IDE directly), and
+// the underlying ~/.continue/config.yaml is shared across both editors —
+// hence one editor-neutral alias rather than `vscode` + `jetbrains` for the
+// same backup file.
 export const RESTORE_AGENTS = [
 	"claude",
 	"codex",
 	"opencode",
-	"vscode",
+	"continue",
 ] as const;
 export type RestoreAgent = (typeof RESTORE_AGENTS)[number];
 
@@ -17,7 +19,9 @@ const TOOL_FOR_AGENT: Record<RestoreAgent, Tool> = {
 	claude: "claude-code",
 	codex: "codex",
 	opencode: "opencode",
-	vscode: "vscode-continue",
+	// Either editor Tool routes to the same `continue-config` BackupKind
+	// — picking `vscode-continue` is canonical, not editor-specific.
+	continue: "vscode-continue",
 };
 
 export function toolForRestoreAgent(agent: RestoreAgent): Tool {
@@ -39,7 +43,13 @@ export function runRestore(tool: Tool): number {
 // since "nothing to restore" is the normal state for unconfigured tools).
 // Returns 0 unless at least one tool failed or every tool was skipped.
 export function runRestoreAll(): number {
-	const tools: Tool[] = ["claude-code", "codex", "opencode", "vscode-continue"];
+	const tools: Tool[] = [
+		"claude-code",
+		"codex",
+		"opencode",
+		"vscode-continue",
+		"jetbrains-continue",
+	];
 	let restored = 0;
 	let failed = 0;
 

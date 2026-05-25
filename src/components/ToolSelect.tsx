@@ -2,21 +2,27 @@ import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 import type { Tool } from "@/lib/configure.js";
 
-const TOOLS: { label: string; value: Tool }[] = [
+// Sentinel value emitted when the user picks the `Continue` row. InstallApp
+// expands it via the ContinueEditorSelect sub-step into the editor-specific
+// Tool values (`vscode-continue` and/or `jetbrains-continue`).
+export const CONTINUE_SENTINEL = "continue" as const;
+export type ToolSelectValue = Tool | typeof CONTINUE_SENTINEL;
+
+const TOOLS: { label: string; value: ToolSelectValue }[] = [
 	{ label: "Claude Code", value: "claude-code" },
 	{ label: "Codex", value: "codex" },
 	{ label: "OpenCode", value: "opencode" },
-	{ label: "VSCode (Continue)", value: "vscode-continue" },
+	{ label: "Continue", value: CONTINUE_SENTINEL },
 ];
 
 interface ToolSelectProps {
-	onConfirm: (tools: Tool[]) => void;
+	onConfirm: (tools: ToolSelectValue[]) => void;
 	readOnly?: boolean;
 }
 
 export function ToolSelect({ onConfirm, readOnly = false }: ToolSelectProps) {
 	const [cursor, setCursor] = useState(0);
-	const [selected, setSelected] = useState<Set<Tool>>(new Set());
+	const [selected, setSelected] = useState<Set<ToolSelectValue>>(new Set());
 
 	useInput(
 		(input, key) => {

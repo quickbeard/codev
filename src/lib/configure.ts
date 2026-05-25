@@ -13,12 +13,17 @@ import { dirname, join } from "node:path";
 import TOML from "@iarna/toml";
 import { AI_GATEWAY_OPENAI_URL, AI_GATEWAY_URL } from "@/lib/const.js";
 
-export type Tool = "claude-code" | "codex" | "opencode" | "vscode-continue";
+export type Tool =
+	| "claude-code"
+	| "codex"
+	| "opencode"
+	| "vscode-continue"
+	| "jetbrains-continue";
 export type BackupKind =
 	| "claude-settings"
 	| "codex-config"
 	| "opencode-config"
-	| "vscode-continue-config";
+	| "continue-config";
 
 export interface BackupStatus {
 	kind: BackupKind;
@@ -123,11 +128,12 @@ const OPENCODE_K = {
 	models: atob("bW9kZWxz"),
 };
 
-// Continue (continue.continue VS Code extension) reads ~/.continue/config.yaml.
-// We write the OpenAI-compatible provider shape: each fetched model becomes a
-// top-level entry in `models:`, all sharing the same apiBase + apiKey. The
-// top-level `name` field doubles as the marker `detectConfiguredTools()` uses
-// to recognize CoDev-written Continue configs.
+// Continue reads ~/.continue/config.yaml from a single shared location across
+// editors (VS Code + JetBrains both load this file). We write the OpenAI-
+// compatible provider shape: each fetched model becomes a top-level entry in
+// `models:`, all sharing the same apiBase + apiKey. The top-level `name` field
+// doubles as the marker `detectConfiguredTools()` uses to recognize CoDev-
+// written Continue configs.
 const CONTINUE_K = {
 	name: atob("bmFtZQ=="),
 	version: atob("dmVyc2lvbg=="),
@@ -151,7 +157,7 @@ function sourcePathOf(kind: BackupKind): string {
 			return join(homedir(), ".codex", "config.toml");
 		case "opencode-config":
 			return join(homedir(), ".config", "opencode", "opencode.json");
-		case "vscode-continue-config":
+		case "continue-config":
 			return join(homedir(), ".continue", "config.yaml");
 	}
 }
@@ -177,6 +183,12 @@ export function getBackupStatus(tool: Tool): BackupStatus[] {
 // the default model. Each marker is something CoDev distinctly writes — the
 // `aigateway` provider id (codex/opencode) or `ANTHROPIC_DEFAULT_OPUS_MODEL`
 // (claude-code) — none of which would appear in a user-authored config.
+//
+// Continue's config file is shared across editors (VS Code + JetBrains both
+// read the same ~/.continue/config.yaml), so when the marker is present we
+// return `vscode-continue` as the canonical pointer rather than enumerating
+// both editor tools. That keeps `codev model` rewriting the YAML once
+// instead of twice; the resulting file is correct for both editors.
 export function detectConfiguredTools(): Tool[] {
 	const tools: Tool[] = [];
 	if (isCodevClaudeConfig()) tools.push("claude-code");
@@ -230,7 +242,7 @@ function isCodevOpenCodeConfig(): boolean {
 // check would be overkill. The top-level `name:` we emit is verbatim and
 // distinctive, so a substring search on the raw file is sufficient.
 function isCodevContinueConfig(): boolean {
-	const path = sourcePathOf("vscode-continue-config");
+	const path = sourcePathOf("continue-config");
 	if (!existsSync(path)) return false;
 	try {
 		const raw = readFileSync(path, "utf-8");
@@ -240,7 +252,11 @@ function isCodevContinueConfig(): boolean {
 	}
 }
 
-function kindForTool(tool: Tool): BackupKind {
+// Both `vscode-continue` and `jetbrains-continue` map to the same BackupKind
+// — the YAML file is shared across editors. Callers that iterate `tools` to
+// write configs should dedupe by kind so the file isn't written twice when
+// both editor variants are selected.
+export function kindForTool(tool: Tool): BackupKind {
 	switch (tool) {
 		case "claude-code":
 			return "claude-settings";
@@ -249,7 +265,8 @@ function kindForTool(tool: Tool): BackupKind {
 		case "opencode":
 			return "opencode-config";
 		case "vscode-continue":
-			return "vscode-continue-config";
+		case "jetbrains-continue":
+			return "continue-config";
 	}
 }
 
@@ -400,9 +417,9 @@ export function configureCodex(creds: Credentials): ConfigureResult[] {
 	return [{ kind: "codex-config", sourcePath, backupPath, created }];
 }
 
-export function configureVscodeContinue(creds: Credentials): ConfigureResult[] {
-	const { path: backupPath, created } = ensureBackup("vscode-continue-config");
-	const sourcePath = sourcePathOf("vscode-continue-config");
+export function configureContinue(creds: Credentials): ConfigureResult[] {
+	const { path: backupPath, created } = ensureBackup("continue-config");
+	const sourcePath = sourcePathOf("continue-config");
 	mkdirSync(dirname(sourcePath), { recursive: true });
 
 	// Continue's `openai` provider expects the OpenAI-compatible /v1 endpoint —
@@ -430,7 +447,7 @@ export function configureVscodeContinue(creds: Credentials): ConfigureResult[] {
 	}
 	writeText(sourcePath, `${lines.join("\n")}\n`);
 
-	return [{ kind: "vscode-continue-config", sourcePath, backupPath, created }];
+	return [{ kind: "continue-config", sourcePath, backupPath, created }];
 }
 
 export function configureOpenCode(creds: Credentials): ConfigureResult[] {

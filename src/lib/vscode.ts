@@ -3,28 +3,25 @@ import { execAsync } from "@/lib/npm.js";
 // Marketplace ID for the Continue extension (continuedev.continue).
 export const CONTINUE_EXTENSION_ID = "continue.continue";
 
-// Best-effort install of the Continue VSCode extension. `code` may not be on
-// PATH (user runs VSCode from a launcher; never opened the command palette's
-// "Shell Command: Install 'code' command in PATH"); that's not a CoDev failure,
-// so ENOENT resolves null and the install proceeds. Any other failure (the
-// `code` CLI ran but returned non-zero — network, marketplace down, etc.) is
-// surfaced as an error so the user sees the real cause in the TaskList row.
-export async function installContinueExtension(): Promise<string | null> {
+// Soft-fail outcome: `null` means the extension was installed (or already
+// present and the install reported success). `{ warning }` means we couldn't
+// install — either `code` wasn't on PATH or the install ran and failed
+// (proxy, marketplace down, certificate error, etc.). Either way we let the
+// install flow continue; the YAML config at ~/.continue/config.yaml is the
+// source of truth and Configure surfaces the warning to the user with a
+// manual-install hint. We never want a transient extension-install failure
+// to abort the entire `codev install` flow.
+export type InstallExtensionResult = null | { warning: string };
+
+export async function installContinueExtension(): Promise<InstallExtensionResult> {
 	const r = await execAsync("code", [
 		"--install-extension",
 		CONTINUE_EXTENSION_ID,
 		"--force",
 	]);
 	if (!r.error) return null;
-	if (r.error.code === "ENOENT") return null;
-	return r.stderr.trim() || r.error.message;
-}
-
-// Surface to the UI whether the auto-install path will actually run. Used by
-// the Configure step to decide whether to append a "install Continue manually"
-// hint to its post-install resume message — if `code` is missing entirely, the
-// best-effort install above silently no-ops, and the user needs to know.
-export async function isCodeCliAvailable(): Promise<boolean> {
-	const r = await execAsync("code", ["--version"]);
-	return !r.error;
+	if (r.error.code === "ENOENT") {
+		return { warning: "VS Code launcher not found on PATH" };
+	}
+	return { warning: r.stderr.trim() || r.error.message };
 }
