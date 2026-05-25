@@ -70,7 +70,7 @@ describe("UpdateApp", () => {
 			);
 
 		const { frames } = render(<UpdateApp />);
-		await new Promise((r) => setTimeout(r, 200));
+		await vi.waitFor(() => expect(allFrames(frames)).toContain("Happy coding"));
 
 		const history = allFrames(frames);
 		expect(history).toContain("Updated opencode-ai");
@@ -86,7 +86,7 @@ describe("UpdateApp", () => {
 		const existsSpy = vi.mocked(fs.existsSync).mockReturnValue(false);
 
 		const { frames } = render(<UpdateApp />);
-		await new Promise((r) => setTimeout(r, 200));
+		await vi.waitFor(() => expect(allFrames(frames)).toContain("Happy coding"));
 
 		const history = allFrames(frames);
 		expect(history).toContain("nothing to update");
@@ -109,7 +109,9 @@ describe("UpdateApp", () => {
 			);
 
 		const { frames } = render(<UpdateApp />);
-		await new Promise((r) => setTimeout(r, 200));
+		await vi.waitFor(() =>
+			expect(allFrames(frames)).toContain("Failed to update opencode-ai"),
+		);
 
 		const history = allFrames(frames);
 		expect(history).toContain("Failed to update opencode-ai");
