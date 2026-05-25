@@ -38,6 +38,9 @@ beforeEach(() => {
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
 
+// Normalize execFile call shapes: production code uses (file, args, opts, cb)
+// on POSIX and the single-string (cmdString, opts, cb) form on Windows (to
+// avoid Node 22's DEP0190). The handler always gets (file, args).
 function stubExecFile(
 	handler: (
 		file: string,
@@ -49,11 +52,21 @@ function stubExecFile(
 	},
 ) {
 	vi.mocked(child_process.execFile).mockImplementation(((
-		file: string,
-		args: string[],
-		...rest: unknown[]
+		...callArgs: unknown[]
 	) => {
-		const cb = rest[rest.length - 1] as ExecCb;
+		const cb = callArgs[callArgs.length - 1] as ExecCb;
+		const first = callArgs[0] as string;
+		const second = callArgs[1];
+		let file: string;
+		let args: string[];
+		if (Array.isArray(second)) {
+			file = first;
+			args = second as string[];
+		} else {
+			const tokens = first.split(/\s+/).filter(Boolean);
+			file = tokens[0] ?? "";
+			args = tokens.slice(1);
+		}
 		const r = handler(file, args);
 		setImmediate(() => cb(r.error ?? null, r.stdout ?? "", r.stderr ?? ""));
 		return {} as unknown as child_process.ChildProcess;
