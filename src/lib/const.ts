@@ -4,19 +4,10 @@ import { join } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
 
 const BASE_URL = atob("aHR0cHM6Ly9uZXRtaW5kLnZpZXR0ZWwudm4=");
-const DEFAULT_PROXY_URL = `${BASE_URL}/codev-proxy`;
+export const PROXY_URL = `${BASE_URL}/codev-proxy`;
 export const SSO_URL = `${BASE_URL}/sso-wrapper`;
 export const AI_GATEWAY_URL = `${BASE_URL}/gateway`;
 export const AI_GATEWAY_OPENAI_URL = `${AI_GATEWAY_URL}/v1`;
-
-// Self-hosted deployments can override the proxy URL via the install flow
-// (the ProxyUrl phase persists the choice to ~/.codev/auth.json). We read it
-// inline rather than importing loadProxyUrl from auth.ts to avoid a circular
-// dependency — proxy.ts imports const.ts, and auth.ts imports proxy.ts.
-export function PROXY_URL(): string {
-	const override = readCodevAuthFile()?.proxy_url;
-	return override ?? DEFAULT_PROXY_URL;
-}
 
 export const VERSION: string = pkg.version;
 
@@ -26,7 +17,6 @@ export const HAPPY_CODING = "Happy coding! 🎉";
 interface CodevAuthFile {
 	supabase_url?: string;
 	supabase_anon_key?: string;
-	proxy_url?: string;
 }
 
 function readCodevAuthFile(): CodevAuthFile | null {
