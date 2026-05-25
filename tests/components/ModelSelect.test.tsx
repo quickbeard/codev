@@ -45,10 +45,11 @@ describe("ModelSelect", () => {
 		const { stdin, lastFrame } = render(
 			<ModelSelect apiKey="sk-x" onSelect={onSelect} onError={() => {}} />,
 		);
-		// Poll for the list to render — fixed-time ticks aren't reliable under
-		// Windows CI's slower event loop. The settle inside vi.waitFor also
-		// gives useInput time to register before the Enter press.
+		// Poll for the list to render, then settle so useInput is registered
+		// before the keypress — fixed-time ticks alone aren't reliable on
+		// slower CI runners.
 		await vi.waitFor(() => expect(lastFrame() ?? "").toContain("alpha"));
+		await tick();
 		stdin.write("\r");
 		await vi.waitFor(() => expect(onSelect).toHaveBeenCalled());
 		expect(onSelect).toHaveBeenCalledWith("alpha", ["alpha", "beta"]);
@@ -61,6 +62,11 @@ describe("ModelSelect", () => {
 			<ModelSelect apiKey="sk-x" onSelect={onSelect} onError={() => {}} />,
 		);
 		await vi.waitFor(() => expect(lastFrame() ?? "").toContain("beta"));
+		// Settle before sending the arrow key: vi.waitFor returns the moment
+		// "beta" first appears in a frame, which is the same render that
+		// mounts useInput — without this delay, the arrow press can land
+		// before the handler is active and be dropped.
+		await tick();
 		stdin.write("\x1B[B"); // ↓
 		await tick();
 		stdin.write("\r");
