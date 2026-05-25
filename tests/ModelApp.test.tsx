@@ -108,11 +108,14 @@ describe("ModelApp", () => {
 		const saveSpy = vi.spyOn(auth, "saveApiKey");
 
 		const { stdin, frames } = render(<ModelApp />);
-		// Wait for fetching → model-choice
-		await tick(150);
+		// Wait for the model row itself — "Choose default model" appears while
+		// the spinner is still up and useInput isn't bound yet, so a fixed
+		// tick(150) lands the Enter press before the handler is active on
+		// slow CI runners.
+		await waitForFrame(frames, "○ new-alpha");
 		// Enter on default cursor (first row).
 		stdin.write("\r");
-		await tick(150);
+		await waitForFrame(frames, "Default model updated to");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Default model updated to");
