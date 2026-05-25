@@ -18,6 +18,7 @@ import {
 	configureClaudeCode,
 	configureCodex,
 	configureOpenCode,
+	configureVscodeContinue,
 	detectConfiguredTools,
 	type Tool,
 } from "@/lib/configure.js";
@@ -43,6 +44,7 @@ const TOOL_LABEL: Record<Tool, string> = {
 	"claude-code": "Claude Code",
 	codex: "Codex",
 	opencode: "OpenCode",
+	"vscode-continue": "VSCode (Continue)",
 };
 
 export function ModelApp() {
@@ -181,6 +183,7 @@ export function ModelApp() {
 				if (tool === "claude-code") configureClaudeCode(creds);
 				else if (tool === "codex") configureCodex(creds);
 				else if (tool === "opencode") configureOpenCode(creds);
+				else if (tool === "vscode-continue") configureVscodeContinue(creds);
 			}
 			saveApiKey({
 				apiKey: creds.apiKey,

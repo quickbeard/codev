@@ -165,7 +165,10 @@ export function InstallApp() {
 			// Install PATH shims silently — the final "Done!" message merges the
 			// activation hint in. Best-effort: a failure doesn't block install.
 			try {
-				installShims(tools.map(toolToShimAgent));
+				const shimAgents = tools
+					.map(toolToShimAgent)
+					.filter((agent) => agent !== null);
+				if (shimAgents.length > 0) installShims(shimAgents);
 				setShimsInstalled(true);
 			} catch {
 				// Leave shimsInstalled=false so the resume message stays simple.

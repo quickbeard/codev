@@ -2,15 +2,21 @@ import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
 import { TaskList } from "@/components/TaskList.js";
-import type { Tool } from "@/lib/configure.js";
-import { detectInstalledViaNpm, installAndVerify, PKG } from "@/lib/npm.js";
+import {
+	detectInstalledViaNpm,
+	installAndVerify,
+	type NpmTool,
+	PKG,
+} from "@/lib/npm.js";
 
-const ALL_TOOLS: Tool[] = ["claude-code", "codex", "opencode"];
+// `codev update` only manages npm-installed agents. VSCode/Continue updates
+// flow through the VSCode marketplace (autoupdate) — not CoDev's concern.
+const ALL_TOOLS: NpmTool[] = ["claude-code", "codex", "opencode"];
 
 type Phase =
 	| { kind: "detecting" }
 	| { kind: "nothing" }
-	| { kind: "updating"; tools: Tool[] };
+	| { kind: "updating"; tools: NpmTool[] };
 
 interface UpdateProps {
 	onDone: (success: boolean) => void;

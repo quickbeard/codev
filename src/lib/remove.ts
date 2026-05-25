@@ -18,12 +18,13 @@ export interface RemoveResult {
 	anyFailed: boolean;
 }
 
-const TOOLS: Tool[] = ["claude-code", "codex", "opencode"];
+const TOOLS: Tool[] = ["claude-code", "codex", "opencode", "vscode-continue"];
 
 const TOOL_LABEL: Record<Tool, string> = {
 	"claude-code": "Claude Code config",
 	codex: "Codex config",
 	opencode: "OpenCode config",
+	"vscode-continue": "VSCode (Continue) config",
 };
 
 // Composes the four reversal steps (logout → unhook → restore-or-delete each

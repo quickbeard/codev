@@ -464,6 +464,136 @@ describe("configureCodex", () => {
 	});
 });
 
+describe("configureVscodeContinue", () => {
+	function readContinueYaml(): string {
+		return readFileSync(join(tempDir, ".continue", "config.yaml"), "utf-8");
+	}
+
+	test("creates ~/.continue/config.yaml with CoDev marker when file does not exist", async () => {
+		const { configureVscodeContinue } = await import("@/lib/configure.js");
+		configureVscodeContinue({ apiKey: "sk-vscode", model: "chosen-model" });
+
+		const filePath = join(tempDir, ".continue", "config.yaml");
+		expect(existsSync(filePath)).toBe(true);
+		const raw = readContinueYaml();
+		expect(raw).toContain("CoDev (AI Gateway)");
+		// OpenAI-compatible provider entry pinned to the gateway's /v1 endpoint.
+		expect(raw).toContain(`provider: "openai"`);
+		expect(raw).toContain(`apiBase: "${AI_GATEWAY_OPENAI_URL}"`);
+		expect(raw).toContain(`apiKey: "sk-vscode"`);
+		expect(raw).toContain(`name: "chosen-model"`);
+		expect(raw).toContain(`model: "chosen-model"`);
+	});
+
+	test("emits one model entry per fetched model", async () => {
+		const { configureVscodeContinue } = await import("@/lib/configure.js");
+		configureVscodeContinue({
+			apiKey: "sk",
+			model: "model-a",
+			models: ["model-a", "model-b", "model-c"],
+		});
+
+		const raw = readContinueYaml();
+		// Each model id should appear in its own `name:` entry. Continue's openai
+		// provider lists each model as a top-level entry under `models:`.
+		expect(raw.match(/^\s*-\s+name:\s+"model-a"$/m)).not.toBeNull();
+		expect(raw.match(/^\s*-\s+name:\s+"model-b"$/m)).not.toBeNull();
+		expect(raw.match(/^\s*-\s+name:\s+"model-c"$/m)).not.toBeNull();
+	});
+
+	test("falls back to [model] when `models` is absent", async () => {
+		const { configureVscodeContinue } = await import("@/lib/configure.js");
+		configureVscodeContinue({ apiKey: "sk", model: "solo-model" });
+
+		const raw = readContinueYaml();
+		expect(raw.match(/^\s*-\s+name:\s+"solo-model"$/m)).not.toBeNull();
+		// No other model entries.
+		const matches = raw.match(/^\s*-\s+name:/gm) ?? [];
+		expect(matches.length).toBe(1);
+	});
+
+	test("appends /v1 to a user-supplied base URL with no v1 suffix", async () => {
+		const { configureVscodeContinue } = await import("@/lib/configure.js");
+		configureVscodeContinue({
+			apiKey: "sk",
+			baseUrl: "https://example.com",
+			model: "m",
+		});
+
+		const raw = readContinueYaml();
+		expect(raw).toContain(`apiBase: "https://example.com/v1"`);
+	});
+
+	test("preserves a base URL that already ends with /v1", async () => {
+		const { configureVscodeContinue } = await import("@/lib/configure.js");
+		configureVscodeContinue({
+			apiKey: "sk",
+			baseUrl: "https://example.com/v1",
+			model: "m",
+		});
+
+		const raw = readContinueYaml();
+		expect(raw).toContain(`apiBase: "https://example.com/v1"`);
+	});
+
+	test("replaces existing config.yaml and backs up the file", async () => {
+		const dir = join(tempDir, ".continue");
+		const filePath = join(dir, "config.yaml");
+		const backupPath = `${filePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		const original = 'name: "User Config"\nmodels:\n  - name: "old"\n';
+		writeFileSync(filePath, original);
+
+		const { configureVscodeContinue } = await import("@/lib/configure.js");
+		const results = configureVscodeContinue({
+			apiKey: "sk-new",
+			model: "m",
+		});
+
+		expect(results[0]?.backupPath).toBe(backupPath);
+		expect(existsSync(backupPath)).toBe(true);
+		expect(readFileSync(backupPath, "utf-8")).toBe(original);
+
+		const raw = readContinueYaml();
+		expect(raw).toContain("CoDev (AI Gateway)");
+		expect(raw).not.toContain("User Config");
+	});
+
+	test("preserves a pre-existing config.yaml backup across repeated runs", async () => {
+		const dir = join(tempDir, ".continue");
+		const filePath = join(dir, "config.yaml");
+		const backupPath = `${filePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(backupPath, 'name: "original-user-config"\n');
+		writeFileSync(filePath, 'name: "prev-codev-run"\n');
+
+		const { configureVscodeContinue } = await import("@/lib/configure.js");
+		configureVscodeContinue({ apiKey: "sk-new", model: "m" });
+
+		expect(readFileSync(backupPath, "utf-8")).toContain("original-user-config");
+	});
+
+	test("does not touch ~/.claude.json (VSCode-only install)", async () => {
+		const { configureVscodeContinue } = await import("@/lib/configure.js");
+		configureVscodeContinue({ apiKey: "sk", model: "m" });
+
+		expect(existsSync(join(tempDir, ".claude.json"))).toBe(false);
+	});
+
+	test("escapes embedded double quotes and backslashes in scalar values", async () => {
+		const { configureVscodeContinue } = await import("@/lib/configure.js");
+		// API keys can in theory contain any byte; the YAML emitter must not
+		// produce a malformed scalar for a key that includes `"` or `\`.
+		configureVscodeContinue({
+			apiKey: 'sk-with-"quote"-and-\\back',
+			model: "m",
+		});
+
+		const raw = readContinueYaml();
+		expect(raw).toContain(`apiKey: "sk-with-\\"quote\\"-and-\\\\back"`);
+	});
+});
+
 describe("getBackupStatus", () => {
 	test("returns claude-settings for claude-code", async () => {
 		const { getBackupStatus } = await import("@/lib/configure.js");
@@ -481,6 +611,15 @@ describe("getBackupStatus", () => {
 		const { getBackupStatus } = await import("@/lib/configure.js");
 		const statuses = getBackupStatus("codex");
 		expect(statuses.map((s) => s.kind)).toEqual(["codex-config"]);
+	});
+
+	test("returns vscode-continue-config for vscode-continue", async () => {
+		const { getBackupStatus } = await import("@/lib/configure.js");
+		const statuses = getBackupStatus("vscode-continue");
+		expect(statuses.map((s) => s.kind)).toEqual(["vscode-continue-config"]);
+		expect(statuses[0]?.sourcePath).toBe(
+			join(tempDir, ".continue", "config.yaml"),
+		);
 	});
 
 	test("reports hasSource and hasBackup accurately", async () => {
@@ -553,6 +692,22 @@ describe("restoreTool", () => {
 		);
 	});
 
+	test("replaces the live Continue config.yaml with the backup", async () => {
+		const dir = join(tempDir, ".continue");
+		const livePath = join(dir, "config.yaml");
+		const backupPath = `${livePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(livePath, 'name: "live"\n');
+		writeFileSync(backupPath, 'name: "backup"\n');
+
+		const { restoreTool } = await import("@/lib/configure.js");
+		const result = restoreTool("vscode-continue");
+
+		expect(result.status).toBe("restored");
+		expect(existsSync(backupPath)).toBe(false);
+		expect(readFileSync(livePath, "utf-8")).toContain('name: "backup"');
+	});
+
 	test("replaces the live Codex config.toml with the backup", async () => {
 		const dir = join(tempDir, ".codex");
 		const livePath = join(dir, "config.toml");
@@ -607,6 +762,25 @@ describe("backupOnly", () => {
 		expect(results[0]?.created).toBe(false);
 		expect(readFileSync(backupPath, "utf-8")).toContain('marker = "original"');
 		expect(readFileSync(livePath, "utf-8")).toContain('marker = "current"');
+	});
+
+	test("creates a backup of the live Continue config.yaml without writing config", async () => {
+		const dir = join(tempDir, ".continue");
+		const livePath = join(dir, "config.yaml");
+		const backupPath = `${livePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		const original = 'name: "user-config"\nmodels: []\n';
+		writeFileSync(livePath, original);
+
+		const { backupOnly } = await import("@/lib/configure.js");
+		const results = backupOnly("vscode-continue");
+
+		const result = results[0];
+		expect(result?.kind).toBe("vscode-continue-config");
+		expect(result?.backupPath).toBe(backupPath);
+		expect(result?.created).toBe(true);
+		expect(readFileSync(backupPath, "utf-8")).toBe(original);
+		expect(readFileSync(livePath, "utf-8")).toBe(original);
 	});
 
 	test("returns null backupPath when neither live nor backup file exists", async () => {
@@ -821,21 +995,43 @@ describe("detectConfiguredTools", () => {
 		);
 	}
 
+	function seedContinueWithCodevMarkers() {
+		const dir = join(tempDir, ".continue");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.yaml"),
+			'name: "CoDev (AI Gateway)"\nversion: "0.0.1"\nschema: "v1"\nmodels:\n  - name: "m"\n',
+		);
+	}
+
 	test("returns [] when no config files exist", async () => {
 		const { detectConfiguredTools } = await import("@/lib/configure.js");
 		expect(detectConfiguredTools()).toEqual([]);
 	});
 
-	test("detects all three when each tool has CoDev markers", async () => {
+	test("detects all four when each tool has CoDev markers", async () => {
 		seedClaudeWithCodevMarkers();
 		seedCodexWithCodevMarkers();
 		seedOpenCodeWithCodevMarkers();
+		seedContinueWithCodevMarkers();
 		const { detectConfiguredTools } = await import("@/lib/configure.js");
 		expect(detectConfiguredTools().sort()).toEqual([
 			"claude-code",
 			"codex",
 			"opencode",
+			"vscode-continue",
 		]);
+	});
+
+	test("ignores a Continue config without the CoDev marker", async () => {
+		const dir = join(tempDir, ".continue");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "config.yaml"),
+			'name: "User Config"\nmodels:\n  - name: "m"\n',
+		);
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools()).toEqual([]);
 	});
 
 	test("ignores user-authored configs lacking CoDev markers", async () => {

@@ -3,13 +3,23 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Tool } from "@/lib/configure.js";
 
-export const PKG: Record<Tool, string> = {
+// Tools installed via npm-global. `vscode-continue` is a VSCode extension,
+// not an npm package — keep it out of these maps so callers can't accidentally
+// run `npm install -g vscode-continue` and the type checker enforces routing
+// to lib/vscode.ts for that path.
+export type NpmTool = Exclude<Tool, "vscode-continue">;
+
+export function isNpmTool(tool: Tool): tool is NpmTool {
+	return tool !== "vscode-continue";
+}
+
+export const PKG: Record<NpmTool, string> = {
 	"claude-code": "@anthropic-ai/claude-code",
 	opencode: "opencode-ai",
 	codex: "@openai/codex",
 };
 
-export const CLI: Record<Tool, string> = {
+export const CLI: Record<NpmTool, string> = {
 	"claude-code": "claude",
 	opencode: "opencode",
 	codex: "codex",
@@ -61,7 +71,7 @@ export async function npmGlobalRoot(): Promise<string | null> {
 	return root || null;
 }
 
-export async function verifyInstall(tool: Tool): Promise<string | null> {
+export async function verifyInstall(tool: NpmTool): Promise<string | null> {
 	const r = await execAsync(CLI[tool], ["--version"]);
 	if (!r.error) return null;
 	return r.stderr.trim() || r.error.message;
@@ -105,7 +115,7 @@ export async function runCodexWindowsRecovery(): Promise<string | null> {
 	return r.stderr.trim() || r.error.message;
 }
 
-export async function installAndVerify(tool: Tool): Promise<string | null> {
+export async function installAndVerify(tool: NpmTool): Promise<string | null> {
 	const installErr = await installPackage(PKG[tool]);
 	if (installErr) return installErr;
 
@@ -139,7 +149,7 @@ export async function installAndVerify(tool: Tool): Promise<string | null> {
 	return `installed but '${CLI[tool]}' fails: ${firstVerify}`;
 }
 
-export async function detectInstalledViaNpm(tool: Tool): Promise<boolean> {
+export async function detectInstalledViaNpm(tool: NpmTool): Promise<boolean> {
 	const root = await npmGlobalRoot();
 	if (!root) return false;
 	const pkgDir = join(root, ...PKG[tool].split("/"));

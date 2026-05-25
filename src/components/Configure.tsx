@@ -8,9 +8,11 @@ import {
 	configureClaudeCode,
 	configureCodex,
 	configureOpenCode,
+	configureVscodeContinue,
 	type Tool,
 } from "@/lib/configure.js";
 import { HAPPY_CODING, HELP_HINT } from "@/lib/const.js";
+import { CONTINUE_EXTENSION_ID, isCodeCliAvailable } from "@/lib/vscode.js";
 
 interface ConfigureProps {
 	tools: Tool[];
@@ -28,22 +30,28 @@ const LABEL: Record<BackupKind, string> = {
 	"claude-settings": "Claude Code",
 	"codex-config": "Codex",
 	"opencode-config": "OpenCode",
+	"vscode-continue-config": "VSCode (Continue)",
 };
 
 // With shims installed, users launch agents by the bare binary name; the
-// shim forwards through `codev <agent>` transparently.
+// shim forwards through `codev <agent>` transparently. VSCode is not a CoDev
+// shim target — `code` is VSCode's own binary, and `vscode-continue` here is
+// the resume hint, not a shimmed command.
 const RUN_CMD: Record<Tool, string> = {
 	"claude-code": "claude",
 	codex: "codex",
 	opencode: "opencode",
+	"vscode-continue": "code",
 };
 
 // Without shims (best-effort install failed), the bare command isn't on
-// PATH, so fall back to the always-working `codev <agent>` form.
+// PATH, so fall back to the always-working `codev <agent>` form. VSCode has
+// no CoDev launcher — keep `code` here too; the user runs VSCode directly.
 const RUN_CMD_FALLBACK: Record<Tool, string> = {
 	"claude-code": "codev claude",
 	codex: "codev codex",
 	opencode: "codev opencode",
+	"vscode-continue": "code",
 };
 
 function resumeMessage(tools: Tool[], shimsInstalled: boolean): ReactNode {
@@ -109,6 +117,7 @@ export function Configure({
 	const [phase, setPhase] = useState<Phase>("running");
 	const [logs, setLogs] = useState<string[]>([]);
 	const [error, setError] = useState<string | null>(null);
+	const [codeMissing, setCodeMissing] = useState(false);
 	const hasRun = useRef(false);
 
 	useEffect(() => {
@@ -125,6 +134,8 @@ export function Configure({
 					results.push(...configureCodex(creds));
 				} else if (tool === "opencode") {
 					results.push(...configureOpenCode(creds));
+				} else if (tool === "vscode-continue") {
+					results.push(...configureVscodeContinue(creds));
 				}
 			}
 			const next: string[] = [];
@@ -132,8 +143,23 @@ export function Configure({
 				next.push(...describeResult(r, creds === null));
 			}
 			setLogs(next);
-			setPhase("done");
-			setTimeout(() => onDone(true), 1000);
+			// If VSCode/Continue was configured but `code` isn't on PATH, the
+			// best-effort extension install in the Install step silently no-op'd.
+			// Probe and append a manual-install hint to the resume message so the
+			// user actually ends up with a working extension.
+			const needsHintProbe =
+				creds !== null && tools.includes("vscode-continue");
+			if (needsHintProbe) {
+				isCodeCliAvailable()
+					.then((ok) => setCodeMissing(!ok))
+					.finally(() => {
+						setPhase("done");
+						setTimeout(() => onDone(true), 1000);
+					});
+			} else {
+				setPhase("done");
+				setTimeout(() => onDone(true), 1000);
+			}
 		} catch (err) {
 			setError((err as Error).message);
 			setPhase("error");
@@ -149,6 +175,15 @@ export function Configure({
 			{phase === "done" && (
 				<Box marginBottom={1} flexDirection="column">
 					{resumeMessage(tools, shimsInstalled)}
+					{codeMissing && (
+						<Text color="yellow">
+							{
+								"`code` was not found on PATH; the Continue extension was not auto-installed. Install it from the VSCode marketplace, or run "
+							}
+							<Text color="cyan">{`code --install-extension ${CONTINUE_EXTENSION_ID}`}</Text>
+							{" once `code` is available."}
+						</Text>
+					)}
 					<Box marginTop={1}>
 						<Text dimColor>{HELP_HINT}</Text>
 					</Box>

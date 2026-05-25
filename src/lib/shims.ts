@@ -19,9 +19,14 @@ import {
 export const SHIM_AGENTS = ["claude", "opencode", "codex"] as const;
 export type ShimAgent = (typeof SHIM_AGENTS)[number];
 
-export function toolToShimAgent(tool: Tool): ShimAgent {
+// VSCode is launched via its own `code` binary, not a CoDev shim, so
+// `vscode-continue` has no ShimAgent. Returning null lets callers filter it
+// out of shim install/uninstall flows without per-call special-casing.
+export function toolToShimAgent(tool: Tool): ShimAgent | null {
 	if (tool === "claude-code") return "claude";
-	return tool;
+	if (tool === "codex") return "codex";
+	if (tool === "opencode") return "opencode";
+	return null;
 }
 
 // Tools CoDev has touched on this machine. Used by bare `codev hook` so it
@@ -45,7 +50,8 @@ export function detectCodevTools(): ShimAgent[] {
 			(tool) =>
 				configured.has(tool) || getBackupStatus(tool).some((s) => s.hasBackup),
 		)
-		.map(toolToShimAgent);
+		.map(toolToShimAgent)
+		.filter((agent): agent is ShimAgent => agent !== null);
 }
 
 const SENTINEL_START = "# >>> codev shims (managed) >>>";

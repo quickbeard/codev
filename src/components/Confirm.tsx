@@ -12,12 +12,14 @@ const TOOL_LABEL: Record<Tool, string> = {
 	"claude-code": "Claude Code",
 	codex: "Codex",
 	opencode: "OpenCode",
+	"vscode-continue": "VSCode (Continue)",
 };
 
 const RESTORE_CMD: Record<Tool, string> = {
 	"claude-code": "codev restore claude",
 	codex: "codev restore codex",
 	opencode: "codev restore opencode",
+	"vscode-continue": "codev restore vscode",
 };
 
 export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {

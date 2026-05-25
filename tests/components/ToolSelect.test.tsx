@@ -15,6 +15,26 @@ describe("ToolSelect", () => {
 		expect(output).toContain("Claude Code");
 		expect(output).toContain("OpenCode");
 		expect(output).toContain("Codex");
+		expect(output).toContain("VSCode (Continue)");
+	});
+
+	test("emits vscode-continue when only the last row is selected", async () => {
+		const onConfirm = vi.fn();
+		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
+
+		// Three down-arrows to reach the 4th row.
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(onConfirm).toHaveBeenCalledWith(["vscode-continue"]);
 	});
 
 	test("renders unchecked checkboxes by default", () => {

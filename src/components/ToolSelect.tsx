@@ -6,6 +6,7 @@ const TOOLS: { label: string; value: Tool }[] = [
 	{ label: "Claude Code", value: "claude-code" },
 	{ label: "Codex", value: "codex" },
 	{ label: "OpenCode", value: "opencode" },
+	{ label: "VSCode (Continue)", value: "vscode-continue" },
 ];
 
 interface ToolSelectProps {

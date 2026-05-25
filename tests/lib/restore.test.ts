@@ -160,6 +160,43 @@ describe("runRestore", () => {
 			),
 		).toBe(true);
 	});
+
+	test("restores VSCode/Continue from backup and prints success", () => {
+		const { livePath, backupPath } = seedBackup(
+			".continue/config.yaml",
+			"continue-backup",
+		);
+
+		const code = runRestore("vscode-continue");
+
+		expect(code).toBe(0);
+		expect(existsSync(backupPath)).toBe(false);
+		expect(existsSync(livePath)).toBe(true);
+
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(
+			logs.some(
+				(l: string) =>
+					l.startsWith("Restored ") &&
+					l.includes(livePath) &&
+					l.includes(backupPath),
+			),
+		).toBe(true);
+	});
+
+	test("returns 1 and prints no-backup error for VSCode/Continue", () => {
+		const code = runRestore("vscode-continue");
+
+		expect(code).toBe(1);
+		const errors = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(
+			errors.some(
+				(e: string) =>
+					e.startsWith("No backup found at") &&
+					e.includes(join(tempDir, ".continue", "config.yaml.backup")),
+			),
+		).toBe(true);
+	});
 });
 
 describe("toolForRestoreAgent", () => {
@@ -167,10 +204,16 @@ describe("toolForRestoreAgent", () => {
 		expect(toolForRestoreAgent("claude")).toBe("claude-code");
 		expect(toolForRestoreAgent("codex")).toBe("codex");
 		expect(toolForRestoreAgent("opencode")).toBe("opencode");
+		expect(toolForRestoreAgent("vscode")).toBe("vscode-continue");
 	});
 
-	test("RESTORE_AGENTS exposes the three launch names", () => {
-		expect([...RESTORE_AGENTS]).toEqual(["claude", "codex", "opencode"]);
+	test("RESTORE_AGENTS exposes the launch names", () => {
+		expect([...RESTORE_AGENTS]).toEqual([
+			"claude",
+			"codex",
+			"opencode",
+			"vscode",
+		]);
 	});
 });
 
@@ -203,7 +246,7 @@ describe("runRestoreAll", () => {
 	});
 
 	test("does not surface a per-tool no-backup error for partial state", () => {
-		// One tool with a backup, two without — restore the one, skip the rest
+		// One tool with a backup, three without — restore the one, skip the rest
 		// quietly. No "No backup found at …" lines (those belong to the
 		// single-tool runRestore path).
 		seedBackup(".claude/settings.json", "c");
@@ -214,6 +257,21 @@ describe("runRestoreAll", () => {
 		const errors = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
 		expect(errors.some((e: string) => e.startsWith("No backup found at"))).toBe(
 			false,
+		);
+	});
+
+	test("sweeps the VSCode/Continue backup alongside the other agents", () => {
+		const claude = seedBackup(".claude/settings.json", "c");
+		const cont = seedBackup(".continue/config.yaml", "v");
+
+		const code = runRestoreAll();
+
+		expect(code).toBe(0);
+		expect(existsSync(claude.backupPath)).toBe(false);
+		expect(existsSync(cont.backupPath)).toBe(false);
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(logs.filter((l: string) => l.startsWith("Restored "))).toHaveLength(
+			2,
 		);
 	});
 });
