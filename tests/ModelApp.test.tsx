@@ -179,7 +179,11 @@ describe("ModelApp", () => {
 		stdin.write("sk-new");
 		await tick();
 		stdin.write("\r");
-		await waitForFrame(frames, "Choose default model");
+		// Wait for the model row itself — "Choose default model" appears before
+		// fetchModels resolves (during the "Fetching available models..." spinner
+		// state), at which point ModelSelect's useInput isn't bound yet and an
+		// Enter press would be dropped.
+		await waitForFrame(frames, "○ m1");
 
 		// Now in model-choice with the new list. Press Enter for default cursor.
 		expect(allFrames(frames)).toContain("Choose default model");
