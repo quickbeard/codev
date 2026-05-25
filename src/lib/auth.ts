@@ -287,6 +287,31 @@ export async function login(
 ): Promise<AuthData> {
 	onLog("Starting SSO login...");
 
+	// Dev escape hatch: when CODEV_BYPASS_LOGIN=1 is set, skip the OAuth flow
+	// entirely and persist a stub session. Useful when the SSO wrapper is down
+	// and you still need to walk through `codev install` to test downstream
+	// steps (npm install, configure, model select, etc.). The stub is real
+	// auth.json on disk, so subsequent `codev claude/codex/opencode` runs and
+	// the upload daemon also see a "logged in" state — clear it with
+	// `codev logout` or by unsetting the env var + `codev remove`.
+	if (process.env.CODEV_BYPASS_LOGIN === "1") {
+		onLog("CODEV_BYPASS_LOGIN=1 — skipping SSO, using stub session.");
+		const authData: AuthData = {
+			access_token: "codev-bypass-no-sso",
+			id_token: "codev-bypass-no-sso",
+			expires_at: Date.now() + 3_600_000,
+			user: {
+				sub: "codev-bypass",
+				email: "bypass@local",
+				displayName: "Bypass User",
+			},
+		};
+		saveAuth(authData);
+		clearForceLogin();
+		onLog(`Logged in as ${authData.user.email}`);
+		return authData;
+	}
+
 	const existing = loadAuth();
 	if (existing) {
 		onLog(`Already logged in as ${existing.user.email}`);
