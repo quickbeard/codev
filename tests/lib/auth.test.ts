@@ -438,6 +438,41 @@ describe("saveApiKey / loadApiKey", () => {
 	});
 });
 
+describe("login CODEV_BYPASS_LOGIN", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	test("returns a stub session and never opens the browser when set", async () => {
+		vi.stubEnv("CODEV_BYPASS_LOGIN", "1");
+		const onReady = vi.fn();
+		const logs: string[] = [];
+
+		const result = await login((msg) => logs.push(msg), onReady);
+
+		expect(result.access_token).toBe("codev-bypass-no-sso");
+		expect(result.user.email).toBe("bypass@local");
+		// Sentinel token must hit disk so subsequent commands see the session.
+		expect(loadAuth()?.access_token).toBe("codev-bypass-no-sso");
+		// No browser handshake, no /authorize redirect.
+		expect(onReady).not.toHaveBeenCalled();
+		expect(logs.some((l) => l.includes("CODEV_BYPASS_LOGIN=1"))).toBe(true);
+	});
+
+	test("does nothing special when the env var is unset or != '1'", async () => {
+		vi.stubEnv("CODEV_BYPASS_LOGIN", "true");
+		writeAuthFile(VALID_AUTH);
+
+		const result = await login(
+			() => {},
+			() => {},
+		);
+
+		// Falls through to the normal "already logged in" path, NOT the stub.
+		expect(result.access_token).toBe("test-access-token");
+	});
+});
+
 describe("login", () => {
 	test("returns existing auth when already logged in", async () => {
 		writeAuthFile(VALID_AUTH);
