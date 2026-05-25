@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import type { Session } from "@/providers/types.js";
 
 export function codevLogsDir(): string {
@@ -23,7 +23,10 @@ export function projectFolderName(cwd: string): string {
 		return "home";
 	}
 	let stripped = real;
-	if (real.startsWith(`${home}/`)) {
+	// Use node:path.sep so Windows (`\`) and POSIX (`/`) both match. Hard-coded
+	// `/` skipped the strip on Windows and left the drive letter in the mangled
+	// output.
+	if (real.startsWith(`${home}${sep}`)) {
 		stripped = real.slice(home.length + 1);
 	}
 	const mangled = stripped

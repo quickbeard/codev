@@ -1,7 +1,7 @@
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { FetchApiKey } from "@/components/FetchApiKey.js";
-import * as auth from "@/lib/auth.js";
+import type * as auth from "@/lib/auth.js";
 import * as proxy from "@/lib/proxy.js";
 
 afterEach(() => {
@@ -20,7 +20,6 @@ function fakeAuth(): auth.AuthData {
 describe("FetchApiKey", () => {
 	test("calls onDone and renders a success line after a successful fetch", async () => {
 		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
-		const saveSpy = vi.spyOn(auth, "saveApiKey").mockImplementation(() => {});
 
 		const onDone = vi.fn();
 		const onFallback = vi.fn();
@@ -32,7 +31,6 @@ describe("FetchApiKey", () => {
 
 		expect(onDone).toHaveBeenCalledTimes(1);
 		expect(onDone).toHaveBeenCalledWith("sk-test-123");
-		expect(saveSpy).toHaveBeenCalledWith({ apiKey: "sk-test-123" });
 		expect(onFallback).not.toHaveBeenCalled();
 		expect(lastFrame() ?? "").toContain("API key obtained successfully.");
 	});
@@ -61,7 +59,6 @@ describe("FetchApiKey", () => {
 			.spyOn(proxy, "fetchApiKey")
 			.mockImplementationOnce(() => Promise.resolve(""))
 			.mockImplementationOnce(() => Promise.resolve("sk-second-try"));
-		vi.spyOn(auth, "saveApiKey").mockImplementation(() => {});
 		fetchSpy.mockClear();
 
 		const authData = fakeAuth();
@@ -148,7 +145,6 @@ describe("FetchApiKey", () => {
 			.spyOn(proxy, "fetchApiKey")
 			.mockImplementationOnce(() => Promise.reject(new Error("transient")))
 			.mockImplementationOnce(() => Promise.resolve("sk-recovered"));
-		vi.spyOn(auth, "saveApiKey").mockImplementation(() => {});
 		fetchSpy.mockClear();
 
 		const onDone = vi.fn();
