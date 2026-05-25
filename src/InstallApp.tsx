@@ -61,17 +61,6 @@ const POST_LOGIN: Phase[] = [
 	"configure-failed",
 	"done",
 ];
-const POST_INSTALL: Phase[] = [
-	"refreshing-config",
-	"validating-existing",
-	"key-choice",
-	"fetching-key",
-	"manual-creds",
-	"model-choice",
-	"configuring",
-	"configure-failed",
-	"done",
-];
 const POST_REFRESH: Phase[] = [
 	"validating-existing",
 	"key-choice",
