@@ -84,7 +84,6 @@ interface AuthFileContents {
 	model?: string;
 	supabase_url?: string;
 	supabase_anon_key?: string;
-	proxy_url?: string;
 }
 
 export interface CodevConfig {
@@ -188,22 +187,6 @@ export function saveCodevConfig(config: CodevConfig): void {
 	});
 }
 
-// Stores the user's chosen proxy URL (or clears it when null is passed, so
-// PROXY_URL() falls back to the baked-in default). Trailing slashes are
-// stripped by the caller (the ProxyUrl component) before reaching this.
-export function saveProxyUrl(url: string | null): void {
-	const existing = readAuthFile() ?? {};
-	writeAuthFile({
-		...existing,
-		proxy_url: url ?? undefined,
-	});
-}
-
-export function loadProxyUrl(): string | null {
-	const raw = readAuthFile();
-	return raw?.proxy_url ?? null;
-}
-
 export function loadApiKey(): ApiKeyCreds | null {
 	const raw = readAuthFile();
 	if (!raw?.api_key) return null;
@@ -226,7 +209,6 @@ export async function logout(): Promise<boolean> {
 			model: raw.model,
 			supabase_url: raw.supabase_url,
 			supabase_anon_key: raw.supabase_anon_key,
-			proxy_url: raw.proxy_url,
 		};
 		const hasAnything = Object.values(preserved).some((v) => v !== undefined);
 		if (hasAnything) {
@@ -312,6 +294,31 @@ export async function login(
 ): Promise<AuthData> {
 	onLog("Starting SSO login...");
 
+	// Dev escape hatch: when CODEV_BYPASS_LOGIN=1 is set, skip the OAuth flow
+	// entirely and persist a stub session. Useful when the SSO wrapper is down
+	// and you still need to walk through `codev install` to test downstream
+	// steps (npm install, configure, model select, etc.). The stub is real
+	// auth.json on disk, so subsequent `codev claude/codex/opencode` runs and
+	// the upload daemon also see a "logged in" state — clear it with
+	// `codev logout` or by unsetting the env var + `codev remove`.
+	if (process.env.CODEV_BYPASS_LOGIN === "1") {
+		onLog("CODEV_BYPASS_LOGIN=1 — skipping SSO, using stub session.");
+		const authData: AuthData = {
+			access_token: "codev-bypass-no-sso",
+			id_token: "codev-bypass-no-sso",
+			expires_at: Date.now() + 3_600_000,
+			user: {
+				sub: "codev-bypass",
+				email: "bypass@local",
+				displayName: "Bypass User",
+			},
+		};
+		saveAuth(authData);
+		clearForceLogin();
+		onLog(`Logged in as ${authData.user.email}`);
+		return authData;
+	}
+
 	const existing = loadAuth();
 	if (existing) {
 		onLog(`Already logged in as ${existing.user.email}`);
@@ -389,15 +396,14 @@ export async function login(
 	return authData;
 }
 
-// Best-effort: pull the latest Supabase coordinates from codev-proxy
-// (against PROXY_URL(), which honors the user's custom-proxy override) and
+// Best-effort: pull the latest Supabase coordinates from codev-proxy and
 // persist them next to the SSO session. Failure is logged but not thrown —
 // downstream accessors (SUPABASE_URL/ANON_KEY in const.ts) will hard-fail
 // later if no values were ever fetched, with a "run codev install" message
 // that's actionable for the user.
 //
 // Callers are responsible for invoking this after a successful login:
-//   - InstallApp runs it as its own phase (after the user picks the proxy URL)
+//   - InstallApp runs it as a `refreshing-config` phase right after install
 //   - upload.ts's ensureAuth runs it on the fresh-login branch, and again
 //     in the retry path after a 401/403 from Supabase (config may have
 //     rotated since the last login).

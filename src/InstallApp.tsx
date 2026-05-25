@@ -19,11 +19,6 @@ import {
 	manualCredentialsTitle,
 } from "@/components/ManualCredentials.js";
 import { ModelSelect, modelSelectTitle } from "@/components/ModelSelect.js";
-import {
-	ProxyUrl,
-	type ProxyUrlChoice,
-	proxyUrlTitle,
-} from "@/components/ProxyUrl.js";
 import { Step } from "@/components/Step.js";
 import { ToolSelect, toolSelectTitle } from "@/components/ToolSelect.js";
 import {
@@ -32,7 +27,6 @@ import {
 	loadApiKey,
 	refreshCodevConfig,
 	saveApiKey,
-	saveProxyUrl,
 } from "@/lib/auth.js";
 import { type Credentials, DEFAULT_MODEL, type Tool } from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
@@ -44,7 +38,6 @@ type Phase =
 	| "login"
 	| "installing"
 	| "install-failed"
-	| "proxy-url-choice"
 	| "refreshing-config"
 	| "validating-existing"
 	| "key-choice"
@@ -58,7 +51,6 @@ type Phase =
 const POST_LOGIN: Phase[] = [
 	"installing",
 	"install-failed",
-	"proxy-url-choice",
 	"refreshing-config",
 	"validating-existing",
 	"key-choice",
@@ -70,18 +62,6 @@ const POST_LOGIN: Phase[] = [
 	"done",
 ];
 const POST_INSTALL: Phase[] = [
-	"proxy-url-choice",
-	"refreshing-config",
-	"validating-existing",
-	"key-choice",
-	"fetching-key",
-	"manual-creds",
-	"model-choice",
-	"configuring",
-	"configure-failed",
-	"done",
-];
-const POST_PROXY_CHOICE: Phase[] = [
 	"refreshing-config",
 	"validating-existing",
 	"key-choice",
@@ -132,7 +112,6 @@ export function InstallApp() {
 	const [existingValid, setExistingValid] = useState(false);
 	const [existingMessage, setExistingMessage] = useState<string | null>(null);
 	const [shimsInstalled, setShimsInstalled] = useState(false);
-	const [proxyChoice, setProxyChoice] = useState<ProxyUrlChoice | null>(null);
 	const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
 	const [modelsError, setModelsError] = useState<string | null>(null);
@@ -203,15 +182,6 @@ export function InstallApp() {
 			} catch {
 				// Leave shimsInstalled=false so the resume message stays simple.
 			}
-			setStep("proxy-url-choice");
-		},
-		[tools],
-	);
-
-	const handleProxyUrlDone = useCallback(
-		(url: string | null) => {
-			saveProxyUrl(url);
-			setProxyChoice(url === null ? "default" : "custom");
 			setStep("refreshing-config");
 			if (!auth) {
 				// login() runs before this phase, so this is defensive only.
@@ -224,7 +194,7 @@ export function InstallApp() {
 				advancePastInstall();
 			});
 		},
-		[auth, advancePastInstall],
+		[tools, auth, advancePastInstall],
 	);
 
 	const handleAuthMethod = useCallback(
@@ -363,18 +333,6 @@ export function InstallApp() {
 					</Step>
 				)}
 				{POST_INSTALL.includes(step) && (
-					<Step
-						active={step === "proxy-url-choice"}
-						title={proxyUrlTitle(step !== "proxy-url-choice")}
-					>
-						<ProxyUrl
-							onDone={handleProxyUrlDone}
-							readOnly={step !== "proxy-url-choice"}
-							selected={proxyChoice}
-						/>
-					</Step>
-				)}
-				{POST_PROXY_CHOICE.includes(step) && (
 					<Step
 						active={step === "refreshing-config"}
 						title={<Text bold>Refreshing CoDev config</Text>}

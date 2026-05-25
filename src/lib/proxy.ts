@@ -41,7 +41,7 @@ export interface SupabaseSession {
 }
 
 export async function fetchApiKey(accessToken: string): Promise<string> {
-	const res = await fetch(`${PROXY_URL()}/auth/exchange`, {
+	const res = await fetch(`${PROXY_URL}/auth/exchange`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
 		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
@@ -64,7 +64,7 @@ export async function fetchApiKey(accessToken: string): Promise<string> {
 export async function fetchCodevConfig(
 	accessToken: string,
 ): Promise<CodevConfig> {
-	const res = await fetch(`${PROXY_URL()}/config`, {
+	const res = await fetch(`${PROXY_URL}/config`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
 		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
@@ -169,7 +169,7 @@ export async function fetchModels(
 export async function fetchSupabaseSession(
 	accessToken: string,
 ): Promise<SupabaseSession> {
-	const res = await fetch(`${PROXY_URL()}/supabase/exchange`, {
+	const res = await fetch(`${PROXY_URL}/supabase/exchange`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
 		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),

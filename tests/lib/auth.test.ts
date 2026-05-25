@@ -16,15 +16,13 @@ import {
 	browserOpener,
 	loadApiKey,
 	loadAuth,
-	loadProxyUrl,
 	login,
 	logout,
 	refreshCodevConfig,
 	saveApiKey,
 	saveCodevConfig,
-	saveProxyUrl,
 } from "@/lib/auth.js";
-import { PROXY_URL, SSO_URL } from "@/lib/const.js";
+import { SSO_URL } from "@/lib/const.js";
 
 const REVOCATION_ENDPOINT = `${SSO_URL}/revoke`;
 
@@ -277,63 +275,6 @@ describe("saveCodevConfig", () => {
 	});
 });
 
-describe("saveProxyUrl / loadProxyUrl", () => {
-	test("round-trips a custom URL", () => {
-		saveProxyUrl("https://custom.example.com/proxy");
-		expect(loadProxyUrl()).toBe("https://custom.example.com/proxy");
-	});
-
-	test("returns null when no proxy_url is set", () => {
-		writeAuthFile(VALID_AUTH);
-		expect(loadProxyUrl()).toBeNull();
-	});
-
-	test("returns null when auth.json does not exist", () => {
-		expect(loadProxyUrl()).toBeNull();
-	});
-
-	test("null argument clears the field while preserving other blocks", () => {
-		writeAuthFile(VALID_AUTH);
-		saveProxyUrl("https://custom.example.com/proxy");
-		expect(loadProxyUrl()).toBe("https://custom.example.com/proxy");
-		saveProxyUrl(null);
-		expect(loadProxyUrl()).toBeNull();
-		expect(loadAuth()?.access_token).toBe("test-access-token");
-	});
-
-	test("PROXY_URL() returns the saved value", () => {
-		saveProxyUrl("https://custom.example.com/proxy");
-		expect(PROXY_URL()).toBe("https://custom.example.com/proxy");
-	});
-
-	test("PROXY_URL() falls back to the default when nothing is saved", () => {
-		expect(PROXY_URL()).toContain("/codev-proxy");
-	});
-
-	test("logout preserves proxy_url alongside other long-lived fields", async () => {
-		const dir = join(tempDir, ".codev");
-		mkdirSync(dir, { recursive: true });
-		writeFileSync(
-			join(dir, "auth.json"),
-			JSON.stringify({
-				...VALID_AUTH,
-				proxy_url: "https://custom.example.com/proxy",
-				api_key: "sk-keep",
-			}),
-		);
-		const fetchSpy = mockAuthFetch({
-			[REVOCATION_ENDPOINT]: async () => new Response("", { status: 200 }),
-		});
-		try {
-			expect(await logout()).toBe(true);
-			expect(loadProxyUrl()).toBe("https://custom.example.com/proxy");
-			expect(loadApiKey()?.apiKey).toBe("sk-keep");
-		} finally {
-			fetchSpy.mockRestore();
-		}
-	});
-});
-
 describe("refreshCodevConfig", () => {
 	test("fetches /config and writes Supabase coords into auth.json", async () => {
 		const fetchSpy = mockAuthFetch({
@@ -353,27 +294,6 @@ describe("refreshCodevConfig", () => {
 			) as Record<string, unknown>;
 			expect(saved.supabase_url).toBe("https://fresh.supabase.co");
 			expect(saved.supabase_anon_key).toBe("fresh-anon");
-		} finally {
-			fetchSpy.mockRestore();
-		}
-	});
-
-	test("uses the persisted custom proxy URL", async () => {
-		saveProxyUrl("https://custom.example.com/proxy");
-		const fetchSpy = mockAuthFetch({
-			"https://custom.example.com/proxy/config": async () =>
-				new Response(
-					JSON.stringify({
-						supabaseUrl: "u",
-						supabaseAnonKey: "a",
-					}),
-					{ headers: { "Content-Type": "application/json" } },
-				),
-		});
-		try {
-			await refreshCodevConfig("token", () => {});
-			const calls = fetchSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-			expect(calls).toContain("https://custom.example.com/proxy/config");
 		} finally {
 			fetchSpy.mockRestore();
 		}
@@ -435,6 +355,41 @@ describe("saveApiKey / loadApiKey", () => {
 		saveApiKey({ apiKey: "sk-perms" });
 		const stat = statSync(join(tempDir, ".codev", "auth.json"));
 		expect(stat.mode & 0o777).toBe(0o600);
+	});
+});
+
+describe("login CODEV_BYPASS_LOGIN", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	test("returns a stub session and never opens the browser when set", async () => {
+		vi.stubEnv("CODEV_BYPASS_LOGIN", "1");
+		const onReady = vi.fn();
+		const logs: string[] = [];
+
+		const result = await login((msg) => logs.push(msg), onReady);
+
+		expect(result.access_token).toBe("codev-bypass-no-sso");
+		expect(result.user.email).toBe("bypass@local");
+		// Sentinel token must hit disk so subsequent commands see the session.
+		expect(loadAuth()?.access_token).toBe("codev-bypass-no-sso");
+		// No browser handshake, no /authorize redirect.
+		expect(onReady).not.toHaveBeenCalled();
+		expect(logs.some((l) => l.includes("CODEV_BYPASS_LOGIN=1"))).toBe(true);
+	});
+
+	test("does nothing special when the env var is unset or != '1'", async () => {
+		vi.stubEnv("CODEV_BYPASS_LOGIN", "true");
+		writeAuthFile(VALID_AUTH);
+
+		const result = await login(
+			() => {},
+			() => {},
+		);
+
+		// Falls through to the normal "already logged in" path, NOT the stub.
+		expect(result.access_token).toBe("test-access-token");
 	});
 });
 
