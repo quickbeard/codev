@@ -13,6 +13,9 @@ let tempHome: string;
 beforeEach(() => {
 	tempHome = mkdtempSync(join(tmpdir(), "codev-modelapp-test-"));
 	vi.stubEnv("HOME", tempHome);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempHome);
 });
 
 afterEach(() => {
@@ -28,6 +31,24 @@ function tick(ms = 50): Promise<void> {
 
 function allFrames(frames: string[]): string {
 	return frames.join("\n");
+}
+
+// Poll `frames` for a substring with a 30ms settle after match so the
+// just-mounted component's useInput is active before the next keypress.
+// Avoids the fixed-time `tick(150)` waits which are too tight on Windows CI.
+async function waitForFrame(
+	frames: string[],
+	needle: string,
+	maxMs = 3_000,
+): Promise<void> {
+	const start = Date.now();
+	while (Date.now() - start < maxMs) {
+		if (frames.join("\n").includes(needle)) {
+			await new Promise((r) => setTimeout(r, 30));
+			return;
+		}
+		await new Promise((r) => setTimeout(r, 20));
+	}
 }
 
 describe("ModelApp", () => {
@@ -146,7 +167,7 @@ describe("ModelApp", () => {
 
 		const { stdin, frames } = render(<ModelApp />);
 		// Wait for fetching → 401 → re-auth-manual
-		await tick(150);
+		await waitForFrame(frames, "Enter API credentials");
 		expect(allFrames(frames)).toContain("Enter API credentials");
 		expect(allFrames(frames)).toContain("Saved API key was rejected");
 
@@ -158,12 +179,16 @@ describe("ModelApp", () => {
 		stdin.write("sk-new");
 		await tick();
 		stdin.write("\r");
-		await tick(150);
+		// Wait for the model row itself — "Choose default model" appears before
+		// fetchModels resolves (during the "Fetching available models..." spinner
+		// state), at which point ModelSelect's useInput isn't bound yet and an
+		// Enter press would be dropped.
+		await waitForFrame(frames, "○ m1");
 
 		// Now in model-choice with the new list. Press Enter for default cursor.
 		expect(allFrames(frames)).toContain("Choose default model");
 		stdin.write("\r");
-		await tick(150);
+		await waitForFrame(frames, "Default model updated to");
 
 		expect(allFrames(frames)).toContain("Default model updated to");
 		expect(configureClaude).toHaveBeenCalledWith({
@@ -187,7 +212,7 @@ describe("ModelApp", () => {
 		);
 
 		const { frames } = render(<ModelApp />);
-		await tick(150);
+		await waitForFrame(frames, "Saved API key was rejected");
 		// We don't drive Login here (it would actually try to login() against
 		// the proxy). Just assert the SSO branch was taken.
 		expect(allFrames(frames)).toContain("Login");
@@ -209,7 +234,7 @@ describe("ModelApp", () => {
 		);
 
 		const { stdin, frames } = render(<ModelApp />);
-		await tick(150);
+		await waitForFrame(frames, "Enter API credentials");
 
 		// Drive ManualCredentials with new (but still 'invalid') creds.
 		stdin.write("https://retry.example.com/v1");
@@ -219,7 +244,7 @@ describe("ModelApp", () => {
 		stdin.write("sk-also-bad");
 		await tick();
 		stdin.write("\r");
-		await tick(150);
+		await waitForFrame(frames, "Re-authentication did not produce a valid key");
 
 		expect(allFrames(frames)).toContain(
 			"Re-authentication did not produce a valid key",

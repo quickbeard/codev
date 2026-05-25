@@ -27,14 +27,25 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 			PATH: stripShimDirFromPath(process.env.PATH),
 		};
 		// On Windows, npm-installed agent binaries are `.cmd` shims (e.g.
-		// `opencode.cmd`). Node's `spawn` only consults PATHEXT when `shell: true`,
-		// so without this flag the spawn fails with ENOENT even though the agent
-		// is installed. Mirrors the win32 handling in lib/npm.ts.
-		const child = spawner.spawn(cmd, args, {
-			stdio: "inherit",
-			env,
-			shell: process.platform === "win32",
-		});
+		// `opencode.cmd`). Node's `spawn` only consults PATHEXT when shell is
+		// enabled, so without it the spawn fails with ENOENT even though the
+		// agent is installed. Mirrors the win32 handling in lib/npm.ts.
+		//
+		// Use the single-string form on Windows — Node 22's DEP0190 deprecates
+		// `shell:true` combined with a separate `args` array (the args get
+		// naively concatenated and not escaped, which is a command-injection
+		// hazard for callers that take untrusted args). For us the args come
+		// from process.argv and the concatenation behavior was already the
+		// status quo, so this is a byte-for-byte equivalent rewrite that
+		// silences the warning.
+		const child =
+			process.platform === "win32"
+				? spawner.spawn(`${cmd} ${args.join(" ")}`, {
+						stdio: "inherit",
+						env,
+						shell: true,
+					})
+				: spawner.spawn(cmd, args, { stdio: "inherit", env });
 
 		// The child shares our process group, so the terminal already delivers
 		// SIGINT/SIGTERM to it. Swallow them in the parent so we don't exit

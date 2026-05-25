@@ -42,26 +42,35 @@ describe("ModelSelect", () => {
 	test("Enter on the default cursor invokes onSelect with the first model", async () => {
 		vi.spyOn(proxy, "fetchModels").mockResolvedValue(["alpha", "beta"]);
 		const onSelect = vi.fn();
-		const { stdin } = render(
+		const { stdin, lastFrame } = render(
 			<ModelSelect apiKey="sk-x" onSelect={onSelect} onError={() => {}} />,
 		);
-		await tick(50);
-		stdin.write("\r");
+		// Poll for the list to render, then settle so useInput is registered
+		// before the keypress — fixed-time ticks alone aren't reliable on
+		// slower CI runners.
+		await vi.waitFor(() => expect(lastFrame() ?? "").toContain("alpha"));
 		await tick();
+		stdin.write("\r");
+		await vi.waitFor(() => expect(onSelect).toHaveBeenCalled());
 		expect(onSelect).toHaveBeenCalledWith("alpha", ["alpha", "beta"]);
 	});
 
 	test("down-arrow then Enter selects the second model", async () => {
 		vi.spyOn(proxy, "fetchModels").mockResolvedValue(["alpha", "beta"]);
 		const onSelect = vi.fn();
-		const { stdin } = render(
+		const { stdin, lastFrame } = render(
 			<ModelSelect apiKey="sk-x" onSelect={onSelect} onError={() => {}} />,
 		);
-		await tick(50);
+		await vi.waitFor(() => expect(lastFrame() ?? "").toContain("beta"));
+		// Settle before sending the arrow key: vi.waitFor returns the moment
+		// "beta" first appears in a frame, which is the same render that
+		// mounts useInput — without this delay, the arrow press can land
+		// before the handler is active and be dropped.
+		await tick();
 		stdin.write("\x1B[B"); // ↓
 		await tick();
 		stdin.write("\r");
-		await tick();
+		await vi.waitFor(() => expect(onSelect).toHaveBeenCalled());
 		expect(onSelect).toHaveBeenCalledWith("beta", ["alpha", "beta"]);
 	});
 
