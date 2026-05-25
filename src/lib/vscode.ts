@@ -25,3 +25,12 @@ export async function installContinueExtension(): Promise<InstallExtensionResult
 	}
 	return { warning: r.stderr.trim() || r.error.message };
 }
+
+// Whether `code` resolves on PATH. Used by `codev update` to decide
+// whether to schedule the VS Code extension update — if the launcher
+// isn't there, CoDev has nothing to update (the user never had us
+// auto-install in the first place, or has since removed the CLI).
+export async function isCodeCliAvailable(): Promise<boolean> {
+	const r = await execAsync("code", ["--version"]);
+	return !r.error;
+}

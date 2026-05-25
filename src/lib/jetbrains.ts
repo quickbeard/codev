@@ -59,3 +59,15 @@ export async function installContinuePlugin(): Promise<InstallPluginResult> {
 	}
 	return null;
 }
+
+// Whether at least one of the JetBrains launchers resolves on PATH. Used
+// by `codev update` to decide whether to schedule the plugin update —
+// short-circuits on the first responder so we don't pay the launcher-
+// probe cost for every IDE when one will do.
+export async function isAnyJetBrainsCliAvailable(): Promise<boolean> {
+	for (const bin of JETBRAINS_CLIS) {
+		const r = await execAsync(bin, ["--version"]);
+		if (!r.error) return true;
+	}
+	return false;
+}

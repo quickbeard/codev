@@ -89,7 +89,7 @@ describe("UpdateApp", () => {
 		await vi.waitFor(() => expect(allFrames(frames)).toContain("Happy coding"));
 
 		const history = allFrames(frames);
-		expect(history).toContain("nothing to update");
+		expect(history).toContain("Nothing to update");
 		expect(history).toContain("Happy coding");
 		existsSpy.mockRestore();
 	});
