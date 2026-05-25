@@ -151,7 +151,7 @@ describe("TaskList", () => {
 			/>,
 		);
 
-		await new Promise((r) => setTimeout(r, 120));
+		await vi.waitFor(() => expect(captureFrame).toHaveBeenCalled());
 
 		expect(captureFrame).toHaveBeenCalledTimes(1);
 		expect(captureFrame).toHaveBeenCalledWith(false);
