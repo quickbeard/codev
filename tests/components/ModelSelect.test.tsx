@@ -42,26 +42,29 @@ describe("ModelSelect", () => {
 	test("Enter on the default cursor invokes onSelect with the first model", async () => {
 		vi.spyOn(proxy, "fetchModels").mockResolvedValue(["alpha", "beta"]);
 		const onSelect = vi.fn();
-		const { stdin } = render(
+		const { stdin, lastFrame } = render(
 			<ModelSelect apiKey="sk-x" onSelect={onSelect} onError={() => {}} />,
 		);
-		await tick(50);
+		// Poll for the list to render — fixed-time ticks aren't reliable under
+		// Windows CI's slower event loop. The settle inside vi.waitFor also
+		// gives useInput time to register before the Enter press.
+		await vi.waitFor(() => expect(lastFrame() ?? "").toContain("alpha"));
 		stdin.write("\r");
-		await tick();
+		await vi.waitFor(() => expect(onSelect).toHaveBeenCalled());
 		expect(onSelect).toHaveBeenCalledWith("alpha", ["alpha", "beta"]);
 	});
 
 	test("down-arrow then Enter selects the second model", async () => {
 		vi.spyOn(proxy, "fetchModels").mockResolvedValue(["alpha", "beta"]);
 		const onSelect = vi.fn();
-		const { stdin } = render(
+		const { stdin, lastFrame } = render(
 			<ModelSelect apiKey="sk-x" onSelect={onSelect} onError={() => {}} />,
 		);
-		await tick(50);
+		await vi.waitFor(() => expect(lastFrame() ?? "").toContain("beta"));
 		stdin.write("\x1B[B"); // ↓
 		await tick();
 		stdin.write("\r");
-		await tick();
+		await vi.waitFor(() => expect(onSelect).toHaveBeenCalled());
 		expect(onSelect).toHaveBeenCalledWith("beta", ["alpha", "beta"]);
 	});
 

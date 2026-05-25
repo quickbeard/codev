@@ -69,63 +69,102 @@ function fakeAuth(): auth.AuthData {
 	};
 }
 
-async function advanceThroughConfirm(stdin: { write: (s: string) => void }) {
+// Poll `frames` for a substring instead of sleeping for a fixed time. The Ink
+// flow is async (login → install → refresh → validate → key-choice → …), and
+// each transition involves React commit + useInput re-registration. Windows
+// CI runs ~2–3× slower than the dev laptop, so any fixed-time sleep that
+// works locally is a Heisenbug. Resolves silently when `maxMs` elapses —
+// downstream assertions surface the real failure message.
+//
+// Includes a small settle after the match so the component's useInput handler
+// has time to register on the render that contained `needle` — without this,
+// an immediate stdin.write can land before the handler is active and get
+// dropped.
+async function waitForFrame(
+	frames: string[],
+	needle: string,
+	maxMs = 3_000,
+): Promise<void> {
+	const start = Date.now();
+	while (Date.now() - start < maxMs) {
+		if (frames.join("\n").includes(needle)) {
+			await new Promise((r) => setTimeout(r, 30));
+			return;
+		}
+		await new Promise((r) => setTimeout(r, 20));
+	}
+}
+
+async function advanceThroughConfirm(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
 	// Select Claude Code, confirm selection, accept backup-warning confirm
 	// (apt-style: type "y" then Enter). Lands on LOGIN.
+	await waitForFrame(frames, "Select the AI agent(s) to install");
 	stdin.write(" ");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
-	await new Promise((r) => setTimeout(r, 30));
+	await waitForFrame(frames, "Continue? [y/N]");
 	stdin.write("y\r");
-	await new Promise((r) => setTimeout(r, 30));
 }
 
-async function advanceThroughConfirmCodex(stdin: {
-	write: (s: string) => void;
-}) {
+async function advanceThroughConfirmCodex(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
 	// Move cursor to the second option (Codex), select, confirm, accept warning.
+	await waitForFrame(frames, "Select the AI agent(s) to install");
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write(" ");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
-	await new Promise((r) => setTimeout(r, 30));
+	await waitForFrame(frames, "Continue? [y/N]");
 	stdin.write("y\r");
-	await new Promise((r) => setTimeout(r, 30));
 }
 
 // After install completes, refreshing-config + validation run immediately
 // (refreshCodevConfig is mocked in beforeEach) and the flow lands on the
-// key-choice step. Wait long enough for those transitions to settle before
-// driving the next input.
-async function settleAfterInstall() {
-	await new Promise((r) => setTimeout(r, 300));
+// key-choice step. Wait for the choose-configuration screen (no-saved-key
+// path) or the existing-key option (saved-key path) to actually appear.
+async function settleAfterInstall(frames: string[]) {
+	await waitForFrame(frames, "Choose configuration method");
 }
 
-async function pickNewKey(stdin: { write: (s: string) => void }) {
+async function pickNewKey(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
 	// Wait for login + install + refresh + validation to settle and the
 	// key-choice screen to appear, then press Enter on the default first
 	// option ("Get a new API Key" when no saved key exists).
-	await settleAfterInstall();
+	await settleAfterInstall(frames);
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
 
-async function pickManual(stdin: { write: (s: string) => void }) {
+async function pickManual(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
 	// Wait for the upstream phases to settle, move cursor to "I have my
 	// own API Key", Enter.
-	await settleAfterInstall();
+	await settleAfterInstall(frames);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
 
-async function pickSkip(stdin: { write: (s: string) => void }) {
+async function pickSkip(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
 	// Wait for the upstream phases to settle, move cursor past
 	// "Get a new API Key" and "I have my own API Key" to land on
 	// "Skip configuration", Enter.
-	await settleAfterInstall();
+	await settleAfterInstall(frames);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\x1B[B");
@@ -136,9 +175,11 @@ async function pickSkip(stdin: { write: (s: string) => void }) {
 
 async function typeManualCreds(
 	stdin: { write: (s: string) => void },
+	frames: string[],
 	baseUrl: string,
 	apiKey: string,
 ) {
+	await waitForFrame(frames, "Enter API credentials");
 	stdin.write(baseUrl);
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
@@ -152,8 +193,12 @@ async function typeManualCreds(
 // After credentials are known, the model-choice step runs ModelSelect. The
 // component fires fetchModels on mount; this helper waits for the list and
 // picks the first option (Enter on default cursor).
-async function pickFirstModel(stdin: { write: (s: string) => void }) {
-	await new Promise((r) => setTimeout(r, 100));
+async function pickFirstModel(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+	expectedModel = "m-alpha",
+) {
+	await waitForFrame(frames, expectedModel);
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
@@ -189,8 +234,8 @@ describe("InstallApp fail-stop invariant", () => {
 		);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await new Promise((r) => setTimeout(r, 200));
+		await advanceThroughConfirm(stdin, frames);
+		await waitForFrame(frames, "Login failed: Connection refused");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Login failed: Connection refused");
@@ -211,8 +256,8 @@ describe("InstallApp fail-stop invariant", () => {
 		});
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await new Promise((r) => setTimeout(r, 300));
+		await advanceThroughConfirm(stdin, frames);
+		await waitForFrame(frames, "Failed to install");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Failed to install");
@@ -229,9 +274,9 @@ describe("InstallApp fail-stop invariant", () => {
 		const configureSpy = vi.spyOn(configure, "configureClaudeCode");
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickNewKey(stdin);
-		await new Promise((r) => setTimeout(r, 200));
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await waitForFrame(frames, "Failed to fetch API key");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Failed to fetch API key");
@@ -250,10 +295,10 @@ describe("InstallApp fail-stop invariant", () => {
 		});
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickNewKey(stdin);
-		await pickFirstModel(stdin);
-		await new Promise((r) => setTimeout(r, 300));
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Configure failed: disk full");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Configure tools");
@@ -278,10 +323,10 @@ describe("InstallApp fail-stop invariant", () => {
 			]);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickNewKey(stdin);
-		await pickFirstModel(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
@@ -310,10 +355,10 @@ describe("InstallApp fail-stop invariant", () => {
 		configureCodexSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirmCodex(stdin);
-		await pickNewKey(stdin);
-		await pickFirstModel(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await advanceThroughConfirmCodex(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
@@ -347,15 +392,16 @@ describe("InstallApp fail-stop invariant", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickManual(stdin);
+		await advanceThroughConfirm(stdin, frames);
+		await pickManual(stdin, frames);
 		await typeManualCreds(
 			stdin,
+			frames,
 			"https://my-gateway.example.com/v1",
 			"sk-manual-123",
 		);
-		await pickFirstModel(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Enter API credentials");
@@ -389,11 +435,11 @@ describe("InstallApp fail-stop invariant", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickNewKey(stdin);
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
 
 		// First empty result — retry prompt should render, no fallback yet.
-		await new Promise((r) => setTimeout(r, 200));
+		await waitForFrame(frames, "Gateway returned an empty API key.");
 		expect(allFrames(frames)).toContain("Gateway returned an empty API key.");
 		expect(allFrames(frames)).toContain("Press Enter to retry");
 		expect(allFrames(frames)).not.toContain(
@@ -402,7 +448,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 		// Press Enter to retry; second attempt also returns empty.
 		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 200));
+		await waitForFrame(frames, "Gateway returned an empty API key again.");
 		expect(allFrames(frames)).toContain(
 			"Gateway returned an empty API key again.",
 		);
@@ -413,16 +459,17 @@ describe("InstallApp fail-stop invariant", () => {
 
 		// Press Enter to drop into manual creds.
 		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 100));
+		await waitForFrame(frames, "Enter API credentials");
 		expect(allFrames(frames)).toContain("Enter API credentials");
 
 		await typeManualCreds(
 			stdin,
+			frames,
 			"https://fallback.example.com/v1",
 			"sk-fallback-123",
 		);
-		await pickFirstModel(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
@@ -460,11 +507,14 @@ describe("InstallApp fail-stop invariant", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickNewKey(stdin);
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
 
 		// First attempt rejects — retry prompt renders.
-		await new Promise((r) => setTimeout(r, 200));
+		await waitForFrame(
+			frames,
+			"Failed to fetch API key: Proxy /auth/exchange failed",
+		);
 		expect(allFrames(frames)).toContain(
 			"Failed to fetch API key: Proxy /auth/exchange failed",
 		);
@@ -474,8 +524,8 @@ describe("InstallApp fail-stop invariant", () => {
 		// Press Enter to retry; second attempt resolves and the model-choice
 		// step renders.
 		stdin.write("\r");
-		await pickFirstModel(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
@@ -508,9 +558,9 @@ describe("InstallApp fail-stop invariant", () => {
 		backupOnlySpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickSkip(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await advanceThroughConfirm(stdin, frames);
+		await pickSkip(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Skip configuration");
@@ -539,9 +589,12 @@ describe("InstallApp fail-stop invariant", () => {
 		]);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickSkip(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await advanceThroughConfirm(stdin, frames);
+		await pickSkip(stdin, frames);
+		await waitForFrame(
+			frames,
+			"Claude Code backup already exists — left untouched",
+		);
 
 		const history = allFrames(frames);
 		expect(history).toContain(
@@ -566,9 +619,9 @@ describe("InstallApp fail-stop invariant", () => {
 		]);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickSkip(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await advanceThroughConfirm(stdin, frames);
+		await pickSkip(stdin, frames);
+		await waitForFrame(frames, "Nothing to back up for Claude Code");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Nothing to back up for Claude Code");
@@ -597,19 +650,19 @@ describe("InstallApp fail-stop invariant", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
+		await advanceThroughConfirm(stdin, frames);
 
 		// Wait for the first login attempt to reject.
-		await new Promise((r) => setTimeout(r, 200));
+		await waitForFrame(frames, "Login failed: network down");
 		expect(allFrames(frames)).toContain("Login failed: network down");
 		expect(allFrames(frames)).toContain("Press Enter to retry, Ctrl-C to quit");
 		expect(configureSpy).not.toHaveBeenCalled();
 
 		// Press Enter to retry login.
 		stdin.write("\r");
-		await pickNewKey(stdin);
-		await pickFirstModel(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
@@ -637,9 +690,9 @@ describe("InstallApp fail-stop invariant", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickNewKey(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Failed to fetch models");
@@ -693,11 +746,10 @@ describe("InstallApp existing-key path", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await settleAfterInstall();
-		// Wait for refresh + validation to settle and key-choice to render
-		// with the new option as the default cursor.
-		await new Promise((r) => setTimeout(r, 300));
+		await advanceThroughConfirm(stdin, frames);
+		// Wait for refresh + validation to settle and the saved-key option to
+		// appear in the key-choice list.
+		await waitForFrame(frames, "Reuse existing API Key");
 
 		const beforeChoice = allFrames(frames);
 		expect(beforeChoice).toContain("Reuse existing API Key");
@@ -710,15 +762,14 @@ describe("InstallApp existing-key path", () => {
 		// Even though the saved model ("m-alpha") matches a row in the list, no
 		// model row should be pre-marked with the green ● — that glyph only
 		// shows AFTER the user has actually picked something on this run.
-		await new Promise((r) => setTimeout(r, 100));
+		await waitForFrame(frames, "m-alpha");
 		const beforePick = frames[frames.length - 1] ?? "";
 		expect(beforePick).toContain("m-alpha");
 		expect(beforePick).not.toContain("● m-alpha");
 		expect(beforePick).not.toContain("● m-beta");
 
 		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 30));
-		await new Promise((r) => setTimeout(r, 1_300));
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
@@ -749,9 +800,8 @@ describe("InstallApp existing-key path", () => {
 		);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await settleAfterInstall();
-		await new Promise((r) => setTimeout(r, 300));
+		await advanceThroughConfirm(stdin, frames);
+		await waitForFrame(frames, "Saved API key is no longer valid");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Saved API key is no longer valid");
@@ -771,9 +821,8 @@ describe("InstallApp existing-key path", () => {
 		);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await settleAfterInstall();
-		await new Promise((r) => setTimeout(r, 300));
+		await advanceThroughConfirm(stdin, frames);
+		await waitForFrame(frames, "Could not verify saved API key");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Could not verify saved API key");

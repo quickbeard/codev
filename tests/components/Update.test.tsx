@@ -86,7 +86,7 @@ describe("Update", () => {
 		const onDone = vi.fn(() => {});
 
 		const { frames } = render(<Update onDone={onDone} />);
-		await new Promise((r) => setTimeout(r, 150));
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
 
 		const history = allFrames(frames);
 		expect(history).toContain("opencode-ai");
@@ -112,7 +112,7 @@ describe("Update", () => {
 		const onDone = vi.fn(() => {});
 
 		const { frames } = render(<Update onDone={onDone} />);
-		await new Promise((r) => setTimeout(r, 150));
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
 
 		const history = allFrames(frames);
 		expect(history).toContain("Failed to update opencode-ai");

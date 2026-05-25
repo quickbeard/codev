@@ -75,16 +75,19 @@ describe("runAgent", () => {
 		},
 	);
 
-	test("maps signal death to 128 + signo", async () => {
-		// No spaces inside the script: with shell:true on Windows, Node joins
-		// argv with spaces into the cmd.exe command line and an inline space in
-		// the script body would be re-parsed as a separate argument.
-		const code = await runAgent("node", [
-			"-e",
-			"process.kill(process.pid,'SIGTERM')",
-		]);
-		expect(code).toBe(128 + constants.signals.SIGTERM);
-	});
+	// Skipped on Windows: there are no real UNIX signals — `process.kill(pid,
+	// 'SIGTERM')` calls TerminateProcess and the child exits with code 1, not
+	// signal death. The 128+signo mapping is a POSIX-only contract.
+	test.skipIf(process.platform === "win32")(
+		"maps signal death to 128 + signo",
+		async () => {
+			const code = await runAgent("node", [
+				"-e",
+				"process.kill(process.pid,'SIGTERM')",
+			]);
+			expect(code).toBe(128 + constants.signals.SIGTERM);
+		},
+	);
 
 	test("prints a startup banner to stderr before launching", async () => {
 		// vi.spyOn(process.stderr, 'write') doesn't reliably intercept under
