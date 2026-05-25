@@ -99,6 +99,8 @@ When removing a string, label, or branch, don't pin its absence with `expect(...
 
 The install flow's "Skip configuration" auth choice routes through `backupOnly(tool)` instead of the per-agent `configure*` functions: it runs the same `ensureBackup` logic (so any existing live config is snapshotted to `*.backup` exactly once) and then exits without writing CoDev's own config. It also does not call `bypassClaudeLogin` — skip means CoDev touches nothing the user didn't already have. `Configure` accepts `creds: Credentials | null`; `null` is the signal to take this backup-only path.
 
+`restoreTool` is invoked via `codev restore <agent>` (one tool) or bare `codev restore` (sweep all tools with a backup). The dispatcher accepts **launch names** — `claude`/`codex`/`opencode` — and `toolForRestoreAgent` in `src/lib/restore.ts` maps them to the internal `Tool` type. Behavior splits on path: `runRestore` (single) treats a missing backup as an error and exits 1; `runRestoreAll` (sweep) skips tools without backups silently, only erroring when *every* tool was skipped. Keep that asymmetry — it's right for both contexts.
+
 ## Config refresh and upload self-healing
 
 Supabase coordinates (`supabase_url`, `supabase_anon_key`) are not baked into the source — they're fetched from `codev-proxy`'s `POST /config` endpoint and cached in `~/.codev/auth.json`. Two invariants keep that cache fresh:

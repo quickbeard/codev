@@ -15,9 +15,9 @@ const TOOL_LABEL: Record<Tool, string> = {
 };
 
 const RESTORE_CMD: Record<Tool, string> = {
-	"claude-code": "codev claude --restore",
-	codex: "codev codex --restore",
-	opencode: "codev opencode --restore",
+	"claude-code": "codev restore claude",
+	codex: "codev restore codex",
+	opencode: "codev restore opencode",
 };
 
 export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
