@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn as nodeSpawn } from "node:child_process";
 import { constants } from "node:os";
 import { stripShimDirFromPath } from "@/lib/shims.js";
 
@@ -6,6 +6,13 @@ const AGENT_LABEL: Record<string, string> = {
 	claude: "Claude Code",
 	codex: "Codex",
 	opencode: "OpenCode",
+};
+
+// Indirection so tests can stub the spawn call without intercepting
+// node:child_process at the module level (mirrors `spawner` in upload.ts and
+// reexec.ts, and `browserOpener` in auth.ts).
+export const spawner = {
+	spawn: nodeSpawn,
 };
 
 export function runAgent(cmd: string, args: string[]): Promise<number> {
@@ -23,7 +30,7 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 		// `opencode.cmd`). Node's `spawn` only consults PATHEXT when `shell: true`,
 		// so without this flag the spawn fails with ENOENT even though the agent
 		// is installed. Mirrors the win32 handling in lib/npm.ts.
-		const child = spawn(cmd, args, {
+		const child = spawner.spawn(cmd, args, {
 			stdio: "inherit",
 			env,
 			shell: process.platform === "win32",
