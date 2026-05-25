@@ -30,6 +30,10 @@ describe("Confirm", () => {
 		const out = lastFrame() ?? "";
 		expect(out).toContain(`${SOURCE} → ${BACKUP}`);
 		expect(out).not.toContain("already exists");
+		// The revert hint must point at the new subcommand shape — catches a
+		// silent revert of RESTORE_CMD back to the old `codev claude --restore`
+		// flag form.
+		expect(out).toContain("codev restore claude");
 	});
 
 	test("flags an existing backup as preserved (no new backup)", () => {
