@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MockInstance } from "vitest";
@@ -22,7 +22,10 @@ afterEach(() => {
 
 describe("runAgent", () => {
 	test("returns 0 when child exits cleanly", async () => {
-		expect(await runAgent("node", ["-e", ""])).toBe(0);
+		// `0` (a no-op expression) instead of `""` — runAgent uses shell:true and
+		// cmd.exe drops empty-string args, leaving Node with a bare `-e` and no
+		// script (which errors out with `node: -e requires an argument`).
+		expect(await runAgent("node", ["-e", "0"])).toBe(0);
 	});
 
 	test("returns the child's non-zero exit code", async () => {
@@ -30,11 +33,20 @@ describe("runAgent", () => {
 	});
 
 	test("forwards args verbatim to the child", async () => {
+		// Write the script to a file rather than passing it via `-e`. runAgent
+		// uses shell:true, and on Windows cmd.exe re-parses the joined command
+		// line — quotes/backslashes inside the inline script get mangled, and
+		// arguments containing spaces are split at the spaces.
 		const outPath = join(tempDir, "argv.json");
-		const script = `require('fs').writeFileSync(${JSON.stringify(outPath)}, JSON.stringify(process.argv.slice(1)))`;
+		const scriptPath = join(tempDir, "script.js");
+		writeFileSync(
+			scriptPath,
+			// slice(2) drops argv[0] (node) and argv[1] (the script path) so we
+			// only capture the user-forwarded args.
+			`require('fs').writeFileSync(${JSON.stringify(outPath)}, JSON.stringify(process.argv.slice(2)))`,
+		);
 		const code = await runAgent("node", [
-			"-e",
-			script,
+			scriptPath,
 			"hello",
 			"--flag",
 			"world",
@@ -44,23 +56,32 @@ describe("runAgent", () => {
 		expect(captured).toEqual(["hello", "--flag", "world"]);
 	});
 
-	test("returns 1 and prints install hint on ENOENT", async () => {
-		const code = await runAgent("codev-nonexistent-binary-xyzzy-12345", []);
-		expect(code).toBe(1);
-		const messages = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-		expect(
-			messages.some((m: string) =>
-				m.includes(
-					"could not be launched. If it isn't installed, run 'codev install'",
+	// Skipped on Windows: with shell:true, cmd.exe handles "command not
+	// recognized" itself and the child emits a non-zero exit instead of the
+	// ENOENT error event that drives runAgent's friendly install hint.
+	test.skipIf(process.platform === "win32")(
+		"returns 1 and prints install hint on ENOENT",
+		async () => {
+			const code = await runAgent("codev-nonexistent-binary-xyzzy-12345", []);
+			expect(code).toBe(1);
+			const messages = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+			expect(
+				messages.some((m: string) =>
+					m.includes(
+						"could not be launched. If it isn't installed, run 'codev install'",
+					),
 				),
-			),
-		).toBe(true);
-	});
+			).toBe(true);
+		},
+	);
 
 	test("maps signal death to 128 + signo", async () => {
+		// No spaces inside the script: with shell:true on Windows, Node joins
+		// argv with spaces into the cmd.exe command line and an inline space in
+		// the script body would be re-parsed as a separate argument.
 		const code = await runAgent("node", [
 			"-e",
-			"process.kill(process.pid, 'SIGTERM')",
+			"process.kill(process.pid,'SIGTERM')",
 		]);
 		expect(code).toBe(128 + constants.signals.SIGTERM);
 	});

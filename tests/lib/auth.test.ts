@@ -46,6 +46,9 @@ const EXPIRED_AUTH: AuthData = {
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-auth-test-"));
 	vi.stubEnv("HOME", tempDir);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempDir);
 });
 
 afterEach(() => {

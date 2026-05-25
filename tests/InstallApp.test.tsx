@@ -28,6 +28,9 @@ let installAppTempHome: string;
 beforeEach(() => {
 	installAppTempHome = mkdtempSync(join(tmpdir(), "codev-installapp-test-"));
 	vi.stubEnv("HOME", installAppTempHome);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", installAppTempHome);
 	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
 	// inline post-install refresh doesn't block tests on a real fetch.
 	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);

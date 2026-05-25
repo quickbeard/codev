@@ -1,5 +1,6 @@
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
+import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { UpdateApp } from "@/UpdateApp.js";
@@ -52,7 +53,7 @@ describe("UpdateApp", () => {
 		const existsSpy = vi
 			.mocked(fs.existsSync)
 			.mockImplementation(
-				(p: fs.PathLike) => String(p) === "/fake/root/opencode-ai",
+				(p: fs.PathLike) => String(p) === join("/fake/root", "opencode-ai"),
 			);
 
 		const { frames } = render(<UpdateApp />);
@@ -91,7 +92,7 @@ describe("UpdateApp", () => {
 		const existsSpy = vi
 			.mocked(fs.existsSync)
 			.mockImplementation(
-				(p: fs.PathLike) => String(p) === "/fake/root/opencode-ai",
+				(p: fs.PathLike) => String(p) === join("/fake/root", "opencode-ai"),
 			);
 
 		const { frames } = render(<UpdateApp />);

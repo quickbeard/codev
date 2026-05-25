@@ -10,6 +10,9 @@ let tempHome: string;
 beforeEach(() => {
 	tempHome = mkdtempSync(join(tmpdir(), "codev-configure-test-"));
 	vi.stubEnv("HOME", tempHome);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempHome);
 });
 
 afterEach(() => {

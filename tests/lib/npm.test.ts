@@ -1,5 +1,6 @@
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
 	detectInstalledViaNpm,
@@ -442,7 +443,7 @@ describe("npm.ts", () => {
 				.mocked(fs.existsSync)
 				.mockImplementation(
 					(p: fs.PathLike) =>
-						String(p) === "/fake/root/@anthropic-ai/claude-code",
+						String(p) === join("/fake/root", "@anthropic-ai", "claude-code"),
 				);
 			const got = await detectInstalledViaNpm("claude-code");
 			expect(got).toBe(true);
