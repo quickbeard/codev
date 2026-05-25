@@ -30,15 +30,6 @@ function allFrames(frames: string[]): string {
 	return frames.join("\n");
 }
 
-function fakeAuth(): auth.AuthData {
-	return {
-		access_token: "access-xyz",
-		id_token: "id-xyz",
-		expires_at: Date.now() + 3_600_000,
-		user: { sub: "u", email: "test@example.com", displayName: "Test" },
-	};
-}
-
 describe("ModelApp", () => {
 	test("errors out when no saved creds are present", async () => {
 		vi.spyOn(auth, "loadApiKey").mockReturnValue(null);

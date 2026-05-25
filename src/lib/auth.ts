@@ -79,7 +79,6 @@ interface AuthFileContents {
 	model?: string;
 	supabase_url?: string;
 	supabase_anon_key?: string;
-	proxy_url?: string;
 }
 
 export interface CodevConfig {
@@ -163,22 +162,6 @@ export function saveCodevConfig(config: CodevConfig): void {
 	});
 }
 
-// Stores the user's chosen proxy URL (or clears it when null is passed, so
-// PROXY_URL() falls back to the baked-in default). Trailing slashes are
-// stripped by the caller (the ProxyUrl component) before reaching this.
-export function saveProxyUrl(url: string | null): void {
-	const existing = readAuthFile() ?? {};
-	writeAuthFile({
-		...existing,
-		proxy_url: url ?? undefined,
-	});
-}
-
-export function loadProxyUrl(): string | null {
-	const raw = readAuthFile();
-	return raw?.proxy_url ?? null;
-}
-
 export function loadApiKey(): ApiKeyCreds | null {
 	const raw = readAuthFile();
 	if (!raw?.api_key) return null;
@@ -201,7 +184,6 @@ export async function logout(): Promise<boolean> {
 			model: raw.model,
 			supabase_url: raw.supabase_url,
 			supabase_anon_key: raw.supabase_anon_key,
-			proxy_url: raw.proxy_url,
 		};
 		const hasAnything = Object.values(preserved).some((v) => v !== undefined);
 		if (hasAnything) {
@@ -389,15 +371,14 @@ export async function login(
 	return authData;
 }
 
-// Best-effort: pull the latest Supabase coordinates from codev-proxy
-// (against PROXY_URL(), which honors the user's custom-proxy override) and
+// Best-effort: pull the latest Supabase coordinates from codev-proxy and
 // persist them next to the SSO session. Failure is logged but not thrown —
 // downstream accessors (SUPABASE_URL/ANON_KEY in const.ts) will hard-fail
 // later if no values were ever fetched, with a "run codev install" message
 // that's actionable for the user.
 //
 // Callers are responsible for invoking this after a successful login:
-//   - InstallApp runs it as its own phase (after the user picks the proxy URL)
+//   - InstallApp runs it as a `refreshing-config` phase right after install
 //   - upload.ts's ensureAuth runs it on the fresh-login branch, and again
 //     in the retry path after a 401/403 from Supabase (config may have
 //     rotated since the last login).
