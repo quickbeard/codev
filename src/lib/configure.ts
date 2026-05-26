@@ -374,7 +374,7 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 	return [{ kind: "claude-settings", sourcePath, backupPath, created }];
 }
 
-export type RestoreStatus = "restored" | "no-backup";
+export type RestoreStatus = "restored" | "deleted-live" | "noop";
 
 export interface RestoreResult {
 	status: RestoreStatus;
@@ -382,18 +382,31 @@ export interface RestoreResult {
 	backupPath: string;
 }
 
+// "Make this tool look pre-CoDev." Three terminal states:
+//   - backup present → swap it over the live file (the user's pre-CoDev
+//     config is reinstated).
+//   - no backup, but a live file exists → delete the live file. CoDev only
+//     skips the backup step when there was nothing to back up in the first
+//     place, so any live file here is CoDev-authored; removing it lands the
+//     user at "no config", which IS the pre-CoDev state.
+//   - neither file exists → noop; already at pre-CoDev state.
 export function restoreTool(tool: Tool): RestoreResult {
 	const kind = kindForTool(tool);
 	const sourcePath = sourcePathOf(kind);
 	const backupPath = `${sourcePath}.backup`;
 
-	if (!existsSync(backupPath)) {
-		return { status: "no-backup", sourcePath, backupPath };
+	if (existsSync(backupPath)) {
+		rmSync(sourcePath, { force: true });
+		renameSync(backupPath, sourcePath);
+		return { status: "restored", sourcePath, backupPath };
 	}
 
-	rmSync(sourcePath, { force: true });
-	renameSync(backupPath, sourcePath);
-	return { status: "restored", sourcePath, backupPath };
+	if (existsSync(sourcePath)) {
+		rmSync(sourcePath, { force: true });
+		return { status: "deleted-live", sourcePath, backupPath };
+	}
+
+	return { status: "noop", sourcePath, backupPath };
 }
 
 export function configureCodex(creds: Credentials): ConfigureResult[] {

@@ -685,14 +685,29 @@ describe("restoreTool", () => {
 		expect(existsSync(livePath)).toBe(true);
 	});
 
-	test("returns no-backup status when backup missing", async () => {
+	test("returns noop status when neither backup nor live file exists", async () => {
 		const { restoreTool } = await import("@/lib/configure.js");
 		const result = restoreTool("claude-code");
 
-		expect(result.status).toBe("no-backup");
+		expect(result.status).toBe("noop");
 		expect(result.backupPath).toBe(
 			join(tempDir, ".claude", "settings.json.backup"),
 		);
+	});
+
+	test("deletes the live CoDev config when no backup exists", async () => {
+		const dir = join(tempDir, ".claude");
+		const livePath = join(dir, "settings.json");
+		const backupPath = `${livePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(livePath, '{"marker":"codev-live"}');
+
+		const { restoreTool } = await import("@/lib/configure.js");
+		const result = restoreTool("claude-code");
+
+		expect(result.status).toBe("deleted-live");
+		expect(existsSync(livePath)).toBe(false);
+		expect(existsSync(backupPath)).toBe(false);
 	});
 
 	test("replaces the live Continue config.yaml with the backup", async () => {
