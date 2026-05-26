@@ -77,6 +77,24 @@ function findMacAppBinary(cli: JetBrainsCli): string | null {
 // (all-ENOENT), or one or more IDEs ran the command and returned non-zero.
 export type InstallPluginResult = null | { warning: string };
 
+// Per-launcher serialization queue. JetBrains IDEs hold a single-instance
+// lock during headless `installPlugins`, so two simultaneous invocations
+// against the same IDE (e.g. parallel Claude Code + Continue installs from
+// the TaskList) race and one fails. Each entry chains the next invocation
+// onto the previous one's completion; calls against *different* launchers
+// stay parallel. Keyed by CLI name (not resolved binary path) so the
+// PATH-launcher and the .app-fallback for the same IDE share one queue.
+const launcherQueues = new Map<string, Promise<unknown>>();
+async function runOnLauncher<T>(cli: string, fn: () => Promise<T>): Promise<T> {
+	const prev = launcherQueues.get(cli) ?? Promise.resolve();
+	const next = prev.then(fn, fn);
+	launcherQueues.set(
+		cli,
+		next.catch(() => undefined),
+	);
+	return next;
+}
+
 // Best-effort install of a JetBrains plugin. Runs `<bin> installPlugins
 // <plugin-id>` against every CLI on PATH, sequentially — IDE batch boots
 // fight each other if parallelized and the user only needs the plugin in
@@ -91,11 +109,15 @@ async function installPlugin(pluginId: string): Promise<InstallPluginResult> {
 	let installed = 0;
 	const errors: string[] = [];
 	for (const cli of JETBRAINS_CLIS) {
-		let r = await execAsync(cli, ["installPlugins", pluginId]);
-		if (r.error?.code === "ENOENT") {
-			const fallback = findMacAppBinary(cli);
-			if (fallback) r = await execAsync(fallback, ["installPlugins", pluginId]);
-		}
+		const r = await runOnLauncher(cli, async () => {
+			let res = await execAsync(cli, ["installPlugins", pluginId]);
+			if (res.error?.code === "ENOENT") {
+				const fallback = findMacAppBinary(cli);
+				if (fallback)
+					res = await execAsync(fallback, ["installPlugins", pluginId]);
+			}
+			return res;
+		});
 		if (!r.error) {
 			installed++;
 			continue;

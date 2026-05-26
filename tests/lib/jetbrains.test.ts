@@ -247,6 +247,62 @@ describe("installClaudeCodePlugin", () => {
 	});
 });
 
+describe("installPlugin (per-launcher serialization)", () => {
+	test("does not run two installs against the same CLI concurrently", async () => {
+		// TaskList fires each row's `run()` in parallel, so two extension
+		// rows (Claude Code + Continue) both call `pycharm installPlugins`
+		// simultaneously. JetBrains IDEs hold a single-instance lock during
+		// headless `installPlugins`; the second invocation fails. The fix
+		// queues calls per CLI so only one IDE boot runs at a time.
+		const activeByCli = new Map<string, number>();
+		const peakByCli = new Map<string, number>();
+		const pending: Array<() => void> = [];
+
+		vi.mocked(child_process.execFile).mockImplementation(((
+			...callArgs: unknown[]
+		) => {
+			const { file, cb } = normalizeExecFileCall(callArgs);
+			const next = (activeByCli.get(file) ?? 0) + 1;
+			activeByCli.set(file, next);
+			peakByCli.set(file, Math.max(peakByCli.get(file) ?? 0, next));
+			pending.push(() => {
+				activeByCli.set(file, (activeByCli.get(file) ?? 1) - 1);
+				cb(null, "ok", "");
+			});
+			return {} as unknown as child_process.ChildProcess;
+		}) as unknown as typeof child_process.execFile);
+
+		// Drain the queue one call at a time. Each drain releases exactly
+		// one pending exec; if the lock is working the next-in-queue can't
+		// have started until the previous resolves.
+		const drainer = (async () => {
+			while (true) {
+				while (pending.length > 0) {
+					const release = pending.shift();
+					release?.();
+					await new Promise((r) => setImmediate(r));
+				}
+				if (
+					Array.from(activeByCli.values()).every((n) => n === 0) &&
+					pending.length === 0
+				) {
+					// Yield once more in case a follow-up exec is about to fire.
+					await new Promise((r) => setImmediate(r));
+					if (pending.length === 0) return;
+				}
+				await new Promise((r) => setImmediate(r));
+			}
+		})();
+
+		await Promise.all([installContinuePlugin(), installClaudeCodePlugin()]);
+		await drainer;
+
+		for (const cli of JETBRAINS_CLIS) {
+			expect(peakByCli.get(cli) ?? 0).toBeLessThanOrEqual(1);
+		}
+	});
+});
+
 // macOS users frequently install JetBrains IDEs via the official `.dmg`
 // without enabling Toolbox's "Generate shell scripts" option, so the
 // `pycharm` / `idea` / `goland` launchers never land on PATH. The fallback
