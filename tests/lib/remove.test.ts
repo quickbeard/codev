@@ -155,7 +155,7 @@ describe("runRemove", () => {
 		vi.spyOn(configure, "restoreTool").mockImplementation((tool) => {
 			if (tool === "codex") throw new Error("boom");
 			return {
-				status: "no-backup",
+				status: "noop",
 				sourcePath: `/tmp/${tool}-fake`,
 				backupPath: `/tmp/${tool}-fake.backup`,
 			};

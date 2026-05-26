@@ -1,4 +1,4 @@
-import { getBackupStatus, restoreTool, type Tool } from "@/lib/configure.js";
+import { type RestoreResult, restoreTool, type Tool } from "@/lib/configure.js";
 
 // Launch-name aliases that `codev restore <name>` accepts. The first three
 // match the agent launchers (`codev claude`, `codev codex`, `codev opencode`)
@@ -28,49 +28,53 @@ export function toolForRestoreAgent(agent: RestoreAgent): Tool {
 	return TOOL_FOR_AGENT[agent];
 }
 
+function reportRestoreResult(result: RestoreResult): void {
+	switch (result.status) {
+		case "restored":
+			console.log(`Restored ${result.sourcePath} from ${result.backupPath}.`);
+			return;
+		case "deleted-live":
+			console.log(`No backup at ${result.backupPath}.`);
+			return;
+		case "noop":
+			console.log(
+				`Nothing to restore for ${result.sourcePath}; already at pre-CoDev state.`,
+			);
+			return;
+	}
+}
+
 export function runRestore(tool: Tool): number {
 	const result = restoreTool(tool);
-	if (result.status === "no-backup") {
-		console.error(`No backup found at ${result.backupPath}.`);
-		return 1;
-	}
-	console.log(`Restored ${result.sourcePath} from ${result.backupPath}.`);
+	reportRestoreResult(result);
 	return 0;
 }
 
-// Bare `codev restore` — sweep every tool that has a *.backup on disk and
-// restore each. Tools without a backup are skipped silently (not an error,
-// since "nothing to restore" is the normal state for unconfigured tools).
-// Returns 0 unless at least one tool failed or every tool was skipped.
-export function runRestoreAll(): number {
-	const tools: Tool[] = [
-		"claude-code",
-		"codex",
-		"opencode",
-		"vscode-claude-code",
-		"jetbrains-claude-code",
-		"vscode-continue",
-		"jetbrains-continue",
-	];
-	let restored = 0;
-	let failed = 0;
+// One Tool per BackupKind. The extension variants (`vscode-claude-code`,
+// `jetbrains-claude-code`, `jetbrains-continue`) share their config file with
+// the canonical entry, so iterating them too would have the second visit see
+// no backup and then delete the file the first visit just restored.
+const SWEEP_TOOLS: Tool[] = [
+	"claude-code",
+	"codex",
+	"opencode",
+	"vscode-continue",
+];
 
-	for (const tool of tools) {
-		const [status] = getBackupStatus(tool);
-		if (!status?.hasBackup) continue;
+// Bare `codev restore` — process every tool. Each tool ends in one of three
+// states (restored / deleted-live / noop). Exit 1 only if every tool was
+// noop or any threw; otherwise 0.
+export function runRestoreAll(): number {
+	let acted = 0;
+	let failed = 0;
+	let noop = 0;
+
+	for (const tool of SWEEP_TOOLS) {
 		try {
 			const result = restoreTool(tool);
-			if (result.status === "restored") {
-				console.log(`Restored ${result.sourcePath} from ${result.backupPath}.`);
-				restored++;
-			} else {
-				// hasBackup was true a moment ago; if restoreTool now reports
-				// no-backup the file vanished between the check and the rename.
-				console.error(
-					`Backup for ${tool} disappeared during restore (${result.backupPath}).`,
-				);
-				failed++;
-			}
+			reportRestoreResult(result);
+			if (result.status === "noop") noop++;
+			else acted++;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			console.error(`Failed to restore ${tool}: ${msg}`);
@@ -78,7 +82,7 @@ export function runRestoreAll(): number {
 		}
 	}
 
-	if (restored === 0 && failed === 0) {
+	if (acted === 0 && failed === 0 && noop > 0) {
 		console.error("No backups found. Nothing to restore.");
 		return 1;
 	}

@@ -55,6 +55,15 @@ const TOOL_LABEL: Record<Tool, string> = {
 	"jetbrains-continue": "Continue",
 };
 
+// Natural-English list join: "X", "X and Y", "X, Y, and Z".
+export function formatToolList(labels: string[]): string {
+	if (labels.length === 0) return "";
+	if (labels.length === 1) return labels[0] ?? "";
+	if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+	const head = labels.slice(0, -1).join(", ");
+	return `${head}, and ${labels[labels.length - 1]}`;
+}
+
 export function ModelApp() {
 	const { exit } = useApp();
 	const [phase, setPhase] = useState<Phase>("loading");
@@ -92,15 +101,13 @@ export function ModelApp() {
 	}, [phase]);
 
 	// ModelSelect's onError handler. On invalid key, branch to re-auth (SSO
-	// vs manual) based on whether the saved key had a baseUrl. On any other
-	// error (network/5xx/timeout/empty list), terminal failed.
+	// vs manual) based on whether the saved key had a baseUrl. Any other
+	// error (network/5xx/timeout/empty list) is left to ModelSelect's
+	// in-component retry prompt — we stay on this step so the user can press
+	// Enter to retry without re-running `codev model`.
 	const handleModelsError = useCallback(
 		(err: Error) => {
-			if (!isInvalidKeyError(err)) {
-				setError(err.message);
-				setPhase("failed");
-				return;
-			}
+			if (!isInvalidKeyError(err)) return;
 			if (reAuthed.current) {
 				setError(
 					`${err.message}\nRe-authentication did not produce a valid key. Run 'codev install' to refresh credentials.`,
@@ -284,25 +291,29 @@ export function ModelApp() {
 					</Step>
 				)}
 
-				{phase === "configuring" && (
-					<Box>
-						<Text color="cyan">
-							<Spinner />
-						</Text>
-						<Text> Updating tool configs...</Text>
-					</Box>
-				)}
-
-				{phase === "done" && chosenModel && (
-					<Box flexDirection="column">
-						<Text>
-							{"Default model updated to "}
-							<Text color="cyan">{chosenModel}</Text>
-							{" for "}
-							{tools.map((t) => TOOL_LABEL[t]).join(", ")}
-							{"."}
-						</Text>
-					</Box>
+				{(phase === "configuring" || phase === "done") && (
+					<Step
+						active={phase === "configuring"}
+						title={<Text bold>Update tool configs</Text>}
+					>
+						{phase === "configuring" && (
+							<Box>
+								<Text color="cyan">
+									<Spinner />
+								</Text>
+								<Text> Updating tool configs...</Text>
+							</Box>
+						)}
+						{phase === "done" && chosenModel && (
+							<Text>
+								{"Default model updated to "}
+								<Text color="cyan">{chosenModel}</Text>
+								{" for "}
+								{formatToolList(tools.map((t) => TOOL_LABEL[t]))}
+								{"."}
+							</Text>
+						)}
+					</Step>
 				)}
 
 				{phase === "failed" && error && <Text color="red">{error}</Text>}

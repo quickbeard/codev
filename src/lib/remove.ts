@@ -97,25 +97,22 @@ function runRestoreOrDelete(tool: Tool): StepResult {
 	const label = TOOL_LABEL[tool];
 	try {
 		const result = restoreTool(tool);
-		if (result.status === "restored") {
-			return {
-				label,
-				detail: `restored from ${result.backupPath}`,
-				status: "ok",
-			};
+		switch (result.status) {
+			case "restored":
+				return {
+					label,
+					detail: `restored from ${result.backupPath}`,
+					status: "ok",
+				};
+			case "deleted-live":
+				return {
+					label,
+					detail: `no backup; deleted ${result.sourcePath}`,
+					status: "ok",
+				};
+			case "noop":
+				return { label, detail: "nothing to restore", status: "noop" };
 		}
-		// status === "no-backup": fall through to deleting whatever live config
-		// CoDev wrote, so the user really is back at pre-CoDev state (i.e. no
-		// CoDev-authored config left behind).
-		if (existsSync(result.sourcePath)) {
-			rmSync(result.sourcePath, { force: true });
-			return {
-				label,
-				detail: `no backup; deleted ${result.sourcePath}`,
-				status: "ok",
-			};
-		}
-		return { label, detail: "nothing to restore", status: "noop" };
 	} catch (err) {
 		return { label, detail: errorMessage(err), status: "failed" };
 	}
