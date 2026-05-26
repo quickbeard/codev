@@ -71,12 +71,6 @@ function normalizeOpenCodeBaseUrl(url: string): string {
 	return url.endsWith("/") ? `${url}v1` : `${url}/v1`;
 }
 
-// Fallback model used when the `/v1/models` fetch fails (network error,
-// timeout, auth error, or empty response). Install proceeds with this model
-// rather than blocking. Base64-encoded to keep the literal name out of the
-// shipped source.
-export const DEFAULT_MODEL = atob("TWluaU1heA==");
-
 function requireModel(creds: Credentials): string {
 	if (!creds.model) {
 		throw new Error("Credentials.model is required");
