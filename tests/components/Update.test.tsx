@@ -299,7 +299,7 @@ describe("Update", () => {
 		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
 
 		const history = allFrames(frames);
-		expect(history).toContain("Updated com.anthropic.claude-code (JetBrains)");
+		expect(history).toContain("Updated com.anthropic.code.plugin (JetBrains)");
 		expect(history).not.toContain("(VS Code)");
 		expect(onDone).toHaveBeenCalledWith(true);
 		existsSpy.mockRestore();
