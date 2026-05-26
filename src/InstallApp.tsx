@@ -16,7 +16,7 @@ import {
 } from "@/components/ContinueEditorSelect.js";
 import { FetchApiKey, fetchApiKeyTitle } from "@/components/FetchApiKey.js";
 import { Frame } from "@/components/Frame.js";
-import { Install, type InstallWarning } from "@/components/Install.js";
+import { Install } from "@/components/Install.js";
 import { Login, loginTitle } from "@/components/Login.js";
 import {
 	ManualCredentials,
@@ -119,7 +119,6 @@ export function InstallApp() {
 	const [shimsInstalled, setShimsInstalled] = useState(false);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
 	const [modelsError, setModelsError] = useState<string | null>(null);
-	const [installWarnings, setInstallWarnings] = useState<InstallWarning[]>([]);
 
 	const handleToolSelectConfirm = (selected: ToolSelectValue[]) => {
 		const hasContinue = selected.includes(CONTINUE_SENTINEL);
@@ -187,11 +186,11 @@ export function InstallApp() {
 	// step's error frame stays rendered so the user can read it; exiting the
 	// app is left to the user (Ctrl-C), matching Login/Configure's prior
 	// hang-on-error behavior. Soft warnings (Continue extension/plugin
-	// install couldn't run cleanly) ride forward via `warnings` — they
-	// don't block the flow; Configure surfaces them as manual-install hints.
+	// install couldn't run cleanly) are rendered as yellow ▲ rows in the
+	// install TaskList itself — they don't flip `success` and don't need to
+	// propagate further.
 	const handleInstallDone = useCallback(
-		(success: boolean, warnings: InstallWarning[]) => {
-			setInstallWarnings(warnings);
+		(success: boolean) => {
 			if (!success) {
 				setStep("install-failed");
 				return;
@@ -465,7 +464,6 @@ export function InstallApp() {
 								tools={tools}
 								creds={creds}
 								shimsInstalled={shimsInstalled}
-								installWarnings={installWarnings}
 								onDone={handleConfigureDone}
 							/>
 						</Step>

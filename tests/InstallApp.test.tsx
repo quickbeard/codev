@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { JETBRAINS_HINT, VSCODE_HINT } from "@/components/Install.js";
 import { InstallApp } from "@/InstallApp.js";
 import * as auth from "@/lib/auth.js";
 import * as configure from "@/lib/configure.js";
@@ -751,15 +750,11 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(history).toContain("Happy coding");
 		// Configure was called for Continue (single dedup'd write).
 		expect(configureSpy).toHaveBeenCalledTimes(1);
-		// The soft-fail hint surfaces in the resume block.
-		expect(history).toContain(
-			"Continue extension auto-install did not complete",
-		);
+		// The install row surfaces the cause + manual-install reassurance.
 		expect(history).toContain("VS Code launcher not found on PATH");
-		// `VSCODE_HINT` is the shared constant — both the install row and
-		// the Configure-pane hint render it, so a reword of the constant
-		// itself breaks this assertion and the corresponding Configure test.
-		expect(history).toContain(VSCODE_HINT);
+		expect(history).toContain(
+			"You can install the Continue extension yourself later.",
+		);
 	});
 
 	test("non-ENOENT Continue install failure (proxy / marketplace 5xx) still reaches Configure", async () => {
@@ -825,9 +820,9 @@ describe("InstallApp fail-stop invariant", () => {
 
 		// Ink wraps long lines inside the rendered frame AND prefixes each
 		// wrapped line with the Frame component's `│` border character — so
-		// a substring like VSCODE_HINT can end up as "You can install the │
-		// Continue extension yourself later." in the joined history. Strip
-		// the border pipes and collapse whitespace before substring-matching.
+		// the manual-install reassurance can end up split as "You can install
+		// the │ Continue extension yourself later." in the joined history.
+		// Strip the border pipes and collapse whitespace before matching.
 		const history = allFrames(frames).replace(/│/g, " ").replace(/\s+/g, " ");
 		// 1. The YAML config was still written — soft fail must not block
 		//    the part of the flow CoDev actually owns.
@@ -836,15 +831,11 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(history).toContain("Happy coding");
 		expect(history).not.toContain("Failed to install");
 		// 3. The install row surfaced the real cause (proxy/marketplace
-		//    error), so the user knows what went wrong.
+		//    error) + the manual-install reassurance.
 		expect(history).toContain("Proxy returned 502 Bad Gateway");
-		// 4. Both the install row and the Configure-pane yellow hint render
-		//    the same shared `VSCODE_HINT` constant. The Configure-specific
-		//    "auto-install did not complete" prefix anchors the pane.
 		expect(history).toContain(
-			"Continue extension auto-install did not complete",
+			"You can install the Continue extension yourself later.",
 		);
-		expect(history).toContain(VSCODE_HINT);
 	});
 
 	test("JetBrains-only Continue install: no launcher on PATH still reaches Configure", async () => {
@@ -914,14 +905,14 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 		expect(history).toContain("Happy coding");
 		expect(history).not.toContain("Failed to install");
-		// Install row + Configure pane both render the shared JETBRAINS_HINT.
-		// The Configure-specific "auto-install did not complete" prefix
-		// anchors the pane; the JetBrains-launcher cause text anchors the row.
+		// Install row surfaces the JetBrains-launcher cause text + the
+		// manual-install reassurance.
 		expect(history).toContain(
 			"JetBrains launcher not found on PATH (PyCharm / IntelliJ IDEA / GoLand)",
 		);
-		expect(history).toContain("Continue plugin auto-install did not complete");
-		expect(history).toContain(JETBRAINS_HINT);
+		expect(history).toContain(
+			"You can install the Continue plugin yourself later.",
+		);
 	});
 
 	test("models fetch failure falls back to DEFAULT_MODEL and reaches done", async () => {
