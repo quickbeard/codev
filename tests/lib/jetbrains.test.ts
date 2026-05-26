@@ -1,5 +1,6 @@
 import * as child_process from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	CLAUDE_CODE_INTELLIJ_PLUGIN_ID,
@@ -327,19 +328,27 @@ describe("installContinuePlugin (macOS .app fallback)", () => {
 	test("invokes the .app binary when the PATH launcher is missing", async () => {
 		// /Applications has PyCharm.app installed but no `pycharm` launcher
 		// is on PATH (user never ran Toolbox's "Generate shell scripts").
+		// Build the expected binary path with the same `join` the production
+		// code uses, so the test passes on Windows CI (where `path.join` is
+		// the win32 variant and emits backslashes) without forcing a posix
+		// override.
+		const pycharmAppBin = join(
+			"/Applications",
+			"PyCharm.app",
+			"Contents",
+			"MacOS",
+			"pycharm",
+		);
 		vi.mocked(readdirSync).mockImplementation(((root: string) => {
 			if (root === "/Applications") return ["PyCharm.app"];
 			return [];
 		}) as unknown as typeof readdirSync);
 		vi.mocked(existsSync).mockImplementation(
-			((p: string) =>
-				p ===
-				"/Applications/PyCharm.app/Contents/MacOS/pycharm") as unknown as typeof existsSync,
+			((p: string) => p === pycharmAppBin) as unknown as typeof existsSync,
 		);
 		const calls = stubExecFile({
 			handler: (file) => {
-				if (file === "/Applications/PyCharm.app/Contents/MacOS/pycharm")
-					return { stdout: "ok" };
+				if (file === pycharmAppBin) return { stdout: "ok" };
 				return { error: enoent(file) };
 			},
 		});
@@ -352,7 +361,7 @@ describe("installContinuePlugin (macOS .app fallback)", () => {
 		expect(calls.map((c) => c.file)).toEqual([
 			"idea",
 			"pycharm",
-			"/Applications/PyCharm.app/Contents/MacOS/pycharm",
+			pycharmAppBin,
 			"goland",
 		]);
 		const pycharmAppCall = calls.find((c) => c.file.includes("PyCharm.app"));
@@ -365,36 +374,32 @@ describe("installContinuePlugin (macOS .app fallback)", () => {
 	test("matches edition variants by .app name prefix", async () => {
 		// Ultimate edition installs as "IntelliJ IDEA Ultimate.app"; CE as
 		// "IntelliJ IDEA CE.app". The fallback should accept any bundle whose
-		// stem starts with the canonical name.
+		// stem starts with the canonical name. Use `join` for the same
+		// platform-portability reason as the PyCharm test above.
+		const ideaAppBin = join(
+			"/Applications",
+			"IntelliJ IDEA Ultimate.app",
+			"Contents",
+			"MacOS",
+			"idea",
+		);
 		vi.mocked(readdirSync).mockImplementation(((root: string) => {
 			if (root === "/Applications") return ["IntelliJ IDEA Ultimate.app"];
 			return [];
 		}) as unknown as typeof readdirSync);
 		vi.mocked(existsSync).mockImplementation(
-			((p: string) =>
-				p ===
-				"/Applications/IntelliJ IDEA Ultimate.app/Contents/MacOS/idea") as unknown as typeof existsSync,
+			((p: string) => p === ideaAppBin) as unknown as typeof existsSync,
 		);
 		const calls = stubExecFile({
 			handler: (file) => {
-				if (
-					file ===
-					"/Applications/IntelliJ IDEA Ultimate.app/Contents/MacOS/idea"
-				)
-					return { stdout: "ok" };
+				if (file === ideaAppBin) return { stdout: "ok" };
 				return { error: enoent(file) };
 			},
 		});
 
 		const result = await installContinuePlugin();
 		expect(result).toBeNull();
-		expect(
-			calls.some(
-				(c) =>
-					c.file ===
-					"/Applications/IntelliJ IDEA Ultimate.app/Contents/MacOS/idea",
-			),
-		).toBe(true);
+		expect(calls.some((c) => c.file === ideaAppBin)).toBe(true);
 	});
 
 	test("does not retry when the .app exists but the embedded binary is missing", async () => {
