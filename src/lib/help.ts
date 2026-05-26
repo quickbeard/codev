@@ -14,8 +14,9 @@ Commands:
   update              Update installed AI coding agents
   upload              Export and upload logs to the monitor module
   model               Switch the default model
-  restore [agent]     Restore an agent's pre-CoDev config from its *.backup
-                      (no arg restores every agent that has a backup)
+  restore [agent]     Restore an agent's pre-CoDev config from its *.backup,
+                      or remove CoDev's config if no backup exists
+                      (no arg processes every agent)
   login               Sign in to SSO (--force to bypass cached session)
   logout              Sign out of SSO
   remove              Revert this machine to its pre-CoDev state (--yes to skip prompt)
