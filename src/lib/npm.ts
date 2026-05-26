@@ -3,27 +3,25 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Tool } from "@/lib/configure.js";
 
-export const PKG: Record<Tool, string> = {
+// Tools installed via npm-global. The Continue editor variants are not npm
+// packages — VS Code installs the extension via `code --install-extension`
+// (lib/vscode.ts) and JetBrains installs the plugin via the per-IDE CLI
+// (lib/jetbrains.ts). Keep them out of these maps so callers can't
+// accidentally `npm install -g` something that doesn't exist and the type
+// checker enforces routing through the right module.
+export type NpmTool = Exclude<Tool, "vscode-continue" | "jetbrains-continue">;
+
+export function isNpmTool(tool: Tool): tool is NpmTool {
+	return tool !== "vscode-continue" && tool !== "jetbrains-continue";
+}
+
+export const PKG: Record<NpmTool, string> = {
 	"claude-code": "@anthropic-ai/claude-code",
 	opencode: "opencode-ai",
 	codex: "@openai/codex",
 };
 
-// Claude Code 2.1.142 shipped a Windows npm package that resolves to a
-// non-PE binary at `bin/claude.exe`, which Windows surfaces as the generic
-// "Unsupported 16-Bit Application" dialog and refuses to run
-// (anthropics/claude-code#50962). 2.1.141 is the last known-good release on
-// Windows; macOS/Linux are unaffected, so we only pin on win32.
-const CLAUDE_CODE_WIN32_PIN = "2.1.141";
-
-export function installSpec(tool: Tool): string {
-	if (tool === "claude-code" && process.platform === "win32") {
-		return `${PKG[tool]}@${CLAUDE_CODE_WIN32_PIN}`;
-	}
-	return PKG[tool];
-}
-
-export const CLI: Record<Tool, string> = {
+export const CLI: Record<NpmTool, string> = {
 	"claude-code": "claude",
 	opencode: "opencode",
 	codex: "codex",
@@ -41,13 +39,36 @@ export interface ExecResult {
 
 export function execAsync(file: string, args: string[]): Promise<ExecResult> {
 	return new Promise((resolve) => {
-		execFile(file, args, { shell: USE_SHELL }, (error, stdout, stderr) => {
+		const done = (
+			error: NodeJS.ErrnoException | null,
+			stdout: string,
+			stderr: string,
+		) => {
 			resolve({
-				stdout: stdout?.toString() ?? "",
-				stderr: stderr?.toString() ?? "",
-				error: error as NodeJS.ErrnoException | null,
+				stdout: stdout ?? "",
+				stderr: stderr ?? "",
+				error,
 			});
-		});
+		};
+		// Node 22's DEP0190 deprecates the (file, args, { shell: true })
+		// signature: with shell:true the args are concatenated, not escaped,
+		// so passing them separately implies an escaping that isn't
+		// happening. The fix is to compose the command string ourselves and
+		// pass it as the only positional argument. Our args are simple npm
+		// flags + package names with no whitespace, so naive concatenation
+		// matches what Node was already doing — same semantics, no warning.
+		if (USE_SHELL) {
+			execFile(
+				`${file} ${args.join(" ")}`,
+				{ shell: true, encoding: "utf-8" },
+				(err, stdout, stderr) =>
+					done(err as NodeJS.ErrnoException | null, stdout, stderr),
+			);
+		} else {
+			execFile(file, args, { encoding: "utf-8" }, (err, stdout, stderr) =>
+				done(err as NodeJS.ErrnoException | null, stdout, stderr),
+			);
+		}
 	});
 }
 
@@ -75,7 +96,7 @@ export async function npmGlobalRoot(): Promise<string | null> {
 	return root || null;
 }
 
-export async function verifyInstall(tool: Tool): Promise<string | null> {
+export async function verifyInstall(tool: NpmTool): Promise<string | null> {
 	const r = await execAsync(CLI[tool], ["--version"]);
 	if (!r.error) return null;
 	return r.stderr.trim() || r.error.message;
@@ -119,8 +140,8 @@ export async function runCodexWindowsRecovery(): Promise<string | null> {
 	return r.stderr.trim() || r.error.message;
 }
 
-export async function installAndVerify(tool: Tool): Promise<string | null> {
-	const installErr = await installPackage(installSpec(tool));
+export async function installAndVerify(tool: NpmTool): Promise<string | null> {
+	const installErr = await installPackage(PKG[tool]);
 	if (installErr) return installErr;
 
 	const firstVerify = await verifyInstall(tool);
@@ -153,7 +174,7 @@ export async function installAndVerify(tool: Tool): Promise<string | null> {
 	return `installed but '${CLI[tool]}' fails: ${firstVerify}`;
 }
 
-export async function detectInstalledViaNpm(tool: Tool): Promise<boolean> {
+export async function detectInstalledViaNpm(tool: NpmTool): Promise<boolean> {
 	const root = await npmGlobalRoot();
 	if (!root) return false;
 	const pkgDir = join(root, ...PKG[tool].split("/"));

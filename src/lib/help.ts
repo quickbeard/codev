@@ -12,11 +12,13 @@ Usage: codev <command> [options]
 Commands:
   install             Install and configure AI coding agents
   update              Update installed AI coding agents
-  upload              Export and upload conversations to the monitor module
-  claude --restore    Restore ~/.claude/settings.json from ~/.claude/settings.json.backup
-  codex --restore     Restore ~/.codex/config.toml from ~/.codex/config.toml.backup
-  opencode --restore  Restore ~/.config/opencode/opencode.json from ~/.config/opencode/opencode.json.backup
+  upload              Export and upload logs to the monitor module
+  model               Switch the default model
+  restore [agent]     Restore an agent's pre-CoDev config from its *.backup
+                      (no arg restores every agent that has a backup)
+  login               Sign in to SSO (--force to bypass cached session)
   logout              Sign out of SSO
+  remove              Revert this machine to its pre-CoDev state (--yes to skip prompt)
   --version, -v       Show version
   --help, -h          Show this help
 `);

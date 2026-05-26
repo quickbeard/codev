@@ -1,12 +1,28 @@
 import { render } from "ink";
 import { InstallApp } from "@/InstallApp.js";
+import { LoginApp } from "@/LoginApp.js";
 import { logout } from "@/lib/auth.js";
 import { printHelp, printVersion } from "@/lib/help.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
-import { runRestore } from "@/lib/restore.js";
+import {
+	RESTORE_AGENTS,
+	type RestoreAgent,
+	runRestore,
+	runRestoreAll,
+	toolForRestoreAgent,
+} from "@/lib/restore.js";
 import { runAgent } from "@/lib/run.js";
-import { activationHint, installShims, uninstallShims } from "@/lib/shims.js";
+import {
+	activationHint,
+	detectCodevTools,
+	installShims,
+	SHIM_AGENTS,
+	type ShimAgent,
+	uninstallShims,
+} from "@/lib/shims.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
+import { ModelApp } from "@/ModelApp.js";
+import { RemoveApp } from "@/RemoveApp.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
 
@@ -54,12 +70,27 @@ switch (command) {
 		break;
 	case "install": {
 		const { waitUntilExit } = render(<InstallApp />);
-		await waitUntilExit();
-		process.exit(0);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
 		break;
 	}
 	case "update": {
 		const { waitUntilExit } = render(<UpdateApp />);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
+		break;
+	}
+	case "login": {
+		const force = args.includes("--force") || args.includes("-f");
+		const { waitUntilExit } = render(<LoginApp force={force} />);
 		try {
 			await waitUntilExit();
 			process.exit(0);
@@ -74,10 +105,53 @@ switch (command) {
 		process.exit(0);
 		break;
 	}
+	case "remove": {
+		const skipConfirm = args.includes("--yes") || args.includes("-y");
+		const { waitUntilExit } = render(<RemoveApp skipConfirm={skipConfirm} />);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
+		break;
+	}
+	case "model": {
+		const { waitUntilExit } = render(<ModelApp />);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
+		break;
+	}
 	// Hidden: not surfaced in --help or README. Installs/removes PATH shims
 	// that route `claude`/`codex`/`opencode` through codev.
-	case "block": {
-		const r = installShims();
+	case "hook": {
+		let agents: readonly ShimAgent[];
+		if (args.length === 0) {
+			agents = detectCodevTools();
+			if (agents.length === 0) {
+				console.log(
+					"No CoDev-installed tools found. Run `codev install` first, " +
+						"or specify agents explicitly: `codev hook claude|codex|opencode`.",
+				);
+				process.exit(0);
+			}
+		} else {
+			const invalid = args.filter(
+				(a) => !(SHIM_AGENTS as readonly string[]).includes(a),
+			);
+			if (invalid.length > 0) {
+				console.error(
+					`Unknown agent(s): ${invalid.join(", ")}. Valid: ${SHIM_AGENTS.join(", ")}.`,
+				);
+				process.exit(1);
+			}
+			agents = args as ShimAgent[];
+		}
+		const r = installShims(agents);
 		console.log(`Installed shims in ${r.shimDir}`);
 		for (const path of r.rcFilesUpdated) console.log(`  patched ${path}`);
 		if (r.windowsUserPathUpdated) console.log("  updated user PATH");
@@ -85,7 +159,7 @@ switch (command) {
 		process.exit(0);
 		break;
 	}
-	case "unblock": {
+	case "unhook": {
 		const r = uninstallShims();
 		if (r.shimsRemoved.length === 0 && r.rcFilesUpdated.length === 0) {
 			console.log("No codev shims installed.");
@@ -112,24 +186,29 @@ switch (command) {
 		}
 		break;
 	}
-	case "claude":
-		if (args[0] === "--restore") {
-			process.exit(runRestore("claude-code"));
+	case "restore": {
+		const agent = args[0];
+		if (agent === undefined) {
+			process.exit(runRestoreAll());
 		}
+		if (!(RESTORE_AGENTS as readonly string[]).includes(agent)) {
+			console.error(
+				`Unknown agent: ${agent}. Valid: ${RESTORE_AGENTS.join(", ")}.`,
+			);
+			process.exit(1);
+		}
+		process.exit(runRestore(toolForRestoreAgent(agent as RestoreAgent)));
+		break;
+	}
+	case "claude":
 		spawnUploadDaemon();
 		process.exit(await runAgent("claude", args));
 		break;
 	case "codex":
-		if (args[0] === "--restore") {
-			process.exit(runRestore("codex"));
-		}
 		spawnUploadDaemon();
 		process.exit(await runAgent("codex", args));
 		break;
 	case "opencode":
-		if (args[0] === "--restore") {
-			process.exit(runRestore("opencode"));
-		}
 		spawnUploadDaemon();
 		process.exit(await runAgent("opencode", args));
 		break;

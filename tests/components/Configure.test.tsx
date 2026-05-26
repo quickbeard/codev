@@ -10,6 +10,9 @@ let tempHome: string;
 beforeEach(() => {
 	tempHome = mkdtempSync(join(tmpdir(), "codev-configure-test-"));
 	vi.stubEnv("HOME", tempHome);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempHome);
 });
 
 afterEach(() => {
@@ -38,31 +41,30 @@ function lastFrame(frames: string[]): string {
 }
 
 describe("Configure resume message", () => {
-	test("without shims, falls back to the plain 'You can now run' phrasing", async () => {
+	test("without shims, the message is the bare 'Done!'", async () => {
 		const { frames } = render(
 			<Configure
 				tools={["opencode"]}
-				creds={{ apiKey: "sk-test" }}
+				creds={{ apiKey: "sk-test", model: "m" }}
 				shimsInstalled={false}
 				onDone={() => {}}
 			/>,
 		);
 		await new Promise((r) => setTimeout(r, 30));
 		const out = lastFrame(frames);
-		expect(out).toContain("Done! You can now run");
-		expect(out).toContain("codev opencode");
-		expect(out).toContain("to get started.");
-		// Activation hint must not appear when shims weren't installed.
+		expect(out).toContain("Done!");
+		// Activation hint belongs to the shims-installed branches only —
+		// negative pins because the shims branches still emit these.
 		expect(out).not.toContain("exec $SHELL");
 		expect(out).not.toContain("Restart your terminal");
 	});
 
-	test("with shims on Unix, merges `exec $SHELL` into the Done sentence", async () => {
+	test("with shims on Unix, the message is the exec-$SHELL hint", async () => {
 		const text = await withPlatform("darwin", async () => {
 			const { frames } = render(
 				<Configure
 					tools={["opencode"]}
-					creds={{ apiKey: "sk-test" }}
+					creds={{ apiKey: "sk-test", model: "m" }}
 					shimsInstalled
 					onDone={() => {}}
 				/>,
@@ -72,22 +74,17 @@ describe("Configure resume message", () => {
 		});
 		expect(text).toContain("Done! Run");
 		expect(text).toContain("exec $SHELL");
-		expect(text).toContain("to activate, then");
-		expect(text).toContain("opencode");
-		expect(text).toContain("to get started.");
-		// With shims, the bare binary name is what users invoke — the
-		// `codev <agent>` form is reserved for the no-shims fallback branch.
-		expect(text).not.toContain("codev opencode");
-		// The old two-sentence form should be gone.
-		expect(text).not.toContain("You can now run");
+		expect(text).toContain("to reload your shell.");
+		// Windows branch's wording must not leak across.
+		expect(text).not.toContain("Restart your terminal");
 	});
 
-	test("with shims on Windows, merges 'Restart your terminal' into the Done sentence", async () => {
+	test("with shims on Windows, the message is the restart-terminal hint", async () => {
 		const text = await withPlatform("win32", async () => {
 			const { frames } = render(
 				<Configure
 					tools={["opencode"]}
-					creds={{ apiKey: "sk-test" }}
+					creds={{ apiKey: "sk-test", model: "m" }}
 					shimsInstalled
 					onDone={() => {}}
 				/>,
@@ -95,32 +92,28 @@ describe("Configure resume message", () => {
 			await new Promise((r) => setTimeout(r, 30));
 			return lastFrame(frames);
 		});
-		expect(text).toContain("Done! Restart your terminal, then run");
-		expect(text).toContain("opencode");
-		expect(text).toContain("to get started.");
-		expect(text).not.toContain("codev opencode");
-		// Windows must not mention Unix-only jargon.
+		expect(text).toContain("Done! Restart your terminal.");
+		// Unix branch's Unix-only jargon must not leak across.
 		expect(text).not.toMatch(/exec|\$SHELL/);
 	});
+});
 
-	test("with multiple tools, joins them with 'or' and keeps the merged activation hint", async () => {
-		const text = await withPlatform("darwin", async () => {
-			const { frames } = render(
-				<Configure
-					tools={["claude-code", "opencode"]}
-					creds={{ apiKey: "sk-test" }}
-					shimsInstalled
-					onDone={() => {}}
-				/>,
-			);
-			await new Promise((r) => setTimeout(r, 30));
-			return lastFrame(frames);
-		});
-		expect(text).toContain("exec $SHELL");
-		expect(text).toContain("claude");
-		expect(text).toContain(" or ");
-		expect(text).toContain("opencode");
-		expect(text).not.toContain("codev claude");
-		expect(text).not.toContain("codev opencode");
+describe("Configure dual-editor Continue", () => {
+	test("dual-editor selection writes the shared Continue config once", async () => {
+		// Both editor Tools map to the same `continue-config` BackupKind.
+		// Configure's per-kind dedupe must emit a single `Configured Continue`
+		// row rather than two.
+		const { frames } = render(
+			<Configure
+				tools={["vscode-continue", "jetbrains-continue"]}
+				creds={{ apiKey: "sk-test", model: "m" }}
+				shimsInstalled={false}
+				onDone={() => {}}
+			/>,
+		);
+		await new Promise((r) => setTimeout(r, 30));
+		const out = lastFrame(frames);
+		const matches = out.match(/Configured Continue/g) ?? [];
+		expect(matches).toHaveLength(1);
 	});
 });

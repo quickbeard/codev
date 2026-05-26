@@ -9,6 +9,12 @@ import * as auth from "@/lib/auth.js";
 import * as configure from "@/lib/configure.js";
 import * as proxy from "@/lib/proxy.js";
 
+function stubModels() {
+	return vi
+		.spyOn(proxy, "fetchModels")
+		.mockResolvedValue(["m-alpha", "m-beta"]);
+}
+
 vi.mock("node:child_process", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:child_process")>();
 	return { ...actual, execFile: vi.fn() };
@@ -22,13 +28,19 @@ let installAppTempHome: string;
 beforeEach(() => {
 	installAppTempHome = mkdtempSync(join(tmpdir(), "codev-installapp-test-"));
 	vi.stubEnv("HOME", installAppTempHome);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", installAppTempHome);
 	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
-	// new `refreshing-config` phase doesn't block the test on real fetch.
+	// inline post-install refresh doesn't block tests on a real fetch.
 	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
 
+// Normalize execFile call shapes: production code uses (file, args, opts, cb)
+// on POSIX and the single-string (cmdString, opts, cb) form on Windows (to
+// avoid Node 22's DEP0190). The handler always gets (file, args).
 function stubExecFile(
 	handler: (
 		file: string,
@@ -40,11 +52,21 @@ function stubExecFile(
 	},
 ) {
 	vi.mocked(child_process.execFile).mockImplementation(((
-		file: string,
-		args: string[],
-		...rest: unknown[]
+		...callArgs: unknown[]
 	) => {
-		const cb = rest[rest.length - 1] as ExecCb;
+		const cb = callArgs[callArgs.length - 1] as ExecCb;
+		const first = callArgs[0] as string;
+		const second = callArgs[1];
+		let file: string;
+		let args: string[];
+		if (Array.isArray(second)) {
+			file = first;
+			args = second as string[];
+		} else {
+			const tokens = first.split(/\s+/).filter(Boolean);
+			file = tokens[0] ?? "";
+			args = tokens.slice(1);
+		}
 		const r = handler(file, args);
 		setImmediate(() => cb(r.error ?? null, r.stdout ?? "", r.stderr ?? ""));
 		return {} as unknown as child_process.ChildProcess;
@@ -60,64 +82,102 @@ function fakeAuth(): auth.AuthData {
 	};
 }
 
-async function advanceThroughConfirm(stdin: { write: (s: string) => void }) {
-	// Select Claude Code, confirm selection, accept backup-warning confirm.
-	// In the new flow this lands on LOGIN, not Install.
+// Poll `frames` for a substring instead of sleeping for a fixed time. The Ink
+// flow is async (login → install → refresh → validate → key-choice → …), and
+// each transition involves React commit + useInput re-registration. Windows
+// CI runs ~2–3× slower than the dev laptop, so any fixed-time sleep that
+// works locally is a Heisenbug. Resolves silently when `maxMs` elapses —
+// downstream assertions surface the real failure message.
+//
+// Includes a small settle after the match so the component's useInput handler
+// has time to register on the render that contained `needle` — without this,
+// an immediate stdin.write can land before the handler is active and get
+// dropped.
+async function waitForFrame(
+	frames: string[],
+	needle: string,
+	maxMs = 3_000,
+): Promise<void> {
+	const start = Date.now();
+	while (Date.now() - start < maxMs) {
+		if (frames.join("\n").includes(needle)) {
+			await new Promise((r) => setTimeout(r, 30));
+			return;
+		}
+		await new Promise((r) => setTimeout(r, 20));
+	}
+}
+
+async function advanceThroughConfirm(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
+	// Select Claude Code, confirm selection, accept backup-warning confirm
+	// (apt-style: type "y" then Enter). Lands on LOGIN.
+	await waitForFrame(frames, "Select the AI agent(s) to install");
 	stdin.write(" ");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
-	await new Promise((r) => setTimeout(r, 30));
-	stdin.write("y");
-	await new Promise((r) => setTimeout(r, 30));
+	await waitForFrame(frames, "Continue? [y/N]");
+	stdin.write("y\r");
 }
 
-async function advanceThroughConfirmCodex(stdin: {
-	write: (s: string) => void;
-}) {
+async function advanceThroughConfirmCodex(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
 	// Move cursor to the second option (Codex), select, confirm, accept warning.
+	await waitForFrame(frames, "Select the AI agent(s) to install");
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write(" ");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
-	await new Promise((r) => setTimeout(r, 30));
-	stdin.write("y");
-	await new Promise((r) => setTimeout(r, 30));
+	await waitForFrame(frames, "Continue? [y/N]");
+	stdin.write("y\r");
 }
 
-// After install completes, the proxy-url-choice screen appears with the
-// cursor on "Use default CoDev proxy URL". Enter picks it; refreshing-config
-// resolves immediately because refreshCodevConfig is mocked in beforeEach.
-async function advanceProxyUrlChoice(stdin: { write: (s: string) => void }) {
-	await new Promise((r) => setTimeout(r, 200));
-	stdin.write("\r");
-	await new Promise((r) => setTimeout(r, 100));
+// After install completes, refreshing-config + validation run immediately
+// (refreshCodevConfig is mocked in beforeEach) and the flow lands on the
+// key-choice step. Wait for the choose-configuration screen (no-saved-key
+// path) or the existing-key option (saved-key path) to actually appear.
+async function settleAfterInstall(frames: string[]) {
+	await waitForFrame(frames, "Choose configuration method");
 }
 
-async function pickNewKey(stdin: { write: (s: string) => void }) {
-	// Wait for login + install + proxy-url + refresh + validation to settle and
-	// the key-choice screen to appear, then press Enter on the default first
+async function pickNewKey(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
+	// Wait for login + install + refresh + validation to settle and the
+	// key-choice screen to appear, then press Enter on the default first
 	// option ("Get a new API Key" when no saved key exists).
-	await advanceProxyUrlChoice(stdin);
+	await settleAfterInstall(frames);
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
 
-async function pickManual(stdin: { write: (s: string) => void }) {
+async function pickManual(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
 	// Wait for the upstream phases to settle, move cursor to "I have my
 	// own API Key", Enter.
-	await advanceProxyUrlChoice(stdin);
+	await settleAfterInstall(frames);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
 
-async function pickSkip(stdin: { write: (s: string) => void }) {
+async function pickSkip(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
 	// Wait for the upstream phases to settle, move cursor past
 	// "Get a new API Key" and "I have my own API Key" to land on
 	// "Skip configuration", Enter.
-	await advanceProxyUrlChoice(stdin);
+	await settleAfterInstall(frames);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\x1B[B");
@@ -128,10 +188,11 @@ async function pickSkip(stdin: { write: (s: string) => void }) {
 
 async function typeManualCreds(
 	stdin: { write: (s: string) => void },
+	frames: string[],
 	baseUrl: string,
 	apiKey: string,
-	model: string,
 ) {
+	await waitForFrame(frames, "Enter API credentials");
 	stdin.write(baseUrl);
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
@@ -140,8 +201,17 @@ async function typeManualCreds(
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
-	stdin.write(model);
-	await new Promise((r) => setTimeout(r, 30));
+}
+
+// After credentials are known, the model-choice step runs ModelSelect. The
+// component fires fetchModels on mount; this helper waits for the list and
+// picks the first option (Enter on default cursor).
+async function pickFirstModel(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+	expectedModel = "m-alpha",
+) {
+	await waitForFrame(frames, expectedModel);
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
@@ -177,8 +247,8 @@ describe("InstallApp fail-stop invariant", () => {
 		);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await new Promise((r) => setTimeout(r, 200));
+		await advanceThroughConfirm(stdin, frames);
+		await waitForFrame(frames, "Login failed: Connection refused");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Login failed: Connection refused");
@@ -199,8 +269,8 @@ describe("InstallApp fail-stop invariant", () => {
 		});
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await new Promise((r) => setTimeout(r, 300));
+		await advanceThroughConfirm(stdin, frames);
+		await waitForFrame(frames, "Failed to install");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Failed to install");
@@ -217,9 +287,9 @@ describe("InstallApp fail-stop invariant", () => {
 		const configureSpy = vi.spyOn(configure, "configureClaudeCode");
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickNewKey(stdin);
-		await new Promise((r) => setTimeout(r, 200));
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await waitForFrame(frames, "Failed to fetch API key");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Failed to fetch API key");
@@ -230,6 +300,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("configure failure does not reach the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
 		vi.spyOn(configure, "configureClaudeCode").mockImplementation(() => {
@@ -237,9 +308,10 @@ describe("InstallApp fail-stop invariant", () => {
 		});
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickNewKey(stdin);
-		await new Promise((r) => setTimeout(r, 300));
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Configure failed: disk full");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Configure tools");
@@ -249,6 +321,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("successful flow reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
 		const configureSpy = vi
@@ -263,17 +336,23 @@ describe("InstallApp fail-stop invariant", () => {
 			]);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickNewKey(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
-		expect(configureSpy).toHaveBeenCalledWith({ apiKey: "sk-test-123" });
+		expect(configureSpy).toHaveBeenCalledWith({
+			apiKey: "sk-test-123",
+			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
+		});
 	});
 
 	test("Codex selection routes to configureCodex and reaches done", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-codex-123");
 		const configureCodexSpy = vi
@@ -289,18 +368,24 @@ describe("InstallApp fail-stop invariant", () => {
 		configureCodexSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirmCodex(stdin);
-		await pickNewKey(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await advanceThroughConfirmCodex(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
 		expect(configureCodexSpy).toHaveBeenCalledTimes(1);
-		expect(configureCodexSpy).toHaveBeenCalledWith({ apiKey: "sk-codex-123" });
+		expect(configureCodexSpy).toHaveBeenCalledWith({
+			apiKey: "sk-codex-123",
+			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
+		});
 	});
 
 	test("manual-credentials flow reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		const loginSpy = vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = vi
 			.spyOn(proxy, "fetchApiKey")
@@ -320,15 +405,16 @@ describe("InstallApp fail-stop invariant", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickManual(stdin);
+		await advanceThroughConfirm(stdin, frames);
+		await pickManual(stdin, frames);
 		await typeManualCreds(
 			stdin,
+			frames,
 			"https://my-gateway.example.com/v1",
 			"sk-manual-123",
-			"custom-model",
 		);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Enter API credentials");
@@ -338,12 +424,14 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-manual-123",
 			baseUrl: "https://my-gateway.example.com/v1",
-			model: "custom-model",
+			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
 		});
 	});
 
 	test("empty-key retry then second empty falls back into manual creds", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("");
 		const configureSpy = vi
@@ -360,11 +448,11 @@ describe("InstallApp fail-stop invariant", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickNewKey(stdin);
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
 
 		// First empty result — retry prompt should render, no fallback yet.
-		await new Promise((r) => setTimeout(r, 200));
+		await waitForFrame(frames, "Gateway returned an empty API key.");
 		expect(allFrames(frames)).toContain("Gateway returned an empty API key.");
 		expect(allFrames(frames)).toContain("Press Enter to retry");
 		expect(allFrames(frames)).not.toContain(
@@ -373,7 +461,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 		// Press Enter to retry; second attempt also returns empty.
 		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 200));
+		await waitForFrame(frames, "Gateway returned an empty API key again.");
 		expect(allFrames(frames)).toContain(
 			"Gateway returned an empty API key again.",
 		);
@@ -384,16 +472,17 @@ describe("InstallApp fail-stop invariant", () => {
 
 		// Press Enter to drop into manual creds.
 		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 100));
+		await waitForFrame(frames, "Enter API credentials");
 		expect(allFrames(frames)).toContain("Enter API credentials");
 
 		await typeManualCreds(
 			stdin,
+			frames,
 			"https://fallback.example.com/v1",
 			"sk-fallback-123",
-			"fallback-model",
 		);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
@@ -402,12 +491,14 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-fallback-123",
 			baseUrl: "https://fallback.example.com/v1",
-			model: "fallback-model",
+			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
 		});
 	});
 
 	test("fetch-key retry after failure reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = vi
 			.spyOn(proxy, "fetchApiKey")
@@ -429,26 +520,35 @@ describe("InstallApp fail-stop invariant", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickNewKey(stdin);
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
 
 		// First attempt rejects — retry prompt renders.
-		await new Promise((r) => setTimeout(r, 200));
+		await waitForFrame(
+			frames,
+			"Failed to fetch API key: Proxy /auth/exchange failed",
+		);
 		expect(allFrames(frames)).toContain(
 			"Failed to fetch API key: Proxy /auth/exchange failed",
 		);
 		expect(allFrames(frames)).toContain("Press Enter to retry, Ctrl-C to quit");
 		expect(configureSpy).not.toHaveBeenCalled();
 
-		// Press Enter to retry; second attempt resolves.
+		// Press Enter to retry; second attempt resolves and the model-choice
+		// step renders.
 		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 1_300));
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
 		expect(fetchApiKeySpy).toHaveBeenCalledTimes(2);
 		expect(configureSpy).toHaveBeenCalledTimes(1);
-		expect(configureSpy).toHaveBeenCalledWith({ apiKey: "sk-retry-ok" });
+		expect(configureSpy).toHaveBeenCalledWith({
+			apiKey: "sk-retry-ok",
+			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
+		});
 	});
 
 	test("skip-configuration flow backs up but does not write configs", async () => {
@@ -471,9 +571,9 @@ describe("InstallApp fail-stop invariant", () => {
 		backupOnlySpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickSkip(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await advanceThroughConfirm(stdin, frames);
+		await pickSkip(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Skip configuration");
@@ -502,9 +602,12 @@ describe("InstallApp fail-stop invariant", () => {
 		]);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickSkip(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await advanceThroughConfirm(stdin, frames);
+		await pickSkip(stdin, frames);
+		await waitForFrame(
+			frames,
+			"Claude Code backup already exists — left untouched",
+		);
 
 		const history = allFrames(frames);
 		expect(history).toContain(
@@ -529,9 +632,9 @@ describe("InstallApp fail-stop invariant", () => {
 		]);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await pickSkip(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await advanceThroughConfirm(stdin, frames);
+		await pickSkip(stdin, frames);
+		await waitForFrame(frames, "Nothing to back up for Claude Code");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Nothing to back up for Claude Code");
@@ -540,6 +643,7 @@ describe("InstallApp fail-stop invariant", () => {
 
 	test("login retry after failure reaches the done screen", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		const loginSpy = vi
 			.spyOn(auth, "login")
 			.mockImplementationOnce(() => Promise.reject(new Error("network down")))
@@ -559,33 +663,309 @@ describe("InstallApp fail-stop invariant", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
+		await advanceThroughConfirm(stdin, frames);
 
 		// Wait for the first login attempt to reject.
-		await new Promise((r) => setTimeout(r, 200));
+		await waitForFrame(frames, "Login failed: network down");
 		expect(allFrames(frames)).toContain("Login failed: network down");
 		expect(allFrames(frames)).toContain("Press Enter to retry, Ctrl-C to quit");
 		expect(configureSpy).not.toHaveBeenCalled();
 
 		// Press Enter to retry login.
 		stdin.write("\r");
-		await pickNewKey(stdin);
-		await new Promise((r) => setTimeout(r, 1_300));
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
 		expect(loginSpy).toHaveBeenCalledTimes(2);
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 	});
+
+	test("Continue selection expands via editor sub-select; soft-fail install still reaches Configure", async () => {
+		// Pick Continue → editor sub-select (VS Code) → soft-fail `code` not
+		// on PATH → flow advances to Configure, which renders the warning
+		// hint instead of aborting. The whole point of option B: a transient
+		// CLI install failure must not block the YAML config write.
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-cont-123");
+		const configureSpy = vi
+			.spyOn(configure, "configureContinue")
+			.mockReturnValue([
+				{
+					kind: "continue-config",
+					sourcePath: "/tmp/c.yaml",
+					backupPath: "/tmp/c.yaml.backup",
+					created: true,
+				},
+			]);
+		configureSpy.mockClear();
+		// `code --install-extension …` returns ENOENT → installContinueExtension
+		// resolves `{ warning: "VS Code launcher not found on PATH" }`. No npm runs
+		// because Continue isn't an NpmTool.
+		stubExecFile((file) => {
+			if (file === "code") {
+				const err = Object.assign(new Error("spawn code ENOENT"), {
+					code: "ENOENT",
+				});
+				return { error: err, stderr: "" };
+			}
+			return { stdout: "ok" };
+		});
+
+		const { stdin, frames } = render(<InstallApp />);
+
+		// Pick the Continue row (4th, index 3).
+		await waitForFrame(frames, "Select the AI agent(s) to install");
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		// Editor sub-select appears — pick VS Code (row 0).
+		await waitForFrame(frames, "Select the editor(s) you use Continue");
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		// Confirm screen → backup-warning prompt.
+		await waitForFrame(frames, "Continue? [y/N]");
+		stdin.write("y\r");
+
+		// Standard login + fetch-key + model-choice path.
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		// Frame-border `│` chars split long wrapped lines; strip them and
+		// collapse whitespace so substring matches survive the wrap.
+		const history = allFrames(frames).replace(/│/g, " ").replace(/\s+/g, " ");
+		expect(history).toContain("Happy coding");
+		// Configure was called for Continue (single dedup'd write).
+		expect(configureSpy).toHaveBeenCalledTimes(1);
+		// The install row surfaces the cause + manual-install reassurance.
+		expect(history).toContain("VS Code launcher not found on PATH");
+		expect(history).toContain(
+			"You can install the Continue extension yourself later.",
+		);
+	});
+
+	test("non-ENOENT Continue install failure (proxy / marketplace 5xx) still reaches Configure", async () => {
+		// Companion to the ENOENT test above: this one stubs the `code` CLI
+		// as PRESENT but failing — e.g. a proxy/marketplace error. With
+		// option B, this is still a soft fail: the install row paints
+		// yellow ▲ with the stderr as the warning, the Configure pane
+		// surfaces it in the resume hint, and the flow reaches Happy coding
+		// rather than parking at install-failed. The original behavior on
+		// this branch was to hard-abort here, which would have stranded the
+		// user any time the marketplace had a hiccup.
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-cont-456");
+		const configureSpy = vi
+			.spyOn(configure, "configureContinue")
+			.mockReturnValue([
+				{
+					kind: "continue-config",
+					sourcePath: "/tmp/c.yaml",
+					backupPath: "/tmp/c.yaml.backup",
+					created: true,
+				},
+			]);
+		configureSpy.mockClear();
+		// `code` runs but returns non-zero — no ENOENT, just a stderr
+		// payload (the kind of failure that used to abort the flow).
+		stubExecFile((file) => {
+			if (file === "code") {
+				return {
+					error: new Error("exit 1"),
+					stderr: "Proxy returned 502 Bad Gateway",
+				};
+			}
+			return { stdout: "ok" };
+		});
+
+		const { stdin, frames } = render(<InstallApp />);
+
+		// Pick the Continue row (4th, index 3) and the VS Code editor.
+		await waitForFrame(frames, "Select the AI agent(s) to install");
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		await waitForFrame(frames, "Select the editor(s) you use Continue");
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		await waitForFrame(frames, "Continue? [y/N]");
+		stdin.write("y\r");
+
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		// Ink wraps long lines inside the rendered frame AND prefixes each
+		// wrapped line with the Frame component's `│` border character — so
+		// the manual-install reassurance can end up split as "You can install
+		// the │ Continue extension yourself later." in the joined history.
+		// Strip the border pipes and collapse whitespace before matching.
+		const history = allFrames(frames).replace(/│/g, " ").replace(/\s+/g, " ");
+		// 1. The YAML config was still written — soft fail must not block
+		//    the part of the flow CoDev actually owns.
+		expect(configureSpy).toHaveBeenCalledTimes(1);
+		// 2. The flow completed — no install-failed parking lot.
+		expect(history).toContain("Happy coding");
+		expect(history).not.toContain("Failed to install");
+		// 3. The install row surfaced the real cause (proxy/marketplace
+		//    error) + the manual-install reassurance.
+		expect(history).toContain("Proxy returned 502 Bad Gateway");
+		expect(history).toContain(
+			"You can install the Continue extension yourself later.",
+		);
+	});
+
+	test("JetBrains-only Continue install: no launcher on PATH still reaches Configure", async () => {
+		// Mirror of the VS Code soft-fail tests, but exercising the
+		// `jetbrains-continue` install branch — every JetBrains shell
+		// launcher we probe (idea/pycharm/goland) returns ENOENT. The flow
+		// must still reach Happy coding, the install row carries
+		// JETBRAINS_HINT, and the Configure pane's plugin-specific yellow
+		// hint surfaces. Pins both the install-row hint string (was not
+		// covered at integration level before) and the JetBrains-side
+		// Configure-pane hint.
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-jb-123");
+		const configureSpy = vi
+			.spyOn(configure, "configureContinue")
+			.mockReturnValue([
+				{
+					kind: "continue-config",
+					sourcePath: "/tmp/c.yaml",
+					backupPath: "/tmp/c.yaml.backup",
+					created: true,
+				},
+			]);
+		configureSpy.mockClear();
+		stubExecFile((file) => {
+			if (file === "idea" || file === "pycharm" || file === "goland") {
+				const err = Object.assign(new Error(`spawn ${file} ENOENT`), {
+					code: "ENOENT",
+				});
+				return { error: err, stderr: "" };
+			}
+			return { stdout: "ok" };
+		});
+
+		const { stdin, frames } = render(<InstallApp />);
+
+		// Continue row → editor sub-select → JetBrains (row 1).
+		await waitForFrame(frames, "Select the AI agent(s) to install");
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		await waitForFrame(frames, "Select the editor(s) you use Continue");
+		// Move cursor down to JetBrains (second row), select, confirm.
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		await waitForFrame(frames, "Continue? [y/N]");
+		stdin.write("y\r");
+
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		const history = allFrames(frames).replace(/│/g, " ").replace(/\s+/g, " ");
+		// YAML still written, flow not aborted.
+		expect(configureSpy).toHaveBeenCalledTimes(1);
+		expect(history).toContain("Happy coding");
+		expect(history).not.toContain("Failed to install");
+		// Install row surfaces the JetBrains-launcher cause text + the
+		// manual-install reassurance.
+		expect(history).toContain(
+			"JetBrains launcher not found on PATH (PyCharm / IntelliJ IDEA / GoLand)",
+		);
+		expect(history).toContain(
+			"You can install the Continue plugin yourself later.",
+		);
+	});
+
+	test("models fetch failure falls back to DEFAULT_MODEL and reaches done", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		vi.spyOn(proxy, "fetchModels").mockRejectedValue(
+			new Error("Models fetch failed (502): boom"),
+		);
+		const configureSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/x",
+					backupPath: "/tmp/x.b",
+					created: true,
+				},
+			]);
+		configureSpy.mockClear();
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		const history = allFrames(frames);
+		expect(history).toContain("Failed to fetch models");
+		expect(history).toContain("Models fetch failed (502): boom");
+		expect(history).toContain("Using default model");
+		// The default model name itself must not leak into the TUI.
+		expect(history).not.toContain(configure.DEFAULT_MODEL);
+		expect(history).toContain("Happy coding");
+		// Fallback: models becomes a one-entry list so OpenCode's map still
+		// gets exactly one valid entry.
+		expect(configureSpy).toHaveBeenCalledWith({
+			apiKey: "sk-test-123",
+			model: configure.DEFAULT_MODEL,
+			models: [configure.DEFAULT_MODEL],
+		});
+	});
 });
 
 describe("InstallApp existing-key path", () => {
 	test("validating an existing key shows it, surfaces the option, and reuses saved creds", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
 		const loadSpy = vi.spyOn(auth, "loadApiKey").mockReturnValue({
 			apiKey: "sk-existing-123",
 			baseUrl: "https://my-gateway.example.com/v1",
-			model: "saved-model",
+			// Saved model matches one in the stubbed /v1/models list so the
+			// "saved model pre-marked as selected" regression can actually fire.
+			model: "m-alpha",
 		});
 		const validateSpy = vi
 			.spyOn(proxy, "validateApiKey")
@@ -611,11 +991,10 @@ describe("InstallApp existing-key path", () => {
 		configureSpy.mockClear();
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await advanceProxyUrlChoice(stdin);
-		// Wait for refresh + validation to settle and key-choice to render
-		// with the new option as the default cursor.
-		await new Promise((r) => setTimeout(r, 300));
+		await advanceThroughConfirm(stdin, frames);
+		// Wait for refresh + validation to settle and the saved-key option to
+		// appear in the key-choice list.
+		await waitForFrame(frames, "Reuse existing API Key");
 
 		const beforeChoice = allFrames(frames);
 		expect(beforeChoice).toContain("Reuse existing API Key");
@@ -623,7 +1002,19 @@ describe("InstallApp existing-key path", () => {
 
 		// Default cursor is on the existing option — Enter selects it directly.
 		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 1_300));
+		// Existing path still routes through model-choice; the user can re-pick.
+		// Wait for the models list to render and capture the frame BEFORE picking.
+		// Even though the saved model ("m-alpha") matches a row in the list, no
+		// model row should be pre-marked with the green ● — that glyph only
+		// shows AFTER the user has actually picked something on this run.
+		await waitForFrame(frames, "m-alpha");
+		const beforePick = frames[frames.length - 1] ?? "";
+		expect(beforePick).toContain("m-alpha");
+		expect(beforePick).not.toContain("● m-alpha");
+		expect(beforePick).not.toContain("● m-beta");
+
+		stdin.write("\r");
+		await waitForFrame(frames, "Happy coding");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
@@ -634,10 +1025,13 @@ describe("InstallApp existing-key path", () => {
 			"sk-existing-123",
 			"https://my-gateway.example.com/v1",
 		);
+		// Model from the model-choice step overrides the saved model — confirms
+		// existing users can change their model on reinstall.
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-existing-123",
 			baseUrl: "https://my-gateway.example.com/v1",
-			model: "saved-model",
+			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
 		});
 	});
 
@@ -651,9 +1045,8 @@ describe("InstallApp existing-key path", () => {
 		);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await advanceProxyUrlChoice(stdin);
-		await new Promise((r) => setTimeout(r, 300));
+		await advanceThroughConfirm(stdin, frames);
+		await waitForFrame(frames, "Saved API key is no longer valid");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Saved API key is no longer valid");
@@ -673,9 +1066,8 @@ describe("InstallApp existing-key path", () => {
 		);
 
 		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin);
-		await advanceProxyUrlChoice(stdin);
-		await new Promise((r) => setTimeout(r, 300));
+		await advanceThroughConfirm(stdin, frames);
+		await waitForFrame(frames, "Could not verify saved API key");
 
 		const history = allFrames(frames);
 		expect(history).toContain("Could not verify saved API key");

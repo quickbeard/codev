@@ -1,5 +1,9 @@
 import type { CodevConfig } from "@/lib/auth.js";
-import { AI_GATEWAY_URL, PROXY_URL } from "@/lib/const.js";
+import {
+	AI_GATEWAY_OPENAI_URL,
+	AI_GATEWAY_URL,
+	PROXY_URL,
+} from "@/lib/const.js";
 
 interface ExchangeResponse {
 	api_key: string;
@@ -20,6 +24,10 @@ interface ErrorResponse {
 }
 
 const VALIDATE_TIMEOUT_MS = 5_000;
+const MODELS_TIMEOUT_MS = 10_000;
+// Proxy endpoints are quick: token exchange, a tiny config blob, a Supabase
+// session exchange. Cap so a stalled gateway doesn't hang the CLI.
+const PROXY_TIMEOUT_MS = 10_000;
 
 export interface SupabaseSession {
 	access_token: string;
@@ -33,9 +41,10 @@ export interface SupabaseSession {
 }
 
 export async function fetchApiKey(accessToken: string): Promise<string> {
-	const res = await fetch(`${PROXY_URL()}/auth/exchange`, {
+	const res = await fetch(`${PROXY_URL}/auth/exchange`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
+		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {
@@ -55,9 +64,10 @@ export async function fetchApiKey(accessToken: string): Promise<string> {
 export async function fetchCodevConfig(
 	accessToken: string,
 ): Promise<CodevConfig> {
-	const res = await fetch(`${PROXY_URL()}/config`, {
+	const res = await fetch(`${PROXY_URL}/config`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
+		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {
@@ -109,12 +119,60 @@ export async function validateApiKey(
 	return true;
 }
 
+// Detects whether a thrown error from fetchModels was caused by an invalid
+// key (401/403) — as opposed to a network/5xx/timeout. Used by `codev model`
+// to decide whether to trigger the re-auth flow.
+export function isInvalidKeyError(err: unknown): boolean {
+	const msg = err instanceof Error ? err.message : String(err);
+	return /Models fetch failed \((?:401|403)\)/.test(msg);
+}
+
+// Hits the OpenAI-compatible /v1/models endpoint. AI_GATEWAY_OPENAI_URL
+// already ends in /v1; manual baseUrls may or may not — normalize either way
+// so we always end up at `<base>/v1/models`.
+function modelsUrl(baseUrl?: string): string {
+	const base = baseUrl ?? AI_GATEWAY_OPENAI_URL;
+	const withV1 = /\/v1\/?$/.test(base)
+		? base.replace(/\/$/, "")
+		: `${base.replace(/\/$/, "")}/v1`;
+	return `${withV1}/models`;
+}
+
+// Fetches the list of model IDs available to the given API key. Throws on
+// non-2xx, network errors, timeout, or an empty result — callers fail-stop
+// (there is no silent fallback to a hardcoded default).
+export async function fetchModels(
+	apiKey: string,
+	baseUrl?: string,
+): Promise<string[]> {
+	const res = await fetch(modelsUrl(baseUrl), {
+		method: "GET",
+		headers: {
+			accept: "application/json",
+			Authorization: `Bearer ${apiKey}`,
+		},
+		signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
+	});
+	if (!res.ok) {
+		const body = (await res.json().catch(() => ({}))) as ErrorResponse;
+		const reason = body.error || res.statusText;
+		throw new Error(`Models fetch failed (${res.status}): ${reason}`);
+	}
+	const data = (await res.json()) as { data?: Array<{ id?: string }> };
+	const ids = (data.data ?? [])
+		.map((m) => m.id)
+		.filter((id): id is string => typeof id === "string" && id.length > 0);
+	if (ids.length === 0) throw new Error("Gateway returned no models");
+	return ids;
+}
+
 export async function fetchSupabaseSession(
 	accessToken: string,
 ): Promise<SupabaseSession> {
-	const res = await fetch(`${PROXY_URL()}/supabase/exchange`, {
+	const res = await fetch(`${PROXY_URL}/supabase/exchange`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
+		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {

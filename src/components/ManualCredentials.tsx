@@ -4,7 +4,6 @@ import { useState } from "react";
 export interface ManualCredentialsValue {
 	baseUrl: string;
 	apiKey: string;
-	model: string;
 }
 
 interface ManualCredentialsProps {
@@ -15,7 +14,6 @@ interface ManualCredentialsProps {
 const FIELDS = [
 	{ key: "baseUrl" as const, label: "API URL" },
 	{ key: "apiKey" as const, label: "API Key" },
-	{ key: "model" as const, label: "Model" },
 ];
 
 const LABEL_WIDTH = Math.max(...FIELDS.map((f) => f.label.length));
@@ -29,7 +27,6 @@ export function ManualCredentials({
 	const [values, setValues] = useState<Values>({
 		baseUrl: "",
 		apiKey: "",
-		model: "",
 	});
 	const [index, setIndex] = useState(0);
 	const [submitted, setSubmitted] = useState(false);
@@ -57,7 +54,6 @@ export function ManualCredentials({
 				onDone({
 					baseUrl: values.baseUrl.trim(),
 					apiKey: values.apiKey.trim(),
-					model: values.model.trim(),
 				});
 				return;
 			}

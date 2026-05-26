@@ -99,16 +99,14 @@ When removing a string, label, or branch, don't pin its absence with `expect(...
 
 The install flow's "Skip configuration" auth choice routes through `backupOnly(tool)` instead of the per-agent `configure*` functions: it runs the same `ensureBackup` logic (so any existing live config is snapshotted to `*.backup` exactly once) and then exits without writing CoDev's own config. It also does not call `bypassClaudeLogin` — skip means CoDev touches nothing the user didn't already have. `Configure` accepts `creds: Credentials | null`; `null` is the signal to take this backup-only path.
 
-## Proxy URL override
-
-The proxy URL is overridable per-install so self-hosted backends can plug in their own `codev-proxy`. `PROXY_URL()` in `src/lib/const.ts` is a function (not a const) — it reads `proxy_url` from `~/.codev/auth.json` and falls back to the baked-in default. The install flow's `proxy-url-choice` phase persists the user's choice via `saveProxyUrl` in `src/lib/auth.ts`; trailing slashes are stripped before persisting so downstream `${PROXY_URL()}/config`-style concatenation produces the right URL. `SSO_URL` and `AI_GATEWAY_URL` are **not** overridable — only proxy traffic retargets.
+`restoreTool` is invoked via `codev restore <agent>` (one tool) or bare `codev restore` (sweep all tools with a backup). The dispatcher accepts **launch names** — `claude`/`codex`/`opencode` — and `toolForRestoreAgent` in `src/lib/restore.ts` maps them to the internal `Tool` type. Behavior splits on path: `runRestore` (single) treats a missing backup as an error and exits 1; `runRestoreAll` (sweep) skips tools without backups silently, only erroring when *every* tool was skipped. Keep that asymmetry — it's right for both contexts.
 
 ## Config refresh and upload self-healing
 
-Supabase coordinates (`supabase_url`, `supabase_anon_key`) are not baked into the source — they're fetched from `codev-proxy`'s `POST /config` endpoint (against `PROXY_URL()`, which honors the proxy-URL override) and cached in `~/.codev/auth.json`. Two invariants keep that cache fresh:
+Supabase coordinates (`supabase_url`, `supabase_anon_key`) are not baked into the source — they're fetched from `codev-proxy`'s `POST /config` endpoint and cached in `~/.codev/auth.json`. Two invariants keep that cache fresh:
 
-1. **Every command that consumes Supabase coords refreshes config after a successful login.** `login()` itself does not call `refreshCodevConfig` — that's by design, so the refresh runs against the user's chosen proxy URL (which is only known after the `proxy-url-choice` phase). Today:
-   - `InstallApp` runs `refreshCodevConfig` as its own `refreshing-config` phase, right after the user picks the proxy URL.
+1. **Every command that consumes Supabase coords refreshes config after a successful login.** `login()` itself does not call `refreshCodevConfig` — callers run it explicitly so the timing fits each flow. Today:
+   - `InstallApp` awaits `refreshCodevConfig` inline between the install and key-choice steps. The `refreshing-config` Phase still exists as an internal state to block forward progress, but renders no visible Step.
    - `src/lib/upload.ts`'s `ensureAuth` calls `refreshCodevConfig` on the fresh-login branch (so the first Supabase attempt doesn't have to fail and retry just to populate the cache).
    - Tests that exercise real `login()` must mock `POST /codev-proxy/config` if (and only if) the caller also calls `refreshCodevConfig`.
 2. **`runUpload` retries once on a "refreshable" error.** `isRefreshableError` (in `src/lib/upload.ts`) is deliberately narrow: `Missing supabase_…` from the cache accessors, or HTTP `401`/`403` from any Supabase or proxy fetch. `5xx`, `404`, network errors, and timeouts are NOT retried — refreshing won't help and we'd amplify the outage. Per-file upload errors stay in `summary.errors` and don't trigger the pipeline-level retry. If you change `runSupabaseUpload`'s shape, keep that boundary intact.

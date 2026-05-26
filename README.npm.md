@@ -18,20 +18,6 @@ codev install
 
 After install, type `claude`, `codex`, or `opencode` to launch.
 
-## Commands
-
-| Command                    | What it does                                                                                                    |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `codev --help`, `-h`       | Show help                                                                                                       |
-| `codev --version`, `-v`    | Show version                                                                                                    |
-| `codev install`            | Install and configure AI coding agents                                                                          |
-| `codev update`             | Update installed AI coding agents                                                                               |
-| `codev upload`             | Export this directory's agent conversations to `~/.codev/logs/<project>/` and upload them to the monitor module |
-| `codev claude --restore`   | Restore `~/.claude/settings.json` from `~/.claude/settings.json.backup`                                         |
-| `codev codex --restore`    | Restore `~/.codex/config.toml` from `~/.codex/config.toml.backup`                                               |
-| `codev opencode --restore` | Restore `~/.config/opencode/opencode.json` from `~/.config/opencode/opencode.json.backup`                       |
-| `codev logout`             | Sign out of SSO                                                                                                 |
-
 ## Restoring a previous configuration
 
 CoDev will replace `~/.claude/settings.json`, `~/.codex/config.toml`, and `~/.config/opencode/opencode.json` with new configs. Before writing its own config, CoDev backs up the specific file it would replace. If a backup already exists from a prior CoDev run (`*.backup`), CoDev leaves it untouched and proceeds to replace the live config. The existing backup is assumed to be your pre-CoDev original and is never clobbered by later runs.
@@ -46,17 +32,23 @@ CoDev will replace `~/.claude/settings.json`, `~/.codex/config.toml`, and `~/.co
 
 ### Restore
 
-Use the built-in restore shortcut:
+Use the built-in `restore` subcommand:
 
 ```bash
-codev claude --restore
-codev codex --restore
-codev opencode --restore
+codev restore claude
+codev restore codex
+codev restore opencode
 ```
 
-Each command removes the active config file and renames the corresponding `*.backup` back into place. If no backup exists, the command prints a "No backup found" message and exits with code 1.
+Each command removes the active config file and renames the corresponding `*.backup` back into place. Run it with no agent to restore every agent that has a backup at once:
 
-Or do it manually:
+```bash
+codev restore
+```
+
+If you have a session running, you might need to restart it with `claude -c`, `codex resume`, or `opencode -c` to resume your progress.
+
+You can also do it manually:
 
 ```bash
 # Claude Code
@@ -69,4 +61,18 @@ mv ~/.codex/config.toml.backup ~/.codex/config.toml
 mv ~/.config/opencode/opencode.json.backup ~/.config/opencode/opencode.json
 ```
 
-If you have a session running, you might need to restart it with `claude -c`, `codex resume`, or `opencode -c` to resume your progress.
+## Removing CoDev entirely
+
+```bash
+codev remove
+```
+
+After confirmation, this reverts your machine to its pre-CoDev state. Add `--yes` (or `-y`) to skip the confirmation prompt.
+
+CoDev itself is still installed globally — finish with:
+
+```bash
+npm uninstall -g codev-ai
+```
+
+Then restart your terminal.

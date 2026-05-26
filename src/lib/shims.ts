@@ -10,14 +10,48 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
-import type { Tool } from "@/lib/configure.js";
+import {
+	detectConfiguredTools,
+	getBackupStatus,
+	type Tool,
+} from "@/lib/configure.js";
 
 export const SHIM_AGENTS = ["claude", "opencode", "codex"] as const;
 export type ShimAgent = (typeof SHIM_AGENTS)[number];
 
-export function toolToShimAgent(tool: Tool): ShimAgent {
+// VS Code is launched via its own `code` binary, not a CoDev shim, so
+// `vscode-continue` has no ShimAgent. Returning null lets callers filter it
+// out of shim install/uninstall flows without per-call special-casing.
+export function toolToShimAgent(tool: Tool): ShimAgent | null {
 	if (tool === "claude-code") return "claude";
-	return tool;
+	if (tool === "codex") return "codex";
+	if (tool === "opencode") return "opencode";
+	return null;
+}
+
+// Tools CoDev has touched on this machine. Used by bare `codev hook` so it
+// shims exactly what the user picked during install, instead of unconditionally
+// all three agents. Signals are unioned so every legitimate install path is
+// covered:
+//   - Live config carries CoDev's marker (`detectConfiguredTools`): catches the
+//     full-configure path, including first-time users where no pre-existing
+//     config existed to back up (so `hasBackup` alone would miss them).
+//   - A `*.backup` snapshot exists: catches the "Skip configuration" path,
+//     where CoDev preserved the user's pre-existing config but didn't write
+//     its own (so no marker lands in the live config).
+// The one case neither signal catches is "Skip configuration on a tool with
+// no pre-existing config" — but there CoDev didn't modify the tool's files at
+// all, so there's nothing on disk to detect.
+export function detectCodevTools(): ShimAgent[] {
+	const tools: Tool[] = ["claude-code", "codex", "opencode"];
+	const configured = new Set(detectConfiguredTools());
+	return tools
+		.filter(
+			(tool) =>
+				configured.has(tool) || getBackupStatus(tool).some((s) => s.hasBackup),
+		)
+		.map(toolToShimAgent)
+		.filter((agent): agent is ShimAgent => agent !== null);
 }
 
 const SENTINEL_START = "# >>> codev shims (managed) >>>";

@@ -45,27 +45,33 @@ describe("printHelp", () => {
 		expect(output()).toContain("Usage: codev");
 	});
 
-	test("lists the --restore form for each agent", () => {
+	test("lists the restore subcommand", () => {
 		printHelp();
-		const out = output();
-		expect(out).toContain("claude --restore");
-		expect(out).toContain("codex --restore");
-		expect(out).toContain("opencode --restore");
+		expect(output()).toContain("restore [agent]");
 	});
 
-	test("only surfaces agent commands as --restore forms", () => {
+	test("lists the login command", () => {
+		printHelp();
+		expect(output()).toContain("login");
+	});
+
+	test("lists the remove command", () => {
+		printHelp();
+		expect(output()).toContain("remove");
+	});
+
+	test("does not surface bare-agent launch commands as documented", () => {
 		// Agents (claude/codex/opencode) are launched via PATH shims set up by
 		// `codev install` — the bare `codev <agent>` form is intentionally
-		// undocumented. Verify structurally: every line that mentions an agent
-		// binary name also names a --restore (or another non-launch operation),
-		// catching regressions where someone re-adds `claude   Run the CLI...`.
+		// undocumented. Help should not advertise it. Catches regressions where
+		// someone re-adds `claude   Run the CLI...`.
 		printHelp();
-		const agentLines = output()
+		const out = output();
+		// `restore [agent]` is fine; a bare `claude` / `codex` / `opencode` line
+		// (where the agent name is the first token after the indent) is not.
+		const bareAgentLine = out
 			.split("\n")
-			.filter((line) => /\b(claude|codex|opencode)\b/.test(line));
-		expect(agentLines.length).toBeGreaterThan(0);
-		for (const line of agentLines) {
-			expect(line).toContain("--restore");
-		}
+			.find((line) => /^\s+(claude|codex|opencode)\b/.test(line));
+		expect(bareAgentLine).toBeUndefined();
 	});
 });

@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { AI_GATEWAY_URL, PROXY_URL } from "@/lib/const.js";
+import {
+	AI_GATEWAY_OPENAI_URL,
+	AI_GATEWAY_URL,
+	PROXY_URL,
+} from "@/lib/const.js";
 import {
 	fetchApiKey,
 	fetchCodevConfig,
+	fetchModels,
 	fetchSupabaseSession,
+	isInvalidKeyError,
 	validateApiKey,
 } from "@/lib/proxy.js";
 
@@ -162,6 +168,103 @@ describe("validateApiKey", () => {
 	});
 });
 
+describe("fetchModels", () => {
+	test("returns the list of model ids from the gateway /v1/models", async () => {
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, {
+				data: [{ id: "model-a" }, { id: "model-b" }],
+			}),
+		);
+		await expect(fetchModels("sk-test")).resolves.toEqual([
+			"model-a",
+			"model-b",
+		]);
+
+		const [url, init] = fetchSpy.mock.calls[0] as [
+			string,
+			{ method?: string; headers?: Record<string, string> },
+		];
+		expect(url).toBe(`${AI_GATEWAY_OPENAI_URL}/models`);
+		expect(init.method).toBe("GET");
+		expect(init.headers?.Authorization).toBe("Bearer sk-test");
+		expect(init.headers?.accept).toBe("application/json");
+	});
+
+	test("throws on 401 with the gateway-supplied error", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(401, { error: "invalid key" }),
+		);
+		await expect(fetchModels("sk-bad")).rejects.toThrow(
+			"Models fetch failed (401): invalid key",
+		);
+	});
+
+	test("throws on 5xx using statusText when no JSON body", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response("oops", { status: 503, statusText: "Service Unavailable" }),
+		);
+		await expect(fetchModels("sk-x")).rejects.toThrow(
+			"Models fetch failed (503): Service Unavailable",
+		);
+	});
+
+	test("throws on network error", async () => {
+		vi.spyOn(globalThis, "fetch").mockRejectedValue(
+			new Error("fetch failed: ECONNREFUSED"),
+		);
+		await expect(fetchModels("sk-x")).rejects.toThrow("ECONNREFUSED");
+	});
+
+	test("throws when the gateway returns an empty model list", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, { data: [] }),
+		);
+		await expect(fetchModels("sk-x")).rejects.toThrow(
+			"Gateway returned no models",
+		);
+	});
+
+	test("throws when data is missing entirely", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(200, {}));
+		await expect(fetchModels("sk-x")).rejects.toThrow(
+			"Gateway returned no models",
+		);
+	});
+
+	test("filters out entries without an id string", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, {
+				data: [
+					{ id: "good" },
+					{ id: "" },
+					{ id: null },
+					{},
+					{ id: "also-good" },
+				],
+			}),
+		);
+		await expect(fetchModels("sk-x")).resolves.toEqual(["good", "also-good"]);
+	});
+
+	test("uses a manual baseUrl that already has /v1", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, { data: [{ id: "m1" }] }));
+		await fetchModels("sk-y", "https://my-gw.example.com/v1");
+		const [url] = fetchSpy.mock.calls[0] as [string];
+		expect(url).toBe("https://my-gw.example.com/v1/models");
+	});
+
+	test("appends /v1 when the baseUrl lacks it", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, { data: [{ id: "m1" }] }));
+		await fetchModels("sk-z", "https://gw.example.com/");
+		const [url] = fetchSpy.mock.calls[0] as [string];
+		expect(url).toBe("https://gw.example.com/v1/models");
+	});
+});
+
 describe("fetchSupabaseSession", () => {
 	test("posts to the codev-proxy /supabase/exchange endpoint", async () => {
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -172,7 +275,7 @@ describe("fetchSupabaseSession", () => {
 		);
 		await fetchSupabaseSession("sso-token");
 		const [url] = fetchSpy.mock.calls[0] as [string];
-		expect(url).toBe(`${PROXY_URL()}/supabase/exchange`);
+		expect(url).toBe(`${PROXY_URL}/supabase/exchange`);
 	});
 
 	test("returns the Supabase session on a 2xx response", async () => {
@@ -228,7 +331,7 @@ describe("fetchCodevConfig", () => {
 			string,
 			{ method?: string; headers?: Record<string, string> },
 		];
-		expect(url).toBe(`${PROXY_URL()}/config`);
+		expect(url).toBe(`${PROXY_URL}/config`);
 		expect(init.method).toBe("POST");
 		expect(init.headers?.Authorization).toBe("Bearer my-token");
 	});
@@ -249,5 +352,35 @@ describe("fetchCodevConfig", () => {
 		await expect(fetchCodevConfig("token")).rejects.toThrow(
 			/incomplete payload/,
 		);
+	});
+});
+
+describe("isInvalidKeyError", () => {
+	test("returns true for fetchModels 401 errors", () => {
+		expect(
+			isInvalidKeyError(new Error("Models fetch failed (401): invalid key")),
+		).toBe(true);
+	});
+
+	test("returns true for fetchModels 403 errors", () => {
+		expect(
+			isInvalidKeyError(new Error("Models fetch failed (403): forbidden")),
+		).toBe(true);
+	});
+
+	test("returns false for 5xx errors", () => {
+		expect(
+			isInvalidKeyError(new Error("Models fetch failed (500): Server Error")),
+		).toBe(false);
+	});
+
+	test("returns false for network errors", () => {
+		expect(isInvalidKeyError(new Error("fetch failed"))).toBe(false);
+	});
+
+	test("returns false for non-Error values", () => {
+		expect(isInvalidKeyError("oops")).toBe(false);
+		expect(isInvalidKeyError(null)).toBe(false);
+		expect(isInvalidKeyError(undefined)).toBe(false);
 	});
 });

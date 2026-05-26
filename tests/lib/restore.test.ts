@@ -10,7 +10,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { runRestore } from "@/lib/restore.js";
+import {
+	RESTORE_AGENTS,
+	runRestore,
+	runRestoreAll,
+	toolForRestoreAgent,
+} from "@/lib/restore.js";
 
 let tempDir: string;
 let logSpy: MockInstance;
@@ -19,6 +24,9 @@ let errorSpy: MockInstance;
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-restore-test-"));
 	vi.stubEnv("HOME", tempDir);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempDir);
 	logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 	errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -154,5 +162,144 @@ describe("runRestore", () => {
 					e.includes(join(tempDir, ".codex", "config.toml.backup")),
 			),
 		).toBe(true);
+	});
+
+	test("restores VS Code/Continue from backup and prints success", () => {
+		const { livePath, backupPath } = seedBackup(
+			".continue/config.yaml",
+			"continue-backup",
+		);
+
+		const code = runRestore("vscode-continue");
+
+		expect(code).toBe(0);
+		expect(existsSync(backupPath)).toBe(false);
+		expect(existsSync(livePath)).toBe(true);
+
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(
+			logs.some(
+				(l: string) =>
+					l.startsWith("Restored ") &&
+					l.includes(livePath) &&
+					l.includes(backupPath),
+			),
+		).toBe(true);
+	});
+
+	test("returns 1 and prints no-backup error for VS Code/Continue", () => {
+		const code = runRestore("vscode-continue");
+
+		expect(code).toBe(1);
+		const errors = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(
+			errors.some(
+				(e: string) =>
+					e.startsWith("No backup found at") &&
+					e.includes(join(tempDir, ".continue", "config.yaml.backup")),
+			),
+		).toBe(true);
+	});
+});
+
+describe("toolForRestoreAgent", () => {
+	test("maps launch names to internal Tool names", () => {
+		expect(toolForRestoreAgent("claude")).toBe("claude-code");
+		expect(toolForRestoreAgent("codex")).toBe("codex");
+		expect(toolForRestoreAgent("opencode")).toBe("opencode");
+		// One editor-neutral alias for the shared Continue config — `continue`
+		// routes to `vscode-continue` canonically; the backup file is shared
+		// between VS Code and JetBrains, so either editor Tool would have done.
+		expect(toolForRestoreAgent("continue")).toBe("vscode-continue");
+	});
+
+	test("RESTORE_AGENTS exposes the launch names", () => {
+		expect([...RESTORE_AGENTS]).toEqual([
+			"claude",
+			"codex",
+			"opencode",
+			"continue",
+		]);
+	});
+});
+
+describe("runRestoreAll", () => {
+	test("restores every tool that has a backup and skips the rest", () => {
+		const claude = seedBackup(".claude/settings.json", "c");
+		const opencode = seedBackup(".config/opencode/opencode.json", "o");
+		// Codex intentionally has no backup — should be silently skipped.
+
+		const code = runRestoreAll();
+
+		expect(code).toBe(0);
+		expect(existsSync(claude.backupPath)).toBe(false);
+		expect(existsSync(opencode.backupPath)).toBe(false);
+		// Two "Restored …" lines, no error output.
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(logs.filter((l: string) => l.startsWith("Restored "))).toHaveLength(
+			2,
+		);
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	test("returns 1 and prints a 'nothing to restore' error when no backups exist", () => {
+		const code = runRestoreAll();
+
+		expect(code).toBe(1);
+		const errors = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(errors).toContain("No backups found. Nothing to restore.");
+		expect(logSpy).not.toHaveBeenCalled();
+	});
+
+	test("does not surface a per-tool no-backup error for partial state", () => {
+		// One tool with a backup, three without — restore the one, skip the rest
+		// quietly. No "No backup found at …" lines (those belong to the
+		// single-tool runRestore path).
+		seedBackup(".claude/settings.json", "c");
+
+		const code = runRestoreAll();
+
+		expect(code).toBe(0);
+		const errors = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(errors.some((e: string) => e.startsWith("No backup found at"))).toBe(
+			false,
+		);
+	});
+
+	test("sweeps the Continue backup alongside the other agents", () => {
+		const claude = seedBackup(".claude/settings.json", "c");
+		const cont = seedBackup(".continue/config.yaml", "v");
+
+		const code = runRestoreAll();
+
+		expect(code).toBe(0);
+		expect(existsSync(claude.backupPath)).toBe(false);
+		expect(existsSync(cont.backupPath)).toBe(false);
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		// Two restores total — Claude + Continue. Even though the sweep
+		// iterates both editor Tools (`vscode-continue` + `jetbrains-continue`),
+		// only one of them actually has a backup at any moment: the first
+		// run renames the shared `~/.continue/config.yaml.backup` away and
+		// the second sees no backup and is silently skipped.
+		expect(logs.filter((l: string) => l.startsWith("Restored "))).toHaveLength(
+			2,
+		);
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	test("the `continue` alias rolls back the shared Continue file", () => {
+		// One alias for both editors — `codev restore continue` rolls back
+		// ~/.continue/config.yaml regardless of which editor (or both) the
+		// user actually has installed.
+		const { livePath, backupPath } = seedBackup(
+			".continue/config.yaml",
+			"continue-backup",
+		);
+
+		const code = runRestore(toolForRestoreAgent("continue"));
+
+		expect(code).toBe(0);
+		expect(existsSync(backupPath)).toBe(false);
+		expect(existsSync(livePath)).toBe(true);
 	});
 });

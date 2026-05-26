@@ -16,15 +16,13 @@ import {
 	browserOpener,
 	loadApiKey,
 	loadAuth,
-	loadProxyUrl,
 	login,
 	logout,
 	refreshCodevConfig,
 	saveApiKey,
 	saveCodevConfig,
-	saveProxyUrl,
 } from "@/lib/auth.js";
-import { PROXY_URL, SSO_URL } from "@/lib/const.js";
+import { SSO_URL } from "@/lib/const.js";
 
 const REVOCATION_ENDPOINT = `${SSO_URL}/revoke`;
 
@@ -48,6 +46,9 @@ const EXPIRED_AUTH: AuthData = {
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-auth-test-"));
 	vi.stubEnv("HOME", tempDir);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempDir);
 });
 
 afterEach(() => {
@@ -267,71 +268,20 @@ describe("saveCodevConfig", () => {
 		expect(loadApiKey()?.apiKey).toBe("sk-merged");
 	});
 
-	test("file is written with mode 0600", () => {
-		saveCodevConfig({
-			supabaseUrl: "u",
-			supabaseAnonKey: "a",
-		});
-		const stat = statSync(join(tempDir, ".codev", "auth.json"));
-		expect(stat.mode & 0o777).toBe(0o600);
-	});
-});
-
-describe("saveProxyUrl / loadProxyUrl", () => {
-	test("round-trips a custom URL", () => {
-		saveProxyUrl("https://custom.example.com/proxy");
-		expect(loadProxyUrl()).toBe("https://custom.example.com/proxy");
-	});
-
-	test("returns null when no proxy_url is set", () => {
-		writeAuthFile(VALID_AUTH);
-		expect(loadProxyUrl()).toBeNull();
-	});
-
-	test("returns null when auth.json does not exist", () => {
-		expect(loadProxyUrl()).toBeNull();
-	});
-
-	test("null argument clears the field while preserving other blocks", () => {
-		writeAuthFile(VALID_AUTH);
-		saveProxyUrl("https://custom.example.com/proxy");
-		expect(loadProxyUrl()).toBe("https://custom.example.com/proxy");
-		saveProxyUrl(null);
-		expect(loadProxyUrl()).toBeNull();
-		expect(loadAuth()?.access_token).toBe("test-access-token");
-	});
-
-	test("PROXY_URL() returns the saved value", () => {
-		saveProxyUrl("https://custom.example.com/proxy");
-		expect(PROXY_URL()).toBe("https://custom.example.com/proxy");
-	});
-
-	test("PROXY_URL() falls back to the default when nothing is saved", () => {
-		expect(PROXY_URL()).toContain("/codev-proxy");
-	});
-
-	test("logout preserves proxy_url alongside other long-lived fields", async () => {
-		const dir = join(tempDir, ".codev");
-		mkdirSync(dir, { recursive: true });
-		writeFileSync(
-			join(dir, "auth.json"),
-			JSON.stringify({
-				...VALID_AUTH,
-				proxy_url: "https://custom.example.com/proxy",
-				api_key: "sk-keep",
-			}),
-		);
-		const fetchSpy = mockAuthFetch({
-			[REVOCATION_ENDPOINT]: async () => new Response("", { status: 200 }),
-		});
-		try {
-			expect(await logout()).toBe(true);
-			expect(loadProxyUrl()).toBe("https://custom.example.com/proxy");
-			expect(loadApiKey()?.apiKey).toBe("sk-keep");
-		} finally {
-			fetchSpy.mockRestore();
-		}
-	});
+	// Skipped on Windows: NTFS has no POSIX permission bits, so fs.chmod's 0o600
+	// becomes 0o666 once read back. The auth file is still ACL-protected to the
+	// user — the assertion is the POSIX-only piece.
+	test.skipIf(process.platform === "win32")(
+		"file is written with mode 0600",
+		() => {
+			saveCodevConfig({
+				supabaseUrl: "u",
+				supabaseAnonKey: "a",
+			});
+			const stat = statSync(join(tempDir, ".codev", "auth.json"));
+			expect(stat.mode & 0o777).toBe(0o600);
+		},
+	);
 });
 
 describe("refreshCodevConfig", () => {
@@ -353,27 +303,6 @@ describe("refreshCodevConfig", () => {
 			) as Record<string, unknown>;
 			expect(saved.supabase_url).toBe("https://fresh.supabase.co");
 			expect(saved.supabase_anon_key).toBe("fresh-anon");
-		} finally {
-			fetchSpy.mockRestore();
-		}
-	});
-
-	test("uses the persisted custom proxy URL", async () => {
-		saveProxyUrl("https://custom.example.com/proxy");
-		const fetchSpy = mockAuthFetch({
-			"https://custom.example.com/proxy/config": async () =>
-				new Response(
-					JSON.stringify({
-						supabaseUrl: "u",
-						supabaseAnonKey: "a",
-					}),
-					{ headers: { "Content-Type": "application/json" } },
-				),
-		});
-		try {
-			await refreshCodevConfig("token", () => {});
-			const calls = fetchSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-			expect(calls).toContain("https://custom.example.com/proxy/config");
 		} finally {
 			fetchSpy.mockRestore();
 		}
@@ -431,10 +360,50 @@ describe("saveApiKey / loadApiKey", () => {
 		});
 	});
 
-	test("file is written with mode 0600", () => {
-		saveApiKey({ apiKey: "sk-perms" });
-		const stat = statSync(join(tempDir, ".codev", "auth.json"));
-		expect(stat.mode & 0o777).toBe(0o600);
+	// Skipped on Windows: NTFS has no POSIX permission bits — see the matching
+	// saveCodevConfig case above.
+	test.skipIf(process.platform === "win32")(
+		"file is written with mode 0600",
+		() => {
+			saveApiKey({ apiKey: "sk-perms" });
+			const stat = statSync(join(tempDir, ".codev", "auth.json"));
+			expect(stat.mode & 0o777).toBe(0o600);
+		},
+	);
+});
+
+describe("login CODEV_BYPASS_LOGIN", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	test("returns a stub session and never opens the browser when set", async () => {
+		vi.stubEnv("CODEV_BYPASS_LOGIN", "1");
+		const onReady = vi.fn();
+		const logs: string[] = [];
+
+		const result = await login((msg) => logs.push(msg), onReady);
+
+		expect(result.access_token).toBe("codev-bypass-no-sso");
+		expect(result.user.email).toBe("bypass@local");
+		// Sentinel token must hit disk so subsequent commands see the session.
+		expect(loadAuth()?.access_token).toBe("codev-bypass-no-sso");
+		// No browser handshake, no /authorize redirect.
+		expect(onReady).not.toHaveBeenCalled();
+		expect(logs.some((l) => l.includes("CODEV_BYPASS_LOGIN=1"))).toBe(true);
+	});
+
+	test("does nothing special when the env var is unset or != '1'", async () => {
+		vi.stubEnv("CODEV_BYPASS_LOGIN", "true");
+		writeAuthFile(VALID_AUTH);
+
+		const result = await login(
+			() => {},
+			() => {},
+		);
+
+		// Falls through to the normal "already logged in" path, NOT the stub.
+		expect(result.access_token).toBe("test-access-token");
 	});
 });
 
@@ -596,6 +565,10 @@ describe("login full OAuth flow", () => {
 		openBrowserSpy = vi
 			.spyOn(browserOpener, "open")
 			.mockImplementation(() => Promise.resolve(undefined));
+		// These tests exercise the silent /authorize → /callback path. Login
+		// only takes that path when ~/.codev/ exists (an absent dir signals
+		// "wipe happened, force re-auth via the wrapper /logout flow").
+		mkdirSync(join(tempDir, ".codev"), { recursive: true });
 	});
 
 	afterEach(() => {
@@ -1052,7 +1025,11 @@ describe("login with force-login marker", () => {
 		expect(existsSync(markerPath)).toBe(false);
 	});
 
-	test("uses /authorize directly when no marker is present", async () => {
+	test("uses /authorize directly when no marker is present and ~/.codev exists", async () => {
+		// ~/.codev/ must exist for the silent path — otherwise the dir-absent
+		// check forces login. Create the dir explicitly without the marker.
+		mkdirSync(join(tempDir, ".codev"), { recursive: true });
+
 		let openedUrl: URL | null = null;
 
 		const loginPromise = login(
@@ -1079,5 +1056,39 @@ describe("login with force-login marker", () => {
 		expect((openedUrl as unknown as URL).pathname).toBe(
 			"/sso-wrapper/authorize",
 		);
+	});
+
+	test("forces login when ~/.codev is absent (e.g. after `codev remove`)", async () => {
+		// No marker written, AND no ~/.codev/ created — mirrors the state left
+		// behind by `codev remove`'s rmSync. The IdP's still-valid browser
+		// session cookie must not be silently reused: the next login must
+		// take the wrapper-logout path so the user retypes credentials.
+		expect(existsSync(join(tempDir, ".codev"))).toBe(false);
+
+		let openedUrl: URL | null = null;
+
+		const loginPromise = login(
+			() => {},
+			(openBrowserFn) => {
+				openBrowserFn();
+				openedUrl = getInitialUrl();
+				const logoutDoneUri = openedUrl.searchParams.get("redirect_uri");
+				const port = Number.parseInt(new URL(logoutDoneUri ?? "").port, 10);
+				setTimeout(async () => {
+					const redirect = await originalFetch(
+						`http://localhost:${port}/logout-done`,
+						{ redirect: "manual" },
+					);
+					const next = new URL(redirect.headers.get("location") ?? "");
+					const state = next.searchParams.get("state") ?? "";
+					await originalFetch(
+						`http://localhost:${port}/callback?code=c&state=${state}`,
+					);
+				}, 50);
+			},
+		);
+
+		await loginPromise;
+		expect((openedUrl as unknown as URL).pathname).toBe("/sso-wrapper/logout");
 	});
 });

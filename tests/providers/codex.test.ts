@@ -22,6 +22,9 @@ function writeSession(name: string, lines: object[]): void {
 beforeEach(() => {
 	tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-codex-")));
 	vi.stubEnv("HOME", tempHome);
+	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
+	// hit the temp home on every platform.
+	vi.stubEnv("USERPROFILE", tempHome);
 	projectCwd = join(tempHome, "works", "myapp");
 	mkdirSync(projectCwd, { recursive: true });
 	dayDir = join(tempHome, ".codex", "sessions", "2026", "04", "27");

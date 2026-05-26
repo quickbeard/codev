@@ -1,0 +1,136 @@
+import { existsSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { logout } from "@/lib/auth.js";
+import { restoreTool, type Tool } from "@/lib/configure.js";
+import { uninstallShims } from "@/lib/shims.js";
+
+export type StepStatus = "ok" | "noop" | "failed";
+
+export interface StepResult {
+	label: string;
+	detail: string;
+	status: StepStatus;
+}
+
+export interface RemoveResult {
+	steps: StepResult[];
+	anyFailed: boolean;
+}
+
+// We iterate one Tool per BackupKind. `vscode-continue` and
+// `jetbrains-continue` share ~/.continue/config.yaml, so including both
+// would have the second iteration delete the file the first iteration just
+// restored. Use `vscode-continue` as the canonical Continue Tool here.
+const TOOLS: Tool[] = ["claude-code", "codex", "opencode", "vscode-continue"];
+
+// Both Continue editor Tools share the same backup file, so the label is
+// editor-neutral. The `jetbrains-continue` entry is for type exhaustiveness;
+// it isn't reached by the loop above.
+const TOOL_LABEL: Record<Tool, string> = {
+	"claude-code": "Claude Code config",
+	codex: "Codex config",
+	opencode: "OpenCode config",
+	"vscode-continue": "Continue config",
+	"jetbrains-continue": "Continue config",
+};
+
+// Composes the four reversal steps (logout → unhook → restore-or-delete each
+// tool → wipe ~/.codev). Order matters: logout runs first because it reads
+// ~/.codev/auth.json to revoke tokens, and the final step deletes that dir;
+// unhook runs before the wipe because it cleans rc-file sentinel blocks and
+// (on Windows) the user PATH registry entry — state that lives OUTSIDE ~/.codev
+// and wouldn't be reached by rmSync(~/.codev).
+export async function runRemove(): Promise<RemoveResult> {
+	const steps: StepResult[] = [];
+
+	steps.push(await runLogout());
+	steps.push(runUnhook());
+	for (const tool of TOOLS) {
+		steps.push(runRestoreOrDelete(tool));
+	}
+	steps.push(runWipeCodevDir());
+
+	return { steps, anyFailed: steps.some((s) => s.status === "failed") };
+}
+
+async function runLogout(): Promise<StepResult> {
+	try {
+		const ok = await logout();
+		return ok
+			? { label: "SSO", detail: "signed out", status: "ok" }
+			: { label: "SSO", detail: "not signed in", status: "noop" };
+	} catch (err) {
+		return { label: "SSO", detail: errorMessage(err), status: "failed" };
+	}
+}
+
+function runUnhook(): StepResult {
+	try {
+		const r = uninstallShims();
+		const removed = r.shimsRemoved.length;
+		const patched =
+			r.rcFilesUpdated.length + (r.windowsUserPathUpdated ? 1 : 0);
+		if (removed === 0 && patched === 0) {
+			return { label: "Shims", detail: "none installed", status: "noop" };
+		}
+		const parts: string[] = [];
+		if (removed > 0)
+			parts.push(`removed ${removed} shim${removed === 1 ? "" : "s"}`);
+		if (r.rcFilesUpdated.length > 0) {
+			parts.push(
+				`cleaned ${r.rcFilesUpdated.length} rc file${r.rcFilesUpdated.length === 1 ? "" : "s"}`,
+			);
+		}
+		if (r.windowsUserPathUpdated) parts.push("updated user PATH");
+		return { label: "Shims", detail: parts.join("; "), status: "ok" };
+	} catch (err) {
+		return { label: "Shims", detail: errorMessage(err), status: "failed" };
+	}
+}
+
+function runRestoreOrDelete(tool: Tool): StepResult {
+	const label = TOOL_LABEL[tool];
+	try {
+		const result = restoreTool(tool);
+		if (result.status === "restored") {
+			return {
+				label,
+				detail: `restored from ${result.backupPath}`,
+				status: "ok",
+			};
+		}
+		// status === "no-backup": fall through to deleting whatever live config
+		// CoDev wrote, so the user really is back at pre-CoDev state (i.e. no
+		// CoDev-authored config left behind).
+		if (existsSync(result.sourcePath)) {
+			rmSync(result.sourcePath, { force: true });
+			return {
+				label,
+				detail: `no backup; deleted ${result.sourcePath}`,
+				status: "ok",
+			};
+		}
+		return { label, detail: "nothing to restore", status: "noop" };
+	} catch (err) {
+		return { label, detail: errorMessage(err), status: "failed" };
+	}
+}
+
+function runWipeCodevDir(): StepResult {
+	const path = join(homedir(), ".codev");
+	try {
+		if (!existsSync(path)) {
+			return { label: "~/.codev", detail: "already absent", status: "noop" };
+		}
+		rmSync(path, { recursive: true, force: true });
+		return { label: "~/.codev", detail: `removed ${path}`, status: "ok" };
+	} catch (err) {
+		return { label: "~/.codev", detail: errorMessage(err), status: "failed" };
+	}
+}
+
+function errorMessage(err: unknown): string {
+	if (err instanceof Error) return err.message;
+	return String(err);
+}

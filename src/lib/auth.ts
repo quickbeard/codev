@@ -1,8 +1,10 @@
+import { randomBytes } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	renameSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -16,6 +18,9 @@ import { fetchCodevConfig } from "@/lib/proxy.js";
 
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
 const REVOKE_TIMEOUT_MS = 3_000;
+// Token/userinfo endpoints are quick handshakes — cap them so a hung IdP
+// surfaces as an error instead of wedging the install flow indefinitely.
+const SSO_FETCH_TIMEOUT_MS = 10_000;
 
 function authFilePath() {
 	return join(homedir(), ".codev", "auth.json");
@@ -79,7 +84,6 @@ interface AuthFileContents {
 	model?: string;
 	supabase_url?: string;
 	supabase_anon_key?: string;
-	proxy_url?: string;
 }
 
 export interface CodevConfig {
@@ -112,7 +116,27 @@ function writeAuthFile(data: AuthFileContents): void {
 	// writeFileSync's mode is ignored when the file already exists, so
 	// re-apply permissions explicitly to tighten any pre-existing loose perms.
 	chmodSync(dir, 0o700);
-	writeFileSync(path, JSON.stringify(data, null, 2), { mode: 0o600 });
+	// Atomic write: stage to a per-process tmp sibling, chmod 0o600 *before*
+	// rename so the published file never appears world-readable, then rename
+	// over the live path. A daemon and a foreground command racing to update
+	// auth.json now end up with one whole write or the other — never a torn
+	// merge. The random suffix prevents two concurrent writers from clobbering
+	// each other's temp file mid-flight.
+	const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+	try {
+		writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+		chmodSync(tmp, 0o600);
+		renameSync(tmp, path);
+	} catch (err) {
+		try {
+			unlinkSync(tmp);
+		} catch {
+			// tmp may already be absent.
+		}
+		throw err;
+	}
+	// Re-apply mode after rename for the EXDEV / overwrite case where the
+	// renamed inode inherits the destination's prior mode on some platforms.
 	chmodSync(path, 0o600);
 }
 
@@ -163,22 +187,6 @@ export function saveCodevConfig(config: CodevConfig): void {
 	});
 }
 
-// Stores the user's chosen proxy URL (or clears it when null is passed, so
-// PROXY_URL() falls back to the baked-in default). Trailing slashes are
-// stripped by the caller (the ProxyUrl component) before reaching this.
-export function saveProxyUrl(url: string | null): void {
-	const existing = readAuthFile() ?? {};
-	writeAuthFile({
-		...existing,
-		proxy_url: url ?? undefined,
-	});
-}
-
-export function loadProxyUrl(): string | null {
-	const raw = readAuthFile();
-	return raw?.proxy_url ?? null;
-}
-
 export function loadApiKey(): ApiKeyCreds | null {
 	const raw = readAuthFile();
 	if (!raw?.api_key) return null;
@@ -201,7 +209,6 @@ export async function logout(): Promise<boolean> {
 			model: raw.model,
 			supabase_url: raw.supabase_url,
 			supabase_anon_key: raw.supabase_anon_key,
-			proxy_url: raw.proxy_url,
 		};
 		const hasAnything = Object.values(preserved).some((v) => v !== undefined);
 		if (hasAnything) {
@@ -287,6 +294,31 @@ export async function login(
 ): Promise<AuthData> {
 	onLog("Starting SSO login...");
 
+	// Dev escape hatch: when CODEV_BYPASS_LOGIN=1 is set, skip the OAuth flow
+	// entirely and persist a stub session. Useful when the SSO wrapper is down
+	// and you still need to walk through `codev install` to test downstream
+	// steps (npm install, configure, model select, etc.). The stub is real
+	// auth.json on disk, so subsequent `codev claude/codex/opencode` runs and
+	// the upload daemon also see a "logged in" state — clear it with
+	// `codev logout` or by unsetting the env var + `codev remove`.
+	if (process.env.CODEV_BYPASS_LOGIN === "1") {
+		onLog("CODEV_BYPASS_LOGIN=1 — skipping SSO, using stub session.");
+		const authData: AuthData = {
+			access_token: "codev-bypass-no-sso",
+			id_token: "codev-bypass-no-sso",
+			expires_at: Date.now() + 3_600_000,
+			user: {
+				sub: "codev-bypass",
+				email: "bypass@local",
+				displayName: "Bypass User",
+			},
+		};
+		saveAuth(authData);
+		clearForceLogin();
+		onLog(`Logged in as ${authData.user.email}`);
+		return authData;
+	}
+
 	const existing = loadAuth();
 	if (existing) {
 		onLog(`Already logged in as ${existing.user.email}`);
@@ -318,7 +350,16 @@ export async function login(
 		}
 	}
 
-	const forceLogin = existsSync(forceLoginPath());
+	// Force re-auth via the IdP login form (prompt=login) when:
+	//   1. ~/.codev/ doesn't exist — typically the user just ran `codev remove`
+	//      (which wipes the dir), or this is a truly fresh install. We have no
+	//      record of prior consent on this machine, so don't silently ride any
+	//      IdP browser-session cookie that might still be valid from another
+	//      app on the same SSO realm.
+	//   2. The force-login sentinel is set — `codev logout` writes it because
+	//      revoking tokens does not terminate the IdP's session cookie.
+	const forceLogin =
+		!existsSync(join(homedir(), ".codev")) || existsSync(forceLoginPath());
 
 	const verifier = generateCodeVerifier();
 	const challenge = await generateCodeChallenge(verifier);
@@ -355,15 +396,16 @@ export async function login(
 	return authData;
 }
 
-// Best-effort: pull the latest Supabase coordinates from codev-proxy
-// (against PROXY_URL(), which honors the user's custom-proxy override) and
+// Best-effort: pull the latest Supabase coordinates from codev-proxy and
 // persist them next to the SSO session. Failure is logged but not thrown —
 // downstream accessors (SUPABASE_URL/ANON_KEY in const.ts) will hard-fail
 // later if no values were ever fetched, with a "run codev install" message
 // that's actionable for the user.
 //
 // Callers are responsible for invoking this after a successful login:
-//   - InstallApp runs it as its own phase (after the user picks the proxy URL)
+//   - InstallApp awaits it inline after the npm install completes (no visible
+//     Step — the call blocks the transition to `validating-existing`/
+//     `key-choice` but doesn't render a spinner of its own).
 //   - upload.ts's ensureAuth runs it on the fresh-login branch, and again
 //     in the retry path after a 401/403 from Supabase (config may have
 //     rotated since the last login).
@@ -517,6 +559,7 @@ async function exchangeCode(
 			client_id: CLIENT_ID,
 			code_verifier: codeVerifier,
 		}),
+		signal: AbortSignal.timeout(SSO_FETCH_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {
@@ -536,6 +579,7 @@ async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
 			refresh_token: refreshToken,
 			client_id: CLIENT_ID,
 		}),
+		signal: AbortSignal.timeout(SSO_FETCH_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {
@@ -548,6 +592,7 @@ async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
 async function fetchUserInfo(accessToken: string) {
 	const res = await fetch(`${SSO_URL}/userinfo`, {
 		headers: { Authorization: `Bearer ${accessToken}` },
+		signal: AbortSignal.timeout(SSO_FETCH_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {

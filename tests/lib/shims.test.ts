@@ -53,6 +53,49 @@ describe("toolToShimAgent", () => {
 	});
 });
 
+describe("detectCodevTools", () => {
+	function seedBackup(relPath: string) {
+		const path = join(tempDir, relPath);
+		mkdirSync(join(path, ".."), { recursive: true });
+		writeFileSync(path, "");
+	}
+
+	test("returns [] when no tool backups exist", async () => {
+		const { detectCodevTools } = await import("@/lib/shims.js");
+		expect(detectCodevTools()).toEqual([]);
+	});
+
+	test("returns only the agents whose *.backup exists, mapping claude-code → claude", async () => {
+		seedBackup(".claude/settings.json.backup");
+		seedBackup(".codex/config.toml.backup");
+
+		const { detectCodevTools } = await import("@/lib/shims.js");
+		expect(detectCodevTools().sort()).toEqual(["claude", "codex"]);
+	});
+
+	test("includes opencode when its nested backup exists", async () => {
+		seedBackup(".config/opencode/opencode.json.backup");
+
+		const { detectCodevTools } = await import("@/lib/shims.js");
+		expect(detectCodevTools()).toEqual(["opencode"]);
+	});
+
+	test("includes a tool whose live config has CoDev's marker even without a backup", async () => {
+		// First-time user: no pre-existing config means `ensureBackup` has nothing
+		// to snapshot, so no `*.backup` is ever created. The live config still
+		// carries CoDev's marker keys though — that signal must be honored.
+		const { configureClaudeCode } = await import("@/lib/configure.js");
+		configureClaudeCode({ apiKey: "sk-test", model: "test-model" });
+
+		expect(existsSync(join(tempDir, ".claude", "settings.json.backup"))).toBe(
+			false,
+		);
+
+		const { detectCodevTools } = await import("@/lib/shims.js");
+		expect(detectCodevTools()).toEqual(["claude"]);
+	});
+});
+
 describe("activationHint", () => {
 	test("returns the exec $SHELL hint on Unix platforms", async () => {
 		const { activationHint } = await import("@/lib/shims.js");
@@ -79,12 +122,19 @@ describe("activationHint", () => {
 });
 
 describe("stripShimDirFromPath", () => {
-	test("removes the shim dir entry from a colon-separated PATH", async () => {
-		const { shimDir, stripShimDirFromPath } = await import("@/lib/shims.js");
-		const dir = shimDir();
-		const path = ["/usr/local/bin", dir, "/usr/bin"].join(":");
-		expect(stripShimDirFromPath(path, ":")).toBe("/usr/local/bin:/usr/bin");
-	});
+	// Skipped on Windows: shimDir() returns a path with a drive-letter colon
+	// (e.g. `C:\Users\…\.codev\bin`), which would split into pieces under the
+	// `":"` delimiter and never match. The next test (platform default delimiter)
+	// covers Windows.
+	test.skipIf(process.platform === "win32")(
+		"removes the shim dir entry from a colon-separated PATH",
+		async () => {
+			const { shimDir, stripShimDirFromPath } = await import("@/lib/shims.js");
+			const dir = shimDir();
+			const path = ["/usr/local/bin", dir, "/usr/bin"].join(":");
+			expect(stripShimDirFromPath(path, ":")).toBe("/usr/local/bin:/usr/bin");
+		},
+	);
 
 	test("returns the input untouched when shim dir is absent", async () => {
 		const { stripShimDirFromPath } = await import("@/lib/shims.js");
