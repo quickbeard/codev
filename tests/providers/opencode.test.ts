@@ -190,6 +190,93 @@ describe("openCodeProvider.listSessions", () => {
 		);
 	});
 
+	test("attaches modelID from message data to assistant messages", async () => {
+		seedProjectAndSession();
+		const sessions = await openCodeProvider.listSessions(projectCwd);
+		const s = sessions[0];
+		if (!s) throw new Error("expected session");
+		// Assistant message (msg-2) has modelID: "claude-sonnet-4-5" in seed data
+		expect(s.messages[1]?.model).toBe("claude-sonnet-4-5");
+		// User message should not expose a model
+		expect(s.messages[0]?.model).toBeUndefined();
+	});
+
+	test("reads modelID from nested model.modelID when flat modelID is absent", async () => {
+		// Real OpenCode data stores model as { providerID, modelID } on user rows
+		// and assistant rows may also use that shape in some versions.
+		const db = new Database(dbPath);
+		createSchema(db);
+		run(db, "INSERT INTO project (id, worktree) VALUES (?, ?)", [
+			"proj-nested",
+			projectCwd,
+		]);
+		run(
+			db,
+			"INSERT INTO session (id, project_id, slug, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			[
+				"ses-nested",
+				"proj-nested",
+				"slug",
+				"Nested model",
+				projectCwd,
+				Math.floor(Date.UTC(2026, 3, 28, 10, 0, 0) / 1000),
+				Math.floor(Date.UTC(2026, 3, 28, 10, 5, 0) / 1000),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+			[
+				"msg-n1",
+				"ses-nested",
+				Math.floor(Date.UTC(2026, 3, 28, 10, 0, 0) / 1000),
+				JSON.stringify({ role: "user" }),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-n1",
+				"msg-n1",
+				"ses-nested",
+				Math.floor(Date.UTC(2026, 3, 28, 10, 0, 0) / 1000),
+				JSON.stringify({ type: "text", text: "Hello" }),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+			[
+				"msg-n2",
+				"ses-nested",
+				Math.floor(Date.UTC(2026, 3, 28, 10, 1, 0) / 1000),
+				// nested model object — shape used by real OpenCode for user rows
+				JSON.stringify({
+					role: "assistant",
+					model: { providerID: "anthropic", modelID: "claude-opus-4-7" },
+				}),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-n2",
+				"msg-n2",
+				"ses-nested",
+				Math.floor(Date.UTC(2026, 3, 28, 10, 1, 0) / 1000),
+				JSON.stringify({ type: "text", text: "Hi there!" }),
+			],
+		);
+		db.close();
+
+		const sessions = await openCodeProvider.listSessions(projectCwd);
+		const nested = sessions.find((s) => s.id === "ses-nested");
+		if (!nested) throw new Error("expected nested session");
+		expect(nested.messages[1]?.model).toBe("claude-opus-4-7");
+	});
+
 	test("returns empty list when no project matches the cwd", async () => {
 		seedProjectAndSession();
 		const otherCwd = join(tempHome, "elsewhere");
