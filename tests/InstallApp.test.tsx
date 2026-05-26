@@ -20,6 +20,23 @@ vi.mock("node:child_process", async (importOriginal) => {
 	return { ...actual, execFile: vi.fn() };
 });
 
+// jetbrains.ts's macOS fallback walks `/Applications` and `~/Applications`
+// for `<IDE>.app` bundles when the shell launcher isn't on PATH. Without
+// this mock, the JetBrains soft-fail test below would pick up the
+// maintainer's real PyCharm.app and follow the install path instead of
+// the warning path. Returning `[]` for any Applications directory forces
+// the fallback into its "nothing found" branch; everything else passes
+// through to real fs so the temp-home setup (mkdtempSync/rmSync) still
+// works.
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs")>();
+	const readdir = ((p: unknown, ...rest: unknown[]) => {
+		if (typeof p === "string" && /(^|\/)Applications$/.test(p)) return [];
+		return (actual.readdirSync as (...a: unknown[]) => unknown)(p, ...rest);
+	}) as typeof actual.readdirSync;
+	return { ...actual, readdirSync: readdir };
+});
+
 // InstallApp's manual-creds path calls saveApiKey(), which writes to
 // ~/.codev/auth.json. Without this redirect, every test run would clobber the
 // developer's real auth.json with fixture keys like "sk-manual-123".

@@ -1,5 +1,7 @@
 import * as child_process from "node:child_process";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	CLAUDE_CODE_INTELLIJ_PLUGIN_ID,
 	CONTINUE_INTELLIJ_PLUGIN_ID,
@@ -11,6 +13,23 @@ import {
 vi.mock("node:child_process", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:child_process")>();
 	return { ...actual, execFile: vi.fn() };
+});
+
+// The macOS fallback in jetbrains.ts walks /Applications and ~/Applications
+// for `.app` bundles whose embedded binary matches the launcher name. Mock
+// node:fs so the host's actual /Applications (which on the maintainer's box
+// contains PyCharm.app) doesn't leak into PATH-only tests. Default behavior
+// is "nothing installed"; tests that exercise the fallback override
+// readdirSync/existsSync explicitly.
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs")>();
+	return {
+		...actual,
+		readdirSync: vi.fn(() => {
+			throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+		}),
+		existsSync: vi.fn(() => false),
+	};
 });
 
 type ExecCb = (
@@ -173,6 +192,30 @@ describe("installContinuePlugin", () => {
 		const result = await installContinuePlugin();
 		expect(result).toEqual({ warning: "idea: ECONNRESET" });
 	});
+
+	test("trims trailing newline from error.message", async () => {
+		// execFile's Error.message is "Command failed: <argv>\n…" with a
+		// trailing newline. Without trimming, Install.tsx's `". <hint>"`
+		// suffix lands on its own line because the embedded \n breaks the
+		// row warning across lines.
+		stubExecFile({
+			handler: (file) => {
+				if (file === "idea") {
+					return {
+						error: new Error(
+							"Command failed: idea installPlugins foo\n",
+						) as NodeJS.ErrnoException,
+						stderr: "",
+					};
+				}
+				return { error: enoent(file) };
+			},
+		});
+		const result = await installContinuePlugin();
+		expect(result).toEqual({
+			warning: "idea: Command failed: idea installPlugins foo",
+		});
+	});
 });
 
 describe("installClaudeCodePlugin", () => {
@@ -204,3 +247,187 @@ describe("installClaudeCodePlugin", () => {
 		});
 	});
 });
+
+describe("installPlugin (per-launcher serialization)", () => {
+	test("does not run two installs against the same CLI concurrently", async () => {
+		// TaskList fires each row's `run()` in parallel, so two extension
+		// rows (Claude Code + Continue) both call `pycharm installPlugins`
+		// simultaneously. JetBrains IDEs hold a single-instance lock during
+		// headless `installPlugins`; the second invocation fails. The fix
+		// queues calls per CLI so only one IDE boot runs at a time.
+		const activeByCli = new Map<string, number>();
+		const peakByCli = new Map<string, number>();
+		const pending: Array<() => void> = [];
+
+		vi.mocked(child_process.execFile).mockImplementation(((
+			...callArgs: unknown[]
+		) => {
+			const { file, cb } = normalizeExecFileCall(callArgs);
+			const next = (activeByCli.get(file) ?? 0) + 1;
+			activeByCli.set(file, next);
+			peakByCli.set(file, Math.max(peakByCli.get(file) ?? 0, next));
+			pending.push(() => {
+				activeByCli.set(file, (activeByCli.get(file) ?? 1) - 1);
+				cb(null, "ok", "");
+			});
+			return {} as unknown as child_process.ChildProcess;
+		}) as unknown as typeof child_process.execFile);
+
+		// Drain the queue one call at a time. Each drain releases exactly
+		// one pending exec; if the lock is working the next-in-queue can't
+		// have started until the previous resolves.
+		const drainer = (async () => {
+			while (true) {
+				while (pending.length > 0) {
+					const release = pending.shift();
+					release?.();
+					await new Promise((r) => setImmediate(r));
+				}
+				if (
+					Array.from(activeByCli.values()).every((n) => n === 0) &&
+					pending.length === 0
+				) {
+					// Yield once more in case a follow-up exec is about to fire.
+					await new Promise((r) => setImmediate(r));
+					if (pending.length === 0) return;
+				}
+				await new Promise((r) => setImmediate(r));
+			}
+		})();
+
+		await Promise.all([installContinuePlugin(), installClaudeCodePlugin()]);
+		await drainer;
+
+		for (const cli of JETBRAINS_CLIS) {
+			expect(peakByCli.get(cli) ?? 0).toBeLessThanOrEqual(1);
+		}
+	});
+});
+
+// macOS users frequently install JetBrains IDEs via the official `.dmg`
+// without enabling Toolbox's "Generate shell scripts" option, so the
+// `pycharm` / `idea` / `goland` launchers never land on PATH. The fallback
+// resolves the launcher to `<Bundle>.app/Contents/MacOS/<cli>` under
+// /Applications or ~/Applications and runs `installPlugins` against that
+// binary instead.
+//
+// Skip on Windows: the production fallback is gated on `process.platform
+// === "darwin"`, so it never runs on win32 in real use. These tests force
+// the darwin override to exercise the fallback logic, but on Windows runners
+// `npm.ts`'s USE_SHELL branch then collapses `(file, args)` into a single
+// space-joined command string with no quoting around `file`. The mock's
+// inverse-split on `\s+` mangles `.app` paths whose IDE name contains a
+// space (every IntelliJ IDEA variant), which would fail the test for a
+// production code path that can't be hit. macOS + Linux CI still cover it.
+describe.skipIf(process.platform === "win32")(
+	"installContinuePlugin (macOS .app fallback)",
+	() => {
+		const origPlatform = process.platform;
+		beforeEach(() => {
+			Object.defineProperty(process, "platform", {
+				value: "darwin",
+				configurable: true,
+			});
+		});
+		afterEach(() => {
+			Object.defineProperty(process, "platform", {
+				value: origPlatform,
+				configurable: true,
+			});
+		});
+
+		test("invokes the .app binary when the PATH launcher is missing", async () => {
+			// /Applications has PyCharm.app installed but no `pycharm` launcher
+			// is on PATH (user never ran Toolbox's "Generate shell scripts").
+			// Build the expected binary path with the same `join` the production
+			// code uses, so the test passes on Windows CI (where `path.join` is
+			// the win32 variant and emits backslashes) without forcing a posix
+			// override.
+			const pycharmAppBin = join(
+				"/Applications",
+				"PyCharm.app",
+				"Contents",
+				"MacOS",
+				"pycharm",
+			);
+			vi.mocked(readdirSync).mockImplementation(((root: string) => {
+				if (root === "/Applications") return ["PyCharm.app"];
+				return [];
+			}) as unknown as typeof readdirSync);
+			vi.mocked(existsSync).mockImplementation(
+				((p: string) => p === pycharmAppBin) as unknown as typeof existsSync,
+			);
+			const calls = stubExecFile({
+				handler: (file) => {
+					if (file === pycharmAppBin) return { stdout: "ok" };
+					return { error: enoent(file) };
+				},
+			});
+
+			const result = await installContinuePlugin();
+
+			expect(result).toBeNull();
+			// idea + goland: PATH probe only (no .app installed → no retry).
+			// pycharm: PATH probe ENOENT, then retry against the .app binary.
+			expect(calls.map((c) => c.file)).toEqual([
+				"idea",
+				"pycharm",
+				pycharmAppBin,
+				"goland",
+			]);
+			const pycharmAppCall = calls.find((c) => c.file.includes("PyCharm.app"));
+			expect(pycharmAppCall?.args).toEqual([
+				"installPlugins",
+				CONTINUE_INTELLIJ_PLUGIN_ID,
+			]);
+		});
+
+		test("matches edition variants by .app name prefix", async () => {
+			// Ultimate edition installs as "IntelliJ IDEA Ultimate.app"; CE as
+			// "IntelliJ IDEA CE.app". The fallback should accept any bundle whose
+			// stem starts with the canonical name. Use `join` for the same
+			// platform-portability reason as the PyCharm test above.
+			const ideaAppBin = join(
+				"/Applications",
+				"IntelliJ IDEA Ultimate.app",
+				"Contents",
+				"MacOS",
+				"idea",
+			);
+			vi.mocked(readdirSync).mockImplementation(((root: string) => {
+				if (root === "/Applications") return ["IntelliJ IDEA Ultimate.app"];
+				return [];
+			}) as unknown as typeof readdirSync);
+			vi.mocked(existsSync).mockImplementation(
+				((p: string) => p === ideaAppBin) as unknown as typeof existsSync,
+			);
+			const calls = stubExecFile({
+				handler: (file) => {
+					if (file === ideaAppBin) return { stdout: "ok" };
+					return { error: enoent(file) };
+				},
+			});
+
+			const result = await installContinuePlugin();
+			expect(result).toBeNull();
+			expect(calls.some((c) => c.file === ideaAppBin)).toBe(true);
+		});
+
+		test("does not retry when the .app exists but the embedded binary is missing", async () => {
+			// Defensive: a stale or broken bundle without Contents/MacOS/<cli>
+			// should fall through to the soft warning, not crash. existsSync
+			// stays false for the binary path.
+			vi.mocked(readdirSync).mockImplementation(((root: string) => {
+				if (root === "/Applications") return ["PyCharm.app"];
+				return [];
+			}) as unknown as typeof readdirSync);
+			stubExecFile({ handler: (file) => ({ error: enoent(file) }) });
+
+			const result = await installContinuePlugin();
+			expect(result).toEqual({
+				warning:
+					"JetBrains launcher not found on PATH (PyCharm / IntelliJ IDEA / GoLand)",
+			});
+		});
+	},
+);
