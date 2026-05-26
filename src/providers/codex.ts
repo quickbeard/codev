@@ -317,10 +317,10 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				timestamp: activeAssistantTimestamp,
 				model: activeAssistantModel,
 			});
-			activeAssistantContent = "";
-			activeAssistantTimestamp = undefined;
-			activeAssistantModel = undefined;
 		}
+		activeAssistantContent = "";
+		activeAssistantTimestamp = undefined;
+		activeAssistantModel = undefined;
 	}
 
 	// Skip the first line (metadata) — already consumed in readMeta.

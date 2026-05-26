@@ -321,10 +321,10 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 				timestamp: activeAssistantTimestamp,
 				model: activeAssistantModel,
 			});
-			activeAssistantContent = "";
-			activeAssistantTimestamp = undefined;
-			activeAssistantModel = undefined;
 		}
+		activeAssistantContent = "";
+		activeAssistantTimestamp = undefined;
+		activeAssistantModel = undefined;
 	}
 
 	for (const line of lines) {
