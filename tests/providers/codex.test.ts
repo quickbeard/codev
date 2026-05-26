@@ -280,6 +280,63 @@ describe("codexProvider.listSessions", () => {
 		expect(assistantContent).toContain("Error: The user rejected this edit.");
 	});
 
+	test("extracts model from turn_context and attaches it to assistant messages", async () => {
+		writeSession("session-model.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-model",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+					model_provider: "openai",
+				},
+			},
+			// turn_context arrives before the user_message in each turn
+			{
+				type: "turn_context",
+				timestamp: "2026-04-27T18:32:08Z",
+				payload: { turn_id: "t-1", model: "gpt-5.5" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "Fix the auth bug" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:20Z",
+				payload: { type: "agent_message", message: "Sure, I'll fix it." },
+			},
+			// Second turn with same model
+			{
+				type: "turn_context",
+				timestamp: "2026-04-27T18:32:25Z",
+				payload: { turn_id: "t-2", model: "gpt-5.5" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:30Z",
+				payload: { type: "user_message", message: "Looks good, thanks!" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:40Z",
+				payload: { type: "agent_message", message: "You're welcome!" },
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		const s = sessions[0];
+		if (!s) throw new Error("expected session");
+		expect(s.messages.length).toBe(4);
+		// Assistant messages should carry the model
+		expect(s.messages[1]?.model).toBe("gpt-5.5");
+		expect(s.messages[3]?.model).toBe("gpt-5.5");
+		// User messages should not have a model
+		expect(s.messages[0]?.model).toBeUndefined();
+	});
+
 	test("excludes sessions whose cwd does not match", async () => {
 		const otherCwd = join(tempHome, "elsewhere");
 		mkdirSync(otherCwd, { recursive: true });

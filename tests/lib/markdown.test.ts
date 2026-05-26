@@ -52,4 +52,23 @@ describe("renderMarkdown", () => {
 		const b = renderMarkdown(fixture());
 		expect(a).toBe(b);
 	});
+
+	test("includes model in assistant header when message.model is set", () => {
+		const md = renderMarkdown(
+			fixture({
+				messages: [
+					{ role: "user", content: "Hi" },
+					{ role: "assistant", content: "Hello!", model: "claude-sonnet-4-6" },
+				],
+			}),
+		);
+		expect(md).toContain("## Assistant (claude-sonnet-4-6)");
+		expect(md).not.toContain("## Assistant\n");
+	});
+
+	test("omits model from assistant header when message.model is not set", () => {
+		const md = renderMarkdown(fixture());
+		expect(md).toContain("## Assistant\n");
+		expect(md).not.toContain("## Assistant (");
+	});
 });

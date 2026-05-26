@@ -336,13 +336,21 @@ function parsePart(part: PartRow): string | null {
 	return null;
 }
 
+interface MessageMeta {
+	role?: string;
+	/** Flat model id on assistant rows (e.g. "claude-sonnet-4-5") */
+	modelID?: string;
+	/** Nested model object on user rows: { providerID, modelID } */
+	model?: { providerID?: string; modelID?: string };
+}
+
 function buildSession(row: SessionRow, db: DB): Session | null {
 	const messages: Message[] = [];
 	let firstUserMessage = "";
 	const msgRows = readMessages(db, row.id);
 
 	for (const msg of msgRows) {
-		const meta = safeParse<{ role?: string }>(msg.data);
+		const meta = safeParse<MessageMeta>(msg.data);
 		const role = meta?.role === "assistant" ? "assistant" : "user";
 		const parts = readParts(db, row.id, msg.id);
 		const textParts: string[] = [];
@@ -353,7 +361,17 @@ function buildSession(row: SessionRow, db: DB): Session | null {
 		const content = textParts.join("\n").trim();
 		if (!content) continue;
 		const timestamp = unixToISO(msg.time_created);
-		messages.push({ role, content, timestamp });
+		// Model id is stored as a flat string on assistant rows and as a nested
+		// object on user rows.  Read both shapes; only attach to assistant turns
+		// since that's what the markdown header and analytics track.
+		const modelId =
+			meta?.modelID || meta?.model?.modelID || undefined;
+		messages.push({
+			role,
+			content,
+			timestamp,
+			model: role === "assistant" ? modelId : undefined,
+		});
 		if (role === "user" && !firstUserMessage) firstUserMessage = content;
 	}
 

@@ -29,6 +29,7 @@ interface RawRecord {
 	message?: {
 		role?: string;
 		content?: unknown;
+		model?: string;
 	};
 }
 
@@ -292,6 +293,7 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 
 	let activeAssistantContent = "";
 	let activeAssistantTimestamp: string | undefined;
+	let activeAssistantModel: string | undefined;
 
 	const pendingToolUses = new Map<
 		string,
@@ -317,9 +319,11 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 				role: "assistant",
 				content: activeAssistantContent.trim(),
 				timestamp: activeAssistantTimestamp,
+				model: activeAssistantModel,
 			});
 			activeAssistantContent = "";
 			activeAssistantTimestamp = undefined;
+			activeAssistantModel = undefined;
 		}
 	}
 
@@ -379,6 +383,9 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 		} else if (rec.type === "assistant" || role === "assistant") {
 			if (!activeAssistantTimestamp) {
 				activeAssistantTimestamp = rec.timestamp;
+			}
+			if (!activeAssistantModel && rec.message?.model) {
+				activeAssistantModel = rec.message.model;
 			}
 
 			if (typeof content === "string") {

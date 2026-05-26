@@ -7,6 +7,7 @@ export interface Message {
 	role: "user" | "assistant";
 	content: string;
 	timestamp?: string;
+	model?: string;
 }
 
 export interface Session {

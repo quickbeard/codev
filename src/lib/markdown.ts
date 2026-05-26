@@ -24,7 +24,13 @@ export function renderMarkdown(session: Session): string {
 			lines.push("---", "");
 		}
 		isFirst = false;
-		lines.push(`## ${msg.role === "user" ? "User" : "Assistant"}`, "");
+		const heading =
+			msg.role === "user"
+				? "## User"
+				: msg.model
+					? `## Assistant (${msg.model})`
+					: "## Assistant";
+		lines.push(heading, "");
 		lines.push(msg.content.trimEnd(), "");
 	}
 

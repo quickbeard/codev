@@ -281,6 +281,11 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 
 	let activeAssistantContent = "";
 	let activeAssistantTimestamp: string | undefined;
+	let activeAssistantModel: string | undefined;
+	// Model captured from turn_context (emitted before each user_message).
+	// Stored separately so flushAssistant() can use the model that was active
+	// for the turn being flushed, not the one for the upcoming turn.
+	let pendingTurnModel: string | undefined;
 
 	const pendingToolUses = new Map<
 		string,
@@ -310,9 +315,11 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				role: "assistant",
 				content: activeAssistantContent.trim(),
 				timestamp: activeAssistantTimestamp,
+				model: activeAssistantModel,
 			});
 			activeAssistantContent = "";
 			activeAssistantTimestamp = undefined;
+			activeAssistantModel = undefined;
 		}
 	}
 
@@ -340,7 +347,13 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				: {};
 		const ptype = payload.type;
 
-		if (type === "event_msg") {
+		if (type === "turn_context") {
+			// turn_context is emitted once per turn, before the user_message event.
+			// Capture payload.model so it can be attached to the assistant turn that
+			// follows after the user message is flushed.
+			const m = typeof payload.model === "string" ? payload.model : undefined;
+			if (m) pendingTurnModel = m;
+		} else if (type === "event_msg") {
 			if (ptype === "user_message") {
 				flushAssistant();
 				const content = (
@@ -357,6 +370,8 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				if (content) {
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = recTimestamp;
+					if (!activeAssistantModel && pendingTurnModel)
+						activeAssistantModel = pendingTurnModel;
 					appendContent(content);
 				}
 			} else if (ptype === "agent_reasoning") {
@@ -366,6 +381,8 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				if (text) {
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = recTimestamp;
+					if (!activeAssistantModel && pendingTurnModel)
+						activeAssistantModel = pendingTurnModel;
 					appendContent(
 						`<details><summary>Thought</summary>\n\n${text}\n</details>\n`,
 					);
@@ -384,6 +401,8 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				if (thought) {
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = recTimestamp;
+					if (!activeAssistantModel && pendingTurnModel)
+						activeAssistantModel = pendingTurnModel;
 					appendContent(
 						`<details><summary>Thought</summary>\n\n${thought}\n</details>\n`,
 					);
@@ -395,6 +414,8 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				if (content) {
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = recTimestamp;
+					if (!activeAssistantModel && pendingTurnModel)
+						activeAssistantModel = pendingTurnModel;
 					appendContent(content);
 				}
 			} else if (ptype === "function_call") {
@@ -437,6 +458,8 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 					);
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = toolUse.timestamp || recTimestamp;
+					if (!activeAssistantModel && pendingTurnModel)
+						activeAssistantModel = pendingTurnModel;
 					appendContent(formatted);
 					pendingToolUses.delete(callId);
 				} else {
@@ -468,6 +491,8 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 					);
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = toolUse.timestamp || recTimestamp;
+					if (!activeAssistantModel && pendingTurnModel)
+						activeAssistantModel = pendingTurnModel;
 					appendContent(formatted);
 					pendingCustomToolUses.delete(callId);
 				}
