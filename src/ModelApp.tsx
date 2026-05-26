@@ -17,6 +17,7 @@ import {
 	type Credentials,
 	configureClaudeCode,
 	configureCodex,
+	configureContinue,
 	configureOpenCode,
 	detectConfiguredTools,
 	type Tool,
@@ -39,10 +40,16 @@ type Phase =
 	| "done"
 	| "failed";
 
+// `jetbrains-continue` is never returned by `detectConfiguredTools` (it maps
+// to the canonical `vscode-continue` for the shared Continue config), but
+// the Tool union forces an entry — label both editors with the same
+// editor-neutral string for safety.
 const TOOL_LABEL: Record<Tool, string> = {
 	"claude-code": "Claude Code",
 	codex: "Codex",
 	opencode: "OpenCode",
+	"vscode-continue": "Continue",
+	"jetbrains-continue": "Continue",
 };
 
 export function ModelApp() {
@@ -179,6 +186,8 @@ export function ModelApp() {
 				if (tool === "claude-code") configureClaudeCode(creds);
 				else if (tool === "codex") configureCodex(creds);
 				else if (tool === "opencode") configureOpenCode(creds);
+				else if (tool === "vscode-continue" || tool === "jetbrains-continue")
+					configureContinue(creds);
 			}
 			saveApiKey({
 				apiKey: creds.apiKey,

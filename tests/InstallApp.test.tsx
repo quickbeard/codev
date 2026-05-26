@@ -683,6 +683,238 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 	});
 
+	test("Continue selection expands via editor sub-select; soft-fail install still reaches Configure", async () => {
+		// Pick Continue → editor sub-select (VS Code) → soft-fail `code` not
+		// on PATH → flow advances to Configure, which renders the warning
+		// hint instead of aborting. The whole point of option B: a transient
+		// CLI install failure must not block the YAML config write.
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-cont-123");
+		const configureSpy = vi
+			.spyOn(configure, "configureContinue")
+			.mockReturnValue([
+				{
+					kind: "continue-config",
+					sourcePath: "/tmp/c.yaml",
+					backupPath: "/tmp/c.yaml.backup",
+					created: true,
+				},
+			]);
+		configureSpy.mockClear();
+		// `code --install-extension …` returns ENOENT → installContinueExtension
+		// resolves `{ warning: "VS Code launcher not found on PATH" }`. No npm runs
+		// because Continue isn't an NpmTool.
+		stubExecFile((file) => {
+			if (file === "code") {
+				const err = Object.assign(new Error("spawn code ENOENT"), {
+					code: "ENOENT",
+				});
+				return { error: err, stderr: "" };
+			}
+			return { stdout: "ok" };
+		});
+
+		const { stdin, frames } = render(<InstallApp />);
+
+		// Pick the Continue row (4th, index 3).
+		await waitForFrame(frames, "Select the AI agent(s) to install");
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		// Editor sub-select appears — pick VS Code (row 0).
+		await waitForFrame(frames, "Select the editor(s) you use Continue");
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		// Confirm screen → backup-warning prompt.
+		await waitForFrame(frames, "Continue? [y/N]");
+		stdin.write("y\r");
+
+		// Standard login + fetch-key + model-choice path.
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		// Frame-border `│` chars split long wrapped lines; strip them and
+		// collapse whitespace so substring matches survive the wrap.
+		const history = allFrames(frames).replace(/│/g, " ").replace(/\s+/g, " ");
+		expect(history).toContain("Happy coding");
+		// Configure was called for Continue (single dedup'd write).
+		expect(configureSpy).toHaveBeenCalledTimes(1);
+		// The install row surfaces the cause + manual-install reassurance.
+		expect(history).toContain("VS Code launcher not found on PATH");
+		expect(history).toContain(
+			"You can install the Continue extension yourself later.",
+		);
+	});
+
+	test("non-ENOENT Continue install failure (proxy / marketplace 5xx) still reaches Configure", async () => {
+		// Companion to the ENOENT test above: this one stubs the `code` CLI
+		// as PRESENT but failing — e.g. a proxy/marketplace error. With
+		// option B, this is still a soft fail: the install row paints
+		// yellow ▲ with the stderr as the warning, the Configure pane
+		// surfaces it in the resume hint, and the flow reaches Happy coding
+		// rather than parking at install-failed. The original behavior on
+		// this branch was to hard-abort here, which would have stranded the
+		// user any time the marketplace had a hiccup.
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-cont-456");
+		const configureSpy = vi
+			.spyOn(configure, "configureContinue")
+			.mockReturnValue([
+				{
+					kind: "continue-config",
+					sourcePath: "/tmp/c.yaml",
+					backupPath: "/tmp/c.yaml.backup",
+					created: true,
+				},
+			]);
+		configureSpy.mockClear();
+		// `code` runs but returns non-zero — no ENOENT, just a stderr
+		// payload (the kind of failure that used to abort the flow).
+		stubExecFile((file) => {
+			if (file === "code") {
+				return {
+					error: new Error("exit 1"),
+					stderr: "Proxy returned 502 Bad Gateway",
+				};
+			}
+			return { stdout: "ok" };
+		});
+
+		const { stdin, frames } = render(<InstallApp />);
+
+		// Pick the Continue row (4th, index 3) and the VS Code editor.
+		await waitForFrame(frames, "Select the AI agent(s) to install");
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		await waitForFrame(frames, "Select the editor(s) you use Continue");
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		await waitForFrame(frames, "Continue? [y/N]");
+		stdin.write("y\r");
+
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		// Ink wraps long lines inside the rendered frame AND prefixes each
+		// wrapped line with the Frame component's `│` border character — so
+		// the manual-install reassurance can end up split as "You can install
+		// the │ Continue extension yourself later." in the joined history.
+		// Strip the border pipes and collapse whitespace before matching.
+		const history = allFrames(frames).replace(/│/g, " ").replace(/\s+/g, " ");
+		// 1. The YAML config was still written — soft fail must not block
+		//    the part of the flow CoDev actually owns.
+		expect(configureSpy).toHaveBeenCalledTimes(1);
+		// 2. The flow completed — no install-failed parking lot.
+		expect(history).toContain("Happy coding");
+		expect(history).not.toContain("Failed to install");
+		// 3. The install row surfaced the real cause (proxy/marketplace
+		//    error) + the manual-install reassurance.
+		expect(history).toContain("Proxy returned 502 Bad Gateway");
+		expect(history).toContain(
+			"You can install the Continue extension yourself later.",
+		);
+	});
+
+	test("JetBrains-only Continue install: no launcher on PATH still reaches Configure", async () => {
+		// Mirror of the VS Code soft-fail tests, but exercising the
+		// `jetbrains-continue` install branch — every JetBrains shell
+		// launcher we probe (idea/pycharm/goland) returns ENOENT. The flow
+		// must still reach Happy coding, the install row carries
+		// JETBRAINS_HINT, and the Configure pane's plugin-specific yellow
+		// hint surfaces. Pins both the install-row hint string (was not
+		// covered at integration level before) and the JetBrains-side
+		// Configure-pane hint.
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-jb-123");
+		const configureSpy = vi
+			.spyOn(configure, "configureContinue")
+			.mockReturnValue([
+				{
+					kind: "continue-config",
+					sourcePath: "/tmp/c.yaml",
+					backupPath: "/tmp/c.yaml.backup",
+					created: true,
+				},
+			]);
+		configureSpy.mockClear();
+		stubExecFile((file) => {
+			if (file === "idea" || file === "pycharm" || file === "goland") {
+				const err = Object.assign(new Error(`spawn ${file} ENOENT`), {
+					code: "ENOENT",
+				});
+				return { error: err, stderr: "" };
+			}
+			return { stdout: "ok" };
+		});
+
+		const { stdin, frames } = render(<InstallApp />);
+
+		// Continue row → editor sub-select → JetBrains (row 1).
+		await waitForFrame(frames, "Select the AI agent(s) to install");
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		await waitForFrame(frames, "Select the editor(s) you use Continue");
+		// Move cursor down to JetBrains (second row), select, confirm.
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		await waitForFrame(frames, "Continue? [y/N]");
+		stdin.write("y\r");
+
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		const history = allFrames(frames).replace(/│/g, " ").replace(/\s+/g, " ");
+		// YAML still written, flow not aborted.
+		expect(configureSpy).toHaveBeenCalledTimes(1);
+		expect(history).toContain("Happy coding");
+		expect(history).not.toContain("Failed to install");
+		// Install row surfaces the JetBrains-launcher cause text + the
+		// manual-install reassurance.
+		expect(history).toContain(
+			"JetBrains launcher not found on PATH (PyCharm / IntelliJ IDEA / GoLand)",
+		);
+		expect(history).toContain(
+			"You can install the Continue plugin yourself later.",
+		);
+	});
+
 	test("models fetch failure falls back to DEFAULT_MODEL and reaches done", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());

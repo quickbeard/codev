@@ -7,7 +7,9 @@ import {
 	type Credentials,
 	configureClaudeCode,
 	configureCodex,
+	configureContinue,
 	configureOpenCode,
+	kindForTool,
 	type Tool,
 } from "@/lib/configure.js";
 import { HAPPY_CODING, HELP_HINT } from "@/lib/const.js";
@@ -28,65 +30,22 @@ const LABEL: Record<BackupKind, string> = {
 	"claude-settings": "Claude Code",
 	"codex-config": "Codex",
 	"opencode-config": "OpenCode",
-};
-
-// With shims installed, users launch agents by the bare binary name; the
-// shim forwards through `codev <agent>` transparently.
-const RUN_CMD: Record<Tool, string> = {
-	"claude-code": "claude",
-	codex: "codex",
-	opencode: "opencode",
-};
-
-// Without shims (best-effort install failed), the bare command isn't on
-// PATH, so fall back to the always-working `codev <agent>` form.
-const RUN_CMD_FALLBACK: Record<Tool, string> = {
-	"claude-code": "codev claude",
-	codex: "codev codex",
-	opencode: "codev opencode",
+	"continue-config": "Continue",
 };
 
 function resumeMessage(tools: Tool[], shimsInstalled: boolean): ReactNode {
 	if (tools.length === 0) return null;
-	const cmdMap = shimsInstalled ? RUN_CMD : RUN_CMD_FALLBACK;
-	const parts = tools.flatMap((t, i) => {
-		const cmd = (
-			<Text key={t} color="cyan">
-				{cmdMap[t]}
-			</Text>
-		);
-		if (i === 0) return [cmd];
-		const sep = i === tools.length - 1 ? " or " : ", ";
-		return [sep, cmd];
-	});
 	if (!shimsInstalled) {
-		return (
-			<Text>
-				{"Done! You can now run "}
-				{parts}
-				{" to get started."}
-			</Text>
-		);
+		return <Text>Done!</Text>;
 	}
-	// Shims are installed but won't take effect in the current shell. Merge
-	// the activation hint into the resume sentence rather than show it as a
-	// separate line.
 	if (process.platform === "win32") {
-		return (
-			<Text>
-				{"Done! Restart your terminal, then run "}
-				{parts}
-				{" to get started."}
-			</Text>
-		);
+		return <Text>Done! Restart your terminal.</Text>;
 	}
 	return (
 		<Text>
 			{"Done! Run "}
 			<Text color="cyan">exec $SHELL</Text>
-			{" to activate, then "}
-			{parts}
-			{" to get started."}
+			{" to reload your shell."}
 		</Text>
 	);
 }
@@ -115,8 +74,14 @@ export function Configure({
 		if (phase !== "running" || hasRun.current) return;
 		hasRun.current = true;
 		try {
+			// Dedupe by BackupKind so a `vscode-continue` + `jetbrains-continue`
+			// selection writes ~/.continue/config.yaml once and emits one row.
+			const seen = new Set<BackupKind>();
 			const results: ConfigureResult[] = [];
 			for (const tool of tools) {
+				const kind = kindForTool(tool);
+				if (seen.has(kind)) continue;
+				seen.add(kind);
 				if (creds === null) {
 					results.push(...backupOnly(tool));
 				} else if (tool === "claude-code") {
@@ -125,6 +90,11 @@ export function Configure({
 					results.push(...configureCodex(creds));
 				} else if (tool === "opencode") {
 					results.push(...configureOpenCode(creds));
+				} else if (
+					tool === "vscode-continue" ||
+					tool === "jetbrains-continue"
+				) {
+					results.push(...configureContinue(creds));
 				}
 			}
 			const next: string[] = [];

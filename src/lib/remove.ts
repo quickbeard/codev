@@ -18,12 +18,21 @@ export interface RemoveResult {
 	anyFailed: boolean;
 }
 
-const TOOLS: Tool[] = ["claude-code", "codex", "opencode"];
+// We iterate one Tool per BackupKind. `vscode-continue` and
+// `jetbrains-continue` share ~/.continue/config.yaml, so including both
+// would have the second iteration delete the file the first iteration just
+// restored. Use `vscode-continue` as the canonical Continue Tool here.
+const TOOLS: Tool[] = ["claude-code", "codex", "opencode", "vscode-continue"];
 
+// Both Continue editor Tools share the same backup file, so the label is
+// editor-neutral. The `jetbrains-continue` entry is for type exhaustiveness;
+// it isn't reached by the loop above.
 const TOOL_LABEL: Record<Tool, string> = {
 	"claude-code": "Claude Code config",
 	codex: "Codex config",
 	opencode: "OpenCode config",
+	"vscode-continue": "Continue config",
+	"jetbrains-continue": "Continue config",
 };
 
 // Composes the four reversal steps (logout → unhook → restore-or-delete each

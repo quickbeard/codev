@@ -13,8 +13,17 @@ import { dirname, join } from "node:path";
 import TOML from "@iarna/toml";
 import { AI_GATEWAY_OPENAI_URL, AI_GATEWAY_URL } from "@/lib/const.js";
 
-export type Tool = "claude-code" | "codex" | "opencode";
-export type BackupKind = "claude-settings" | "codex-config" | "opencode-config";
+export type Tool =
+	| "claude-code"
+	| "codex"
+	| "opencode"
+	| "vscode-continue"
+	| "jetbrains-continue";
+export type BackupKind =
+	| "claude-settings"
+	| "codex-config"
+	| "opencode-config"
+	| "continue-config";
 
 export interface BackupStatus {
 	kind: BackupKind;
@@ -119,6 +128,27 @@ const OPENCODE_K = {
 	models: atob("bW9kZWxz"),
 };
 
+// Continue reads ~/.continue/config.yaml from a single shared location across
+// editors (VS Code + JetBrains both load this file). We write the OpenAI-
+// compatible provider shape: each fetched model becomes a top-level entry in
+// `models:`, all sharing the same apiBase + apiKey. The top-level `name` field
+// doubles as the marker `detectConfiguredTools()` uses to recognize CoDev-
+// written Continue configs.
+const CONTINUE_K = {
+	name: atob("bmFtZQ=="),
+	version: atob("dmVyc2lvbg=="),
+	schema: atob("c2NoZW1h"),
+	schemaValue: atob("djE="),
+	models: atob("bW9kZWxz"),
+	provider: atob("cHJvdmlkZXI="),
+	providerValue: atob("b3BlbmFp"),
+	model: atob("bW9kZWw="),
+	apiBase: atob("YXBpQmFzZQ=="),
+	apiKey: atob("YXBpS2V5"),
+	configName: atob("Q29EZXYgKEFJIEdhdGV3YXkp"),
+	configVersion: atob("MC4wLjE="),
+};
+
 function sourcePathOf(kind: BackupKind): string {
 	switch (kind) {
 		case "claude-settings":
@@ -127,6 +157,8 @@ function sourcePathOf(kind: BackupKind): string {
 			return join(homedir(), ".codex", "config.toml");
 		case "opencode-config":
 			return join(homedir(), ".config", "opencode", "opencode.json");
+		case "continue-config":
+			return join(homedir(), ".continue", "config.yaml");
 	}
 }
 
@@ -143,13 +175,7 @@ function statusFor(kind: BackupKind): BackupStatus {
 }
 
 export function getBackupStatus(tool: Tool): BackupStatus[] {
-	if (tool === "claude-code") {
-		return [statusFor("claude-settings")];
-	}
-	if (tool === "codex") {
-		return [statusFor("codex-config")];
-	}
-	return [statusFor("opencode-config")];
+	return [statusFor(kindForTool(tool))];
 }
 
 // Detect which AI tools currently have a CoDev-managed config on disk. Used
@@ -157,11 +183,18 @@ export function getBackupStatus(tool: Tool): BackupStatus[] {
 // the default model. Each marker is something CoDev distinctly writes — the
 // `aigateway` provider id (codex/opencode) or `ANTHROPIC_DEFAULT_OPUS_MODEL`
 // (claude-code) — none of which would appear in a user-authored config.
+//
+// Continue's config file is shared across editors (VS Code + JetBrains both
+// read the same ~/.continue/config.yaml), so when the marker is present we
+// return `vscode-continue` as the canonical pointer rather than enumerating
+// both editor tools. That keeps `codev model` rewriting the YAML once
+// instead of twice; the resulting file is correct for both editors.
 export function detectConfiguredTools(): Tool[] {
 	const tools: Tool[] = [];
 	if (isCodevClaudeConfig()) tools.push("claude-code");
 	if (isCodevCodexConfig()) tools.push("codex");
 	if (isCodevOpenCodeConfig()) tools.push("opencode");
+	if (isCodevContinueConfig()) tools.push("vscode-continue");
 	return tools;
 }
 
@@ -205,10 +238,36 @@ function isCodevOpenCodeConfig(): boolean {
 	}
 }
 
-function kindForTool(tool: Tool): BackupKind {
-	if (tool === "claude-code") return "claude-settings";
-	if (tool === "codex") return "codex-config";
-	return "opencode-config";
+// Continue's config is YAML; pulling in a YAML parser just for one substring
+// check would be overkill. The top-level `name:` we emit is verbatim and
+// distinctive, so a substring search on the raw file is sufficient.
+function isCodevContinueConfig(): boolean {
+	const path = sourcePathOf("continue-config");
+	if (!existsSync(path)) return false;
+	try {
+		const raw = readFileSync(path, "utf-8");
+		return raw.includes(CONTINUE_K.configName);
+	} catch {
+		return false;
+	}
+}
+
+// Both `vscode-continue` and `jetbrains-continue` map to the same BackupKind
+// — the YAML file is shared across editors. Callers that iterate `tools` to
+// write configs should dedupe by kind so the file isn't written twice when
+// both editor variants are selected.
+export function kindForTool(tool: Tool): BackupKind {
+	switch (tool) {
+		case "claude-code":
+			return "claude-settings";
+		case "codex":
+			return "codex-config";
+		case "opencode":
+			return "opencode-config";
+		case "vscode-continue":
+		case "jetbrains-continue":
+			return "continue-config";
+	}
 }
 
 // Create the *.backup snapshot for `tool` without writing CoDev's config.
@@ -260,6 +319,19 @@ function writeToml(path: string, data: TOML.JsonMap) {
 	chmodSync(path, 0o600);
 }
 
+// Always-double-quote YAML scalar. Defensive: api keys can contain any byte,
+// model IDs occasionally contain colons or slashes — double quotes are the
+// only YAML scalar form that requires no further character-class reasoning,
+// just escape `\` and `"`.
+function yamlScalar(s: string): string {
+	return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function writeText(path: string, contents: string) {
+	writeFileSync(path, contents, { mode: 0o600 });
+	chmodSync(path, 0o600);
+}
+
 export function bypassClaudeLogin(): void {
 	const claudeJsonPath = join(homedir(), ".claude.json");
 	const config = readJson(claudeJsonPath);
@@ -306,12 +378,7 @@ export interface RestoreResult {
 }
 
 export function restoreTool(tool: Tool): RestoreResult {
-	const kind: BackupKind =
-		tool === "claude-code"
-			? "claude-settings"
-			: tool === "codex"
-				? "codex-config"
-				: "opencode-config";
+	const kind = kindForTool(tool);
 	const sourcePath = sourcePathOf(kind);
 	const backupPath = `${sourcePath}.backup`;
 
@@ -348,6 +415,39 @@ export function configureCodex(creds: Credentials): ConfigureResult[] {
 	});
 
 	return [{ kind: "codex-config", sourcePath, backupPath, created }];
+}
+
+export function configureContinue(creds: Credentials): ConfigureResult[] {
+	const { path: backupPath, created } = ensureBackup("continue-config");
+	const sourcePath = sourcePathOf("continue-config");
+	mkdirSync(dirname(sourcePath), { recursive: true });
+
+	// Continue's `openai` provider expects the OpenAI-compatible /v1 endpoint —
+	// same normalization as Codex/OpenCode.
+	const baseUrl = creds.baseUrl
+		? normalizeOpenCodeBaseUrl(creds.baseUrl)
+		: AI_GATEWAY_OPENAI_URL;
+	const defaultModel = requireModel(creds);
+	const allModels =
+		creds.models && creds.models.length > 0 ? creds.models : [defaultModel];
+
+	const lines: string[] = [];
+	lines.push(`${CONTINUE_K.name}: ${yamlScalar(CONTINUE_K.configName)}`);
+	lines.push(`${CONTINUE_K.version}: ${yamlScalar(CONTINUE_K.configVersion)}`);
+	lines.push(`${CONTINUE_K.schema}: ${yamlScalar(CONTINUE_K.schemaValue)}`);
+	lines.push(`${CONTINUE_K.models}:`);
+	for (const id of allModels) {
+		lines.push(`  - ${CONTINUE_K.name}: ${yamlScalar(id)}`);
+		lines.push(
+			`    ${CONTINUE_K.provider}: ${yamlScalar(CONTINUE_K.providerValue)}`,
+		);
+		lines.push(`    ${CONTINUE_K.model}: ${yamlScalar(id)}`);
+		lines.push(`    ${CONTINUE_K.apiBase}: ${yamlScalar(baseUrl)}`);
+		lines.push(`    ${CONTINUE_K.apiKey}: ${yamlScalar(creds.apiKey)}`);
+	}
+	writeText(sourcePath, `${lines.join("\n")}\n`);
+
+	return [{ kind: "continue-config", sourcePath, backupPath, created }];
 }
 
 export function configureOpenCode(creds: Credentials): ConfigureResult[] {

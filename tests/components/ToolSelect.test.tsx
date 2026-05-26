@@ -15,6 +15,29 @@ describe("ToolSelect", () => {
 		expect(output).toContain("Claude Code");
 		expect(output).toContain("OpenCode");
 		expect(output).toContain("Codex");
+		expect(output).toContain("Continue");
+	});
+
+	test("emits the `continue` sentinel when the Continue row is picked", async () => {
+		// The Continue row is editor-agnostic; the editor sub-select runs
+		// next. ToolSelect emits a sentinel that InstallApp expands into
+		// `vscode-continue` and/or `jetbrains-continue` via ContinueEditorSelect.
+		const onConfirm = vi.fn();
+		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
+
+		// Three down-arrows to reach the 4th (Continue) row.
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(onConfirm).toHaveBeenCalledWith(["continue"]);
 	});
 
 	test("renders unchecked checkboxes by default", () => {
