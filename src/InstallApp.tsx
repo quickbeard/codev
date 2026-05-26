@@ -39,7 +39,7 @@ import {
 	refreshCodevConfig,
 	saveApiKey,
 } from "@/lib/auth.js";
-import { type Credentials, DEFAULT_MODEL, type Tool } from "@/lib/configure.js";
+import type { Credentials, Tool } from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 
@@ -121,7 +121,6 @@ export function InstallApp() {
 	const [existingMessage, setExistingMessage] = useState<string | null>(null);
 	const [shimsInstalled, setShimsInstalled] = useState(false);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
-	const [modelsError, setModelsError] = useState<string | null>(null);
 
 	const handleToolSelectConfirm = (selected: ToolSelectValue[]) => {
 		const hasClaudeCodeExt = selected.includes(CLAUDE_CODE_EXT_SENTINEL);
@@ -312,32 +311,6 @@ export function InstallApp() {
 		[creds],
 	);
 
-	// Models fetch failed (network error, timeout, auth error, or empty list).
-	// Fall back to DEFAULT_MODEL and continue — install must not block on a
-	// transient gateway issue. `models` becomes a one-entry list so OpenCode's
-	// models map ends up with exactly one valid entry. The yellow warning in
-	// the model-choice step tells the user what happened.
-	const handleModelsFailed = useCallback(
-		(err: Error) => {
-			setModelsError(err.message);
-			setChosenModel(DEFAULT_MODEL);
-			setCreds((prev) =>
-				prev
-					? { ...prev, model: DEFAULT_MODEL, models: [DEFAULT_MODEL] }
-					: prev,
-			);
-			if (creds) {
-				saveApiKey({
-					apiKey: creds.apiKey,
-					baseUrl: creds.baseUrl,
-					model: DEFAULT_MODEL,
-				});
-			}
-			setStep("configuring");
-		},
-		[creds],
-	);
-
 	const handleConfigureDone = useCallback(
 		(success: boolean) => {
 			if (!success) {
@@ -463,18 +436,13 @@ export function InstallApp() {
 							active={step === "model-choice"}
 							title={modelSelectTitle(step !== "model-choice")}
 						>
-							{modelsError ? (
-								<Text color="yellow">{`Failed to fetch models (${modelsError}). Using default model.`}</Text>
-							) : (
-								<ModelSelect
-									apiKey={creds.apiKey}
-									baseUrl={creds.baseUrl}
-									onSelect={handleModelSelect}
-									onError={handleModelsFailed}
-									readOnly={step !== "model-choice"}
-									selected={chosenModel}
-								/>
-							)}
+							<ModelSelect
+								apiKey={creds.apiKey}
+								baseUrl={creds.baseUrl}
+								onSelect={handleModelSelect}
+								readOnly={step !== "model-choice"}
+								selected={chosenModel}
+							/>
 						</Step>
 					)}
 				{POST_MODEL_CHOICE.includes(step) &&

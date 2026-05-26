@@ -92,15 +92,13 @@ export function ModelApp() {
 	}, [phase]);
 
 	// ModelSelect's onError handler. On invalid key, branch to re-auth (SSO
-	// vs manual) based on whether the saved key had a baseUrl. On any other
-	// error (network/5xx/timeout/empty list), terminal failed.
+	// vs manual) based on whether the saved key had a baseUrl. Any other
+	// error (network/5xx/timeout/empty list) is left to ModelSelect's
+	// in-component retry prompt — we stay on this step so the user can press
+	// Enter to retry without re-running `codev model`.
 	const handleModelsError = useCallback(
 		(err: Error) => {
-			if (!isInvalidKeyError(err)) {
-				setError(err.message);
-				setPhase("failed");
-				return;
-			}
+			if (!isInvalidKeyError(err)) return;
 			if (reAuthed.current) {
 				setError(
 					`${err.message}\nRe-authentication did not produce a valid key. Run 'codev install' to refresh credentials.`,

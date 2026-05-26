@@ -12,10 +12,6 @@ async function tick(ms = 30): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
 }
 
-function frames(arr: string[]): string {
-	return arr.join("\n");
-}
-
 describe("ModelSelect", () => {
 	test("renders the loading spinner while fetching", () => {
 		// Never resolve, so we stay in the loading phase for assertion.
@@ -118,14 +114,61 @@ describe("ModelSelect", () => {
 		expect(onSelect).not.toHaveBeenCalled();
 	});
 
-	test("renders nothing visible after an error (parent owns the error frame)", async () => {
-		vi.spyOn(proxy, "fetchModels").mockRejectedValue(new Error("nope"));
-		const { frames: f } = render(
+	test("renders the error message and retry prompt after a fetch failure", async () => {
+		vi.spyOn(proxy, "fetchModels").mockRejectedValue(
+			new Error("Models fetch failed (502): boom"),
+		);
+		const { lastFrame } = render(
 			<ModelSelect apiKey="sk-x" onSelect={() => {}} onError={() => {}} />,
 		);
-		await tick(50);
-		// The component should not have rendered a model list after errored;
-		// the spinner line may have appeared during loading, which is fine.
-		expect(frames(f)).not.toContain("○");
+		await vi.waitFor(() =>
+			expect(lastFrame() ?? "").toContain("Press Enter to retry"),
+		);
+		const out = lastFrame() ?? "";
+		expect(out).toContain("Failed to fetch models");
+		expect(out).toContain("Models fetch failed (502): boom");
+		// No list rows once the component has settled into the errored frame.
+		expect(out).not.toContain("○");
+	});
+
+	test("Enter on the errored frame re-runs fetchModels", async () => {
+		const spy = vi
+			.spyOn(proxy, "fetchModels")
+			.mockRejectedValueOnce(new Error("Models fetch failed (502): boom"))
+			.mockResolvedValue(["alpha", "beta"]);
+		const onSelect = vi.fn();
+		const onError = vi.fn();
+		const { stdin, lastFrame } = render(
+			<ModelSelect apiKey="sk-x" onSelect={onSelect} onError={onError} />,
+		);
+		await vi.waitFor(() =>
+			expect(lastFrame() ?? "").toContain("Press Enter to retry"),
+		);
+		// Settle so useInput is registered before the keypress.
+		await tick();
+		stdin.write("\r");
+		await vi.waitFor(() => expect(lastFrame() ?? "").toContain("alpha"));
+		expect(spy).toHaveBeenCalledTimes(2);
+		// onError fired once per failed attempt; the successful retry doesn't
+		// fire it again.
+		expect(onError).toHaveBeenCalledTimes(1);
+	});
+
+	test("a second failure after retry fires onError again (auth-routing parents need this)", async () => {
+		vi.spyOn(proxy, "fetchModels")
+			.mockRejectedValueOnce(new Error("Models fetch failed (502): boom"))
+			.mockRejectedValue(new Error("Models fetch failed (401): invalid key"));
+		const onError = vi.fn();
+		const { stdin, lastFrame } = render(
+			<ModelSelect apiKey="sk-x" onSelect={() => {}} onError={onError} />,
+		);
+		await vi.waitFor(() =>
+			expect(lastFrame() ?? "").toContain("Press Enter to retry"),
+		);
+		await tick();
+		stdin.write("\r");
+		await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(2));
+		expect(onError.mock.calls[0]?.[0]?.message).toContain("502");
+		expect(onError.mock.calls[1]?.[0]?.message).toContain("401");
 	});
 });

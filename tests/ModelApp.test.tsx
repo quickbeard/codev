@@ -254,7 +254,7 @@ describe("ModelApp", () => {
 		);
 	});
 
-	test("non-auth fetch failure errors out without triggering re-auth", async () => {
+	test("non-auth fetch failure shows the retry prompt instead of routing to re-auth", async () => {
 		vi.spyOn(auth, "loadApiKey").mockReturnValue({
 			apiKey: "sk-x",
 		});
@@ -268,13 +268,54 @@ describe("ModelApp", () => {
 			);
 
 		const { frames } = render(<ModelApp />);
-		await tick(150);
+		await waitForFrame(frames, "Press Enter to retry");
 
 		const history = allFrames(frames);
 		expect(history).toContain("503");
-		// Should not have entered any re-auth branch.
+		expect(history).toContain("Failed to fetch models");
+		// Should not have entered any re-auth branch — a 503 is not an auth error.
 		expect(history).not.toContain("Saved API key was rejected");
-		// Single fetch attempt — no retry.
+		// One attempt so far; ModelSelect leaves the choice to the user.
 		expect(fetchSpy).toHaveBeenCalledTimes(1);
+	});
+
+	test("non-auth fetch failure recovers when the user retries", async () => {
+		vi.spyOn(auth, "loadApiKey").mockReturnValue({
+			apiKey: "sk-x",
+		});
+		vi.spyOn(configure, "detectConfiguredTools").mockReturnValue([
+			"claude-code",
+		]);
+		const fetchSpy = vi
+			.spyOn(proxy, "fetchModels")
+			.mockRejectedValueOnce(
+				new Error("Models fetch failed (503): Service Unavailable"),
+			)
+			.mockResolvedValue(["recovered-alpha", "recovered-beta"]);
+		const configureClaude = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/x",
+					backupPath: "/tmp/x.b",
+					created: false,
+				},
+			]);
+
+		const { stdin, frames } = render(<ModelApp />);
+		await waitForFrame(frames, "Press Enter to retry");
+		stdin.write("\r");
+		await waitForFrame(frames, "○ recovered-alpha");
+		stdin.write("\r");
+		await waitForFrame(frames, "Default model updated to");
+
+		expect(fetchSpy).toHaveBeenCalledTimes(2);
+		expect(configureClaude).toHaveBeenCalledWith({
+			apiKey: "sk-x",
+			baseUrl: undefined,
+			model: "recovered-alpha",
+			models: ["recovered-alpha", "recovered-beta"],
+		});
 	});
 });

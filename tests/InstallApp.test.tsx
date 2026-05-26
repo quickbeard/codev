@@ -1027,13 +1027,14 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 	});
 
-	test("models fetch failure falls back to DEFAULT_MODEL and reaches done", async () => {
+	test("models fetch failure shows retry prompt; Enter retries to success", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
-		vi.spyOn(proxy, "fetchModels").mockRejectedValue(
-			new Error("Models fetch failed (502): boom"),
-		);
+		const fetchModelsSpy = vi
+			.spyOn(proxy, "fetchModels")
+			.mockRejectedValueOnce(new Error("Models fetch failed (502): boom"))
+			.mockResolvedValue(["m-alpha", "m-beta"]);
 		const configureSpy = vi
 			.spyOn(configure, "configureClaudeCode")
 			.mockReturnValue([
@@ -1049,21 +1050,26 @@ describe("InstallApp fail-stop invariant", () => {
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin, frames);
 		await pickNewKey(stdin, frames);
+
+		// First fetch rejects — the retry prompt should render in place.
+		await waitForFrame(frames, "Press Enter to retry");
+		const errored = allFrames(frames);
+		expect(errored).toContain("Failed to fetch models");
+		expect(errored).toContain("Models fetch failed (502): boom");
+		expect(configureSpy).not.toHaveBeenCalled();
+
+		// Enter to retry — second attempt resolves; the user picks the first
+		// model and the flow reaches "Happy coding".
+		stdin.write("\r");
+		await pickFirstModel(stdin, frames);
 		await waitForFrame(frames, "Happy coding");
 
-		const history = allFrames(frames);
-		expect(history).toContain("Failed to fetch models");
-		expect(history).toContain("Models fetch failed (502): boom");
-		expect(history).toContain("Using default model");
-		// The default model name itself must not leak into the TUI.
-		expect(history).not.toContain(configure.DEFAULT_MODEL);
-		expect(history).toContain("Happy coding");
-		// Fallback: models becomes a one-entry list so OpenCode's map still
-		// gets exactly one valid entry.
+		expect(fetchModelsSpy).toHaveBeenCalledTimes(2);
+		expect(configureSpy).toHaveBeenCalledTimes(1);
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-test-123",
-			model: configure.DEFAULT_MODEL,
-			models: [configure.DEFAULT_MODEL],
+			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
 		});
 	});
 });
