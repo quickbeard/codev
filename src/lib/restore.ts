@@ -34,9 +34,7 @@ function reportRestoreResult(result: RestoreResult): void {
 			console.log(`Restored ${result.sourcePath} from ${result.backupPath}.`);
 			return;
 		case "deleted-live":
-			console.log(
-				`No backup at ${result.backupPath}; removed CoDev config at ${result.sourcePath}.`,
-			);
+			console.log(`No backup at ${result.backupPath}.`);
 			return;
 		case "noop":
 			console.log(

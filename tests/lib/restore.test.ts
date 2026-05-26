@@ -106,14 +106,7 @@ describe("runRestore", () => {
 		expect(code).toBe(0);
 		expect(existsSync(livePath)).toBe(false);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-		expect(
-			logs.some(
-				(l: string) =>
-					l.startsWith("No backup at") &&
-					l.includes(`${livePath}.backup`) &&
-					l.includes(`removed CoDev config at ${livePath}`),
-			),
-		).toBe(true);
+		expect(logs).toContain(`No backup at ${livePath}.backup.`);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
@@ -143,14 +136,7 @@ describe("runRestore", () => {
 		expect(code).toBe(0);
 		expect(existsSync(livePath)).toBe(false);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-		expect(
-			logs.some(
-				(l: string) =>
-					l.startsWith("No backup at") &&
-					l.includes(`${livePath}.backup`) &&
-					l.includes(`removed CoDev config at ${livePath}`),
-			),
-		).toBe(true);
+		expect(logs).toContain(`No backup at ${livePath}.backup.`);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
@@ -187,14 +173,7 @@ describe("runRestore", () => {
 		expect(code).toBe(0);
 		expect(existsSync(livePath)).toBe(false);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-		expect(
-			logs.some(
-				(l: string) =>
-					l.startsWith("No backup at") &&
-					l.includes(`${livePath}.backup`) &&
-					l.includes(`removed CoDev config at ${livePath}`),
-			),
-		).toBe(true);
+		expect(logs).toContain(`No backup at ${livePath}.backup.`);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
@@ -231,14 +210,7 @@ describe("runRestore", () => {
 		expect(code).toBe(0);
 		expect(existsSync(livePath)).toBe(false);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-		expect(
-			logs.some(
-				(l: string) =>
-					l.startsWith("No backup at") &&
-					l.includes(`${livePath}.backup`) &&
-					l.includes(`removed CoDev config at ${livePath}`),
-			),
-		).toBe(true);
+		expect(logs).toContain(`No backup at ${livePath}.backup.`);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 });
