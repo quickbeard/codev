@@ -717,20 +717,18 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 
-		// Pick the Continue row (4th, index 3).
+		// Pick the Continue (extension) row (5th, index 4).
 		await waitForFrame(frames, "Select the AI agent(s) to install");
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 30));
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 30));
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 30));
+		for (let i = 0; i < 4; i++) {
+			stdin.write("\x1B[B");
+			await new Promise((r) => setTimeout(r, 30));
+		}
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 30));
 		stdin.write("\r");
 
 		// Editor sub-select appears — pick VS Code (row 0).
-		await waitForFrame(frames, "Select the editor(s) you use Continue");
+		await waitForFrame(frames, "Select the editor(s) to install extensions");
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 30));
 		stdin.write("\r");
@@ -794,19 +792,17 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 
-		// Pick the Continue row (4th, index 3) and the VS Code editor.
+		// Pick the Continue (extension) row (5th, index 4) and the VS Code editor.
 		await waitForFrame(frames, "Select the AI agent(s) to install");
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 30));
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 30));
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 30));
+		for (let i = 0; i < 4; i++) {
+			stdin.write("\x1B[B");
+			await new Promise((r) => setTimeout(r, 30));
+		}
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 30));
 		stdin.write("\r");
 
-		await waitForFrame(frames, "Select the editor(s) you use Continue");
+		await waitForFrame(frames, "Select the editor(s) to install extensions");
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 30));
 		stdin.write("\r");
@@ -873,19 +869,17 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 
-		// Continue row → editor sub-select → JetBrains (row 1).
+		// Continue (extension) row (5th, index 4) → editor sub-select → JetBrains.
 		await waitForFrame(frames, "Select the AI agent(s) to install");
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 30));
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 30));
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 30));
+		for (let i = 0; i < 4; i++) {
+			stdin.write("\x1B[B");
+			await new Promise((r) => setTimeout(r, 30));
+		}
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 30));
 		stdin.write("\r");
 
-		await waitForFrame(frames, "Select the editor(s) you use Continue");
+		await waitForFrame(frames, "Select the editor(s) to install extensions");
 		// Move cursor down to JetBrains (second row), select, confirm.
 		stdin.write("\x1B[B");
 		await new Promise((r) => setTimeout(r, 30));
@@ -913,6 +907,124 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(history).toContain(
 			"You can install the Continue plugin yourself later.",
 		);
+	});
+
+	test("Claude Code (extension) selection routes to configureClaudeCode (shared backup kind)", async () => {
+		// Picks Claude Code (extension) in ToolSelect → merged editor sub-
+		// select → VS Code → standard auth + model flow. The configurator
+		// called is `configureClaudeCode` (not a separate extension config
+		// path) because the CLI and extension share `~/.claude/settings.json`.
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-ccext-123");
+		const configureSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/claude.json",
+					backupPath: "/tmp/claude.json.backup",
+					created: true,
+				},
+			]);
+		configureSpy.mockClear();
+		// `code --install-extension` resolves fine; the npm path never runs
+		// because the extension tool is not an NpmTool.
+		stubExecFile(() => ({ stdout: "ok" }));
+
+		const { stdin, frames } = render(<InstallApp />);
+
+		// Pick the Claude Code (extension) row (4th, index 3).
+		await waitForFrame(frames, "Select the AI agent(s) to install");
+		for (let i = 0; i < 3; i++) {
+			stdin.write("\x1B[B");
+			await new Promise((r) => setTimeout(r, 30));
+		}
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		// Merged editor sub-select — pick VS Code (row 0).
+		await waitForFrame(frames, "Select the editor(s) to install extensions");
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		await waitForFrame(frames, "Continue? [y/N]");
+		stdin.write("y\r");
+
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		expect(configureSpy).toHaveBeenCalledTimes(1);
+		expect(configureSpy).toHaveBeenCalledWith({
+			apiKey: "sk-ccext-123",
+			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
+		});
+	});
+
+	test("Claude Code CLI + extension share the backup kind: single configure call, both install tasks scheduled", async () => {
+		// Picks Claude Code CLI (1st row) AND Claude Code (extension) (4th
+		// row), then VS Code in the merged sub-select. Asserts:
+		//  - `configureClaudeCode` runs exactly once (shared BackupKind).
+		//  - Both the npm install task (@anthropic-ai/claude-code) and the
+		//    extension install task (anthropic.claude-code (VS Code)) appear.
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-both-123");
+		const configureSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/claude.json",
+					backupPath: "/tmp/claude.json.backup",
+					created: true,
+				},
+			]);
+		configureSpy.mockClear();
+		// npm install + npm root + claude --version + `code` all succeed.
+		stubExecFile((file, args) => {
+			if (file === "npm" && args[0] === "root") {
+				return { stdout: "/fake/root" };
+			}
+			return { stdout: "ok" };
+		});
+
+		const { stdin, frames } = render(<InstallApp />);
+
+		await waitForFrame(frames, "Select the AI agent(s) to install");
+		// Row 0 (Claude Code CLI) — toggle, then arrow down to row 3 and toggle.
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		for (let i = 0; i < 3; i++) {
+			stdin.write("\x1B[B");
+			await new Promise((r) => setTimeout(r, 30));
+		}
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		await waitForFrame(frames, "Select the editor(s) to install extensions");
+		stdin.write(" "); // VS Code
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+
+		await waitForFrame(frames, "Continue? [y/N]");
+		stdin.write("y\r");
+
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		const history = allFrames(frames).replace(/│/g, " ").replace(/\s+/g, " ");
+		// Both install task rows showed up.
+		expect(history).toContain("@anthropic-ai/claude-code");
+		expect(history).toContain("anthropic.claude-code (VS Code)");
+		// And configureClaudeCode ran exactly once thanks to the per-kind dedup.
+		expect(configureSpy).toHaveBeenCalledTimes(1);
 	});
 
 	test("models fetch failure falls back to DEFAULT_MODEL and reaches done", async () => {

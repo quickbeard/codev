@@ -2,17 +2,24 @@ import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 import type { Tool } from "@/lib/configure.js";
 
-// Sentinel value emitted when the user picks the `Continue` row. InstallApp
-// expands it via the ContinueEditorSelect sub-step into the editor-specific
-// Tool values (`vscode-continue` and/or `jetbrains-continue`).
+// Sentinel values emitted when the user picks an editor-extension row.
+// InstallApp expands them via the merged EditorSelect sub-step into the
+// editor-specific Tool values (e.g. `vscode-claude-code` /
+// `jetbrains-continue`). Two separate sentinels (one per extension) let
+// downstream code know which extension(s) the editor choice applies to.
+export const CLAUDE_CODE_EXT_SENTINEL = "claude-code-ext" as const;
 export const CONTINUE_SENTINEL = "continue" as const;
-export type ToolSelectValue = Tool | typeof CONTINUE_SENTINEL;
+export type ToolSelectSentinel =
+	| typeof CLAUDE_CODE_EXT_SENTINEL
+	| typeof CONTINUE_SENTINEL;
+export type ToolSelectValue = Tool | ToolSelectSentinel;
 
 const TOOLS: { label: string; value: ToolSelectValue }[] = [
 	{ label: "Claude Code", value: "claude-code" },
 	{ label: "Codex", value: "codex" },
 	{ label: "OpenCode", value: "opencode" },
-	{ label: "Continue", value: CONTINUE_SENTINEL },
+	{ label: "Claude Code (extension)", value: CLAUDE_CODE_EXT_SENTINEL },
+	{ label: "Continue (extension)", value: CONTINUE_SENTINEL },
 ];
 
 interface ToolSelectProps {

@@ -76,6 +76,8 @@ export function Configure({
 		try {
 			// Dedupe by BackupKind so a `vscode-continue` + `jetbrains-continue`
 			// selection writes ~/.continue/config.yaml once and emits one row.
+			// Same for Claude Code CLI + extension variants, which all share
+			// ~/.claude/settings.json.
 			const seen = new Set<BackupKind>();
 			const results: ConfigureResult[] = [];
 			for (const tool of tools) {
@@ -84,7 +86,11 @@ export function Configure({
 				seen.add(kind);
 				if (creds === null) {
 					results.push(...backupOnly(tool));
-				} else if (tool === "claude-code") {
+				} else if (
+					tool === "claude-code" ||
+					tool === "vscode-claude-code" ||
+					tool === "jetbrains-claude-code"
+				) {
 					results.push(...configureClaudeCode(creds));
 				} else if (tool === "codex") {
 					results.push(...configureCodex(creds));

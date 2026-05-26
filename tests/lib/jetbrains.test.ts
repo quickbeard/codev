@@ -1,7 +1,9 @@
 import * as child_process from "node:child_process";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+	CLAUDE_CODE_INTELLIJ_PLUGIN_ID,
 	CONTINUE_INTELLIJ_PLUGIN_ID,
+	installClaudeCodePlugin,
 	installContinuePlugin,
 	JETBRAINS_CLIS,
 } from "@/lib/jetbrains.js";
@@ -170,5 +172,35 @@ describe("installContinuePlugin", () => {
 		});
 		const result = await installContinuePlugin();
 		expect(result).toEqual({ warning: "idea: ECONNRESET" });
+	});
+});
+
+describe("installClaudeCodePlugin", () => {
+	test("invokes each JetBrains CLI on PATH with `installPlugins <claude-code id>`", async () => {
+		// Mirror of the Continue test — confirms the wrapper threads the
+		// Claude Code plugin id through the shared installPlugin helper.
+		const calls = stubExecFile({
+			handler: (file) =>
+				file === "idea" ? { stdout: "ok" } : { error: enoent(file) },
+		});
+		const result = await installClaudeCodePlugin();
+
+		expect(result).toBeNull();
+		expect(calls.map((c) => c.file)).toEqual([...JETBRAINS_CLIS]);
+		for (const c of calls) {
+			expect(c.args).toEqual([
+				"installPlugins",
+				CLAUDE_CODE_INTELLIJ_PLUGIN_ID,
+			]);
+		}
+	});
+
+	test("returns a soft warning when no JetBrains CLI is on PATH", async () => {
+		stubExecFile({ handler: (file) => ({ error: enoent(file) }) });
+		const result = await installClaudeCodePlugin();
+		expect(result).toEqual({
+			warning:
+				"JetBrains launcher not found on PATH (PyCharm / IntelliJ IDEA / GoLand)",
+		});
 	});
 });

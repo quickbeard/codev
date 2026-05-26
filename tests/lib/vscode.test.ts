@@ -1,7 +1,9 @@
 import * as child_process from "node:child_process";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+	CLAUDE_CODE_EXTENSION_ID,
 	CONTINUE_EXTENSION_ID,
+	installClaudeCodeExtension,
 	installContinueExtension,
 } from "@/lib/vscode.js";
 
@@ -113,5 +115,40 @@ describe("installContinueExtension", () => {
 		stubExecFile({ handler: () => ({ error: fail, stderr: "" }) });
 		const result = await installContinueExtension();
 		expect(result).toEqual({ warning: "ECONNRESET" });
+	});
+});
+
+describe("installClaudeCodeExtension", () => {
+	test("invokes `code --install-extension anthropic.claude-code --force` and resolves null on success", async () => {
+		// Mirror of the Continue test — confirms the wrapper passes the
+		// Claude Code marketplace id to the shared installExtension helper.
+		const calls = stubExecFile({ handler: () => ({}) });
+		const result = await installClaudeCodeExtension();
+
+		expect(result).toBeNull();
+		expect(calls).toEqual([
+			{
+				file: "code",
+				args: ["--install-extension", CLAUDE_CODE_EXTENSION_ID, "--force"],
+			},
+		]);
+	});
+
+	test("returns a soft warning when `code` is not on PATH (ENOENT)", async () => {
+		const enoent = Object.assign(new Error("spawn code ENOENT"), {
+			code: "ENOENT",
+		}) as NodeJS.ErrnoException;
+		stubExecFile({ handler: () => ({ error: enoent }) });
+		const result = await installClaudeCodeExtension();
+		expect(result).toEqual({ warning: "VS Code launcher not found on PATH" });
+	});
+
+	test("returns a soft warning on non-ENOENT failures", async () => {
+		const fail: NodeJS.ErrnoException = new Error("nope");
+		stubExecFile({
+			handler: () => ({ error: fail, stderr: "marketplace unreachable" }),
+		});
+		const result = await installClaudeCodeExtension();
+		expect(result).toEqual({ warning: "marketplace unreachable" });
 	});
 });
