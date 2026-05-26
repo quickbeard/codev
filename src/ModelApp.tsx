@@ -291,25 +291,29 @@ export function ModelApp() {
 					</Step>
 				)}
 
-				{phase === "configuring" && (
-					<Box>
-						<Text color="cyan">
-							<Spinner />
-						</Text>
-						<Text> Updating tool configs...</Text>
-					</Box>
-				)}
-
-				{phase === "done" && chosenModel && (
-					<Box flexDirection="column" marginTop={1}>
-						<Text>
-							{"Default model updated to "}
-							<Text color="cyan">{chosenModel}</Text>
-							{" for "}
-							{formatToolList(tools.map((t) => TOOL_LABEL[t]))}
-							{"."}
-						</Text>
-					</Box>
+				{(phase === "configuring" || phase === "done") && (
+					<Step
+						active={phase === "configuring"}
+						title={<Text bold>Update tool configs</Text>}
+					>
+						{phase === "configuring" && (
+							<Box>
+								<Text color="cyan">
+									<Spinner />
+								</Text>
+								<Text> Updating tool configs...</Text>
+							</Box>
+						)}
+						{phase === "done" && chosenModel && (
+							<Text>
+								{"Default model updated to "}
+								<Text color="cyan">{chosenModel}</Text>
+								{" for "}
+								{formatToolList(tools.map((t) => TOOL_LABEL[t]))}
+								{"."}
+							</Text>
+						)}
+					</Step>
 				)}
 
 				{phase === "failed" && error && <Text color="red">{error}</Text>}
