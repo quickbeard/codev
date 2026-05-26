@@ -17,6 +17,8 @@ export type Tool =
 	| "claude-code"
 	| "codex"
 	| "opencode"
+	| "vscode-claude-code"
+	| "jetbrains-claude-code"
 	| "vscode-continue"
 	| "jetbrains-continue";
 export type BackupKind =
@@ -252,13 +254,16 @@ function isCodevContinueConfig(): boolean {
 	}
 }
 
-// Both `vscode-continue` and `jetbrains-continue` map to the same BackupKind
-// — the YAML file is shared across editors. Callers that iterate `tools` to
-// write configs should dedupe by kind so the file isn't written twice when
-// both editor variants are selected.
+// Tools that share a config file map to the same BackupKind. Continue's two
+// editor variants share ~/.continue/config.yaml; the Claude Code CLI and its
+// two extension variants share ~/.claude/settings.json. Callers that iterate
+// `tools` to write configs should dedupe by kind so each shared file isn't
+// written more than once.
 export function kindForTool(tool: Tool): BackupKind {
 	switch (tool) {
 		case "claude-code":
+		case "vscode-claude-code":
+		case "jetbrains-claude-code":
 			return "claude-settings";
 		case "codex":
 			return "codex-config";

@@ -117,3 +117,24 @@ describe("Configure dual-editor Continue", () => {
 		expect(matches).toHaveLength(1);
 	});
 });
+
+describe("Configure Claude Code CLI + extension dedup", () => {
+	test("CLI + both extension variants together write the shared Claude Code config once", async () => {
+		// All three Tools map to the same `claude-settings` BackupKind, so
+		// `~/.claude/settings.json` should be written exactly once and the
+		// resume log should carry a single `Configured Claude Code` row —
+		// not three.
+		const { frames } = render(
+			<Configure
+				tools={["claude-code", "vscode-claude-code", "jetbrains-claude-code"]}
+				creds={{ apiKey: "sk-test", model: "m" }}
+				shimsInstalled={false}
+				onDone={() => {}}
+			/>,
+		);
+		await new Promise((r) => setTimeout(r, 30));
+		const out = lastFrame(frames);
+		const matches = out.match(/Configured Claude Code/g) ?? [];
+		expect(matches).toHaveLength(1);
+	});
+});

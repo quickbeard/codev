@@ -5,6 +5,9 @@ import { execAsync } from "@/lib/npm.js";
 export const CONTINUE_INTELLIJ_PLUGIN_ID =
 	"com.github.continuedev.continueintellijextension";
 
+// JetBrains Marketplace plugin ID for Claude Code.
+export const CLAUDE_CODE_INTELLIJ_PLUGIN_ID = "com.anthropic.claude-code";
+
 // Shell launcher names we probe. Limited to PyCharm/IntelliJ IDEA/GoLand for
 // now — each batch-mode invocation boots the IDE headless and takes several
 // seconds, so we keep the probe list small. Users with other JetBrains IDEs
@@ -23,21 +26,18 @@ export const JETBRAINS_CLIS = ["idea", "pycharm", "goland"] as const;
 // (all-ENOENT), or one or more IDEs ran the command and returned non-zero.
 export type InstallPluginResult = null | { warning: string };
 
-// Best-effort install of the Continue JetBrains plugin. Runs
-// `<bin> installPlugins <plugin-id>` against every CLI on PATH, sequentially
-// — IDE batch boots fight each other if parallelized and the user only
-// needs the plugin in IDEs they actually use, so wall time scales with
-// IDEs-on-PATH × ~few seconds. ENOENT on a probe is normal ("user doesn't
-// have that IDE"); non-ENOENT failures are aggregated into one warning so
-// the user sees every IDE that failed in a single hint.
-export async function installContinuePlugin(): Promise<InstallPluginResult> {
+// Best-effort install of a JetBrains plugin. Runs `<bin> installPlugins
+// <plugin-id>` against every CLI on PATH, sequentially — IDE batch boots
+// fight each other if parallelized and the user only needs the plugin in
+// IDEs they actually use, so wall time scales with IDEs-on-PATH × ~few
+// seconds. ENOENT on a probe is normal ("user doesn't have that IDE");
+// non-ENOENT failures are aggregated into one warning so the user sees
+// every IDE that failed in a single hint.
+async function installPlugin(pluginId: string): Promise<InstallPluginResult> {
 	let installed = 0;
 	const errors: string[] = [];
 	for (const bin of JETBRAINS_CLIS) {
-		const r = await execAsync(bin, [
-			"installPlugins",
-			CONTINUE_INTELLIJ_PLUGIN_ID,
-		]);
+		const r = await execAsync(bin, ["installPlugins", pluginId]);
 		if (!r.error) {
 			installed++;
 			continue;
@@ -58,6 +58,14 @@ export async function installContinuePlugin(): Promise<InstallPluginResult> {
 		};
 	}
 	return null;
+}
+
+export function installContinuePlugin(): Promise<InstallPluginResult> {
+	return installPlugin(CONTINUE_INTELLIJ_PLUGIN_ID);
+}
+
+export function installClaudeCodePlugin(): Promise<InstallPluginResult> {
+	return installPlugin(CLAUDE_CODE_INTELLIJ_PLUGIN_ID);
 }
 
 // Whether at least one of the JetBrains launchers resolves on PATH. Used

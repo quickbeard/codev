@@ -21,16 +21,20 @@ export interface RemoveResult {
 // We iterate one Tool per BackupKind. `vscode-continue` and
 // `jetbrains-continue` share ~/.continue/config.yaml, so including both
 // would have the second iteration delete the file the first iteration just
-// restored. Use `vscode-continue` as the canonical Continue Tool here.
+// restored. Same for the Claude Code extension variants — they share
+// ~/.claude/settings.json with `claude-code`. Use `claude-code` and
+// `vscode-continue` as the canonical Tools for each shared kind.
 const TOOLS: Tool[] = ["claude-code", "codex", "opencode", "vscode-continue"];
 
-// Both Continue editor Tools share the same backup file, so the label is
-// editor-neutral. The `jetbrains-continue` entry is for type exhaustiveness;
-// it isn't reached by the loop above.
+// Tools that share a backup file get an editor-neutral label. The non-
+// canonical entries (extension variants) are present for type
+// exhaustiveness; they aren't reached by the loop above.
 const TOOL_LABEL: Record<Tool, string> = {
 	"claude-code": "Claude Code config",
 	codex: "Codex config",
 	opencode: "OpenCode config",
+	"vscode-claude-code": "Claude Code config",
+	"jetbrains-claude-code": "Claude Code config",
 	"vscode-continue": "Continue config",
 	"jetbrains-continue": "Continue config",
 };

@@ -3,16 +3,27 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Tool } from "@/lib/configure.js";
 
-// Tools installed via npm-global. The Continue editor variants are not npm
-// packages — VS Code installs the extension via `code --install-extension`
-// (lib/vscode.ts) and JetBrains installs the plugin via the per-IDE CLI
-// (lib/jetbrains.ts). Keep them out of these maps so callers can't
-// accidentally `npm install -g` something that doesn't exist and the type
-// checker enforces routing through the right module.
-export type NpmTool = Exclude<Tool, "vscode-continue" | "jetbrains-continue">;
+// Tools installed via npm-global. Extension/plugin variants (Claude Code +
+// Continue) are not npm packages — VS Code installs them via
+// `code --install-extension` (lib/vscode.ts) and JetBrains installs them via
+// the per-IDE CLI (lib/jetbrains.ts). Keep them out of these maps so callers
+// can't accidentally `npm install -g` something that doesn't exist and the
+// type checker enforces routing through the right module.
+export type NpmTool = Exclude<
+	Tool,
+	| "vscode-claude-code"
+	| "jetbrains-claude-code"
+	| "vscode-continue"
+	| "jetbrains-continue"
+>;
 
 export function isNpmTool(tool: Tool): tool is NpmTool {
-	return tool !== "vscode-continue" && tool !== "jetbrains-continue";
+	return (
+		tool !== "vscode-claude-code" &&
+		tool !== "jetbrains-claude-code" &&
+		tool !== "vscode-continue" &&
+		tool !== "jetbrains-continue"
+	);
 }
 
 export const PKG: Record<NpmTool, string> = {

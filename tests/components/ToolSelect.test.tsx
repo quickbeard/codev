@@ -15,23 +15,42 @@ describe("ToolSelect", () => {
 		expect(output).toContain("Claude Code");
 		expect(output).toContain("OpenCode");
 		expect(output).toContain("Codex");
-		expect(output).toContain("Continue");
+		expect(output).toContain("Claude Code (extension)");
+		expect(output).toContain("Continue (extension)");
 	});
 
-	test("emits the `continue` sentinel when the Continue row is picked", async () => {
-		// The Continue row is editor-agnostic; the editor sub-select runs
-		// next. ToolSelect emits a sentinel that InstallApp expands into
-		// `vscode-continue` and/or `jetbrains-continue` via ContinueEditorSelect.
+	test("emits the `claude-code-ext` sentinel when the Claude Code (extension) row is picked", async () => {
+		// The extension rows are editor-agnostic; the merged editor sub-
+		// select runs next. ToolSelect emits a sentinel that InstallApp
+		// expands into `vscode-claude-code` and/or `jetbrains-claude-code`
+		// via EditorSelect.
 		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
-		// Three down-arrows to reach the 4th (Continue) row.
+		// Three down-arrows to reach the 4th (Claude Code (extension)) row.
 		stdin.write("\x1B[B");
 		await new Promise((r) => setTimeout(r, 50));
 		stdin.write("\x1B[B");
 		await new Promise((r) => setTimeout(r, 50));
 		stdin.write("\x1B[B");
 		await new Promise((r) => setTimeout(r, 50));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(onConfirm).toHaveBeenCalledWith(["claude-code-ext"]);
+	});
+
+	test("emits the `continue` sentinel when the Continue (extension) row is picked", async () => {
+		const onConfirm = vi.fn();
+		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
+
+		// Four down-arrows to reach the 5th (Continue (extension)) row.
+		for (let i = 0; i < 4; i++) {
+			stdin.write("\x1B[B");
+			await new Promise((r) => setTimeout(r, 50));
+		}
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 50));
 		stdin.write("\r");

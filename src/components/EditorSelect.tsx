@@ -1,31 +1,33 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
-import type { Tool } from "@/lib/configure.js";
 
-export type ContinueEditor = Extract<
-	Tool,
-	"vscode-continue" | "jetbrains-continue"
->;
+// Editor-agnostic identifier returned from the sub-select. The InstallApp
+// handler maps these to extension-specific Tool values (e.g.
+// `vscode-claude-code` / `jetbrains-continue`) based on which sentinel(s)
+// the user picked in ToolSelect. Keeping the component itself ignorant of
+// the extensions means the merged step works whether the user picked
+// Claude Code (extension), Continue (extension), or both.
+export type Editor = "vscode" | "jetbrains";
 
-const EDITORS: { label: string; value: ContinueEditor }[] = [
-	{ label: "VS Code", value: "vscode-continue" },
+const EDITORS: { label: string; value: Editor }[] = [
+	{ label: "VS Code", value: "vscode" },
 	{
 		label: "JetBrains (PyCharm / IntelliJ IDEA / GoLand)",
-		value: "jetbrains-continue",
+		value: "jetbrains",
 	},
 ];
 
-interface ContinueEditorSelectProps {
-	onConfirm: (editors: ContinueEditor[]) => void;
+interface EditorSelectProps {
+	onConfirm: (editors: Editor[]) => void;
 	readOnly?: boolean;
 }
 
-export function ContinueEditorSelect({
+export function EditorSelect({
 	onConfirm,
 	readOnly = false,
-}: ContinueEditorSelectProps) {
+}: EditorSelectProps) {
 	const [cursor, setCursor] = useState(0);
-	const [selected, setSelected] = useState<Set<ContinueEditor>>(new Set());
+	const [selected, setSelected] = useState<Set<Editor>>(new Set());
 
 	useInput(
 		(input, key) => {
@@ -74,10 +76,10 @@ export function ContinueEditorSelect({
 	);
 }
 
-export function continueEditorSelectTitle(readOnly = false) {
+export function editorSelectTitle(readOnly = false) {
 	return (
 		<Text bold>
-			{"Select the editor(s) you use Continue with "}
+			{"Select the editor(s) to install extensions in "}
 			{!readOnly && (
 				<Text dimColor>(↑/↓ to move, Space to select, Enter to confirm)</Text>
 			)}
