@@ -10,10 +10,10 @@ import { Banner } from "@/components/Banner.js";
 import { Configure, configureTitle } from "@/components/Configure.js";
 import { Confirm, confirmTitle } from "@/components/Confirm.js";
 import {
-	type ContinueEditor,
-	ContinueEditorSelect,
-	continueEditorSelectTitle,
-} from "@/components/ContinueEditorSelect.js";
+	type Editor,
+	EditorSelect,
+	editorSelectTitle,
+} from "@/components/EditorSelect.js";
 import { FetchApiKey, fetchApiKeyTitle } from "@/components/FetchApiKey.js";
 import { Frame } from "@/components/Frame.js";
 import { Install } from "@/components/Install.js";
@@ -26,6 +26,7 @@ import {
 import { ModelSelect, modelSelectTitle } from "@/components/ModelSelect.js";
 import { Step } from "@/components/Step.js";
 import {
+	CLAUDE_CODE_EXT_SENTINEL,
 	CONTINUE_SENTINEL,
 	ToolSelect,
 	type ToolSelectValue,
@@ -44,7 +45,7 @@ import { installShims, toolToShimAgent } from "@/lib/shims.js";
 
 type Phase =
 	| "select"
-	| "continue-editor-select"
+	| "editor-select"
 	| "confirm"
 	| "login"
 	| "installing"
@@ -105,10 +106,12 @@ export function InstallApp() {
 	const { exit } = useApp();
 	const [step, setStep] = useState<Phase>("select");
 	const [tools, setTools] = useState<Tool[]>([]);
-	// Whether the user picked the Continue row in ToolSelect — drives
-	// whether ContinueEditorSelect is shown (active or readOnly) in later
+	// Whether the user picked an extension sentinel row in ToolSelect —
+	// drives whether EditorSelect is shown (active or readOnly) in later
 	// phases. Stored separately from `tools` so the readOnly editor sub-step
-	// keeps mounting after the sentinel has been expanded into editor Tools.
+	// keeps mounting after the sentinels have been expanded into editor
+	// Tools.
+	const [claudeCodeExtSelected, setClaudeCodeExtSelected] = useState(false);
 	const [continueSelected, setContinueSelected] = useState(false);
 	const [auth, setAuth] = useState<AuthData | null>(null);
 	const [authMethod, setAuthMethod] = useState<AuthMethodChoice | null>(null);
@@ -121,21 +124,41 @@ export function InstallApp() {
 	const [modelsError, setModelsError] = useState<string | null>(null);
 
 	const handleToolSelectConfirm = (selected: ToolSelectValue[]) => {
+		const hasClaudeCodeExt = selected.includes(CLAUDE_CODE_EXT_SENTINEL);
 		const hasContinue = selected.includes(CONTINUE_SENTINEL);
+		setClaudeCodeExtSelected(hasClaudeCodeExt);
 		setContinueSelected(hasContinue);
-		if (hasContinue) {
+		const baseTools = selected.filter(
+			(v): v is Tool =>
+				v !== CLAUDE_CODE_EXT_SENTINEL && v !== CONTINUE_SENTINEL,
+		);
+		if (hasClaudeCodeExt || hasContinue) {
 			// Park the non-sentinel picks until the editor sub-select resolves;
-			// the sub-step appends editor-specific Tools to this base.
-			setTools(selected.filter((v): v is Tool => v !== CONTINUE_SENTINEL));
-			setStep("continue-editor-select");
+			// the sub-step appends editor-specific Tools to this base for each
+			// extension the user picked.
+			setTools(baseTools);
+			setStep("editor-select");
 			return;
 		}
-		setTools(selected as Tool[]);
+		setTools(baseTools);
 		setStep("confirm");
 	};
 
-	const handleContinueEditorsConfirm = (editors: ContinueEditor[]) => {
-		setTools((prev) => [...prev, ...editors]);
+	const handleEditorsConfirm = (editors: Editor[]) => {
+		const newTools: Tool[] = [];
+		for (const editor of editors) {
+			if (claudeCodeExtSelected) {
+				newTools.push(
+					editor === "vscode" ? "vscode-claude-code" : "jetbrains-claude-code",
+				);
+			}
+			if (continueSelected) {
+				newTools.push(
+					editor === "vscode" ? "vscode-continue" : "jetbrains-continue",
+				);
+			}
+		}
+		setTools((prev) => [...prev, ...newTools]);
 		setStep("confirm");
 	};
 
@@ -340,18 +363,18 @@ export function InstallApp() {
 						readOnly={step !== "select"}
 					/>
 				</Step>
-				{continueSelected && step !== "select" && (
+				{(claudeCodeExtSelected || continueSelected) && step !== "select" && (
 					<Step
-						active={step === "continue-editor-select"}
-						title={continueEditorSelectTitle(step !== "continue-editor-select")}
+						active={step === "editor-select"}
+						title={editorSelectTitle(step !== "editor-select")}
 					>
-						<ContinueEditorSelect
-							onConfirm={handleContinueEditorsConfirm}
-							readOnly={step !== "continue-editor-select"}
+						<EditorSelect
+							onConfirm={handleEditorsConfirm}
+							readOnly={step !== "editor-select"}
 						/>
 					</Step>
 				)}
-				{step !== "select" && step !== "continue-editor-select" && (
+				{step !== "select" && step !== "editor-select" && (
 					<Step active={step === "confirm"} title={confirmTitle()}>
 						<Confirm
 							tools={tools}
@@ -361,7 +384,7 @@ export function InstallApp() {
 					</Step>
 				)}
 				{step !== "select" &&
-					step !== "continue-editor-select" &&
+					step !== "editor-select" &&
 					step !== "confirm" && (
 						<Step active={step === "login"} title={loginTitle()}>
 							<Login onDone={handleLoginDone} />

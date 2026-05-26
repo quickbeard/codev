@@ -47,6 +47,8 @@ export function runRestoreAll(): number {
 		"claude-code",
 		"codex",
 		"opencode",
+		"vscode-claude-code",
+		"jetbrains-claude-code",
 		"vscode-continue",
 		"jetbrains-continue",
 	];

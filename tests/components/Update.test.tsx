@@ -67,6 +67,15 @@ function stubContinueDetected(detected: boolean) {
 	);
 }
 
+// Same idea, but for the Claude Code marker. The Update flow probes the
+// same IDE launchers for both extensions, so each test pins exactly one
+// marker to keep the assertions narrow.
+function stubClaudeCodeDetected(detected: boolean) {
+	vi.spyOn(configure, "detectConfiguredTools").mockReturnValue(
+		detected ? ["claude-code"] : [],
+	);
+}
+
 describe("Update", () => {
 	test("renders 'Checking installed agents...' during detection", async () => {
 		// Never-resolving npm root keeps detection pending.
@@ -221,6 +230,76 @@ describe("Update", () => {
 			"Updated com.github.continuedev.continueintellijextension (JetBrains)",
 		);
 		// VS Code task was not scheduled.
+		expect(history).not.toContain("(VS Code)");
+		expect(onDone).toHaveBeenCalledWith(true);
+		existsSpy.mockRestore();
+	});
+
+	test("updates the VS Code Claude Code extension when `code` is on PATH", async () => {
+		// `~/.claude/settings.json` has the CoDev marker → schedule the
+		// extension update. JetBrains launchers all ENOENT → no plugin task.
+		stubClaudeCodeDetected(true);
+		stubExecFile((file, args) => {
+			if (file === "npm" && args[0] === "root") return { stdout: "/fake/root" };
+			if (file === "code" && args[0] === "--version") {
+				return { stdout: "1.96.0\n" };
+			}
+			if (file === "code" && args[0] === "--install-extension") {
+				return { stdout: "ok" };
+			}
+			if (file === "idea" || file === "pycharm" || file === "goland") {
+				const err = Object.assign(new Error(`spawn ${file} ENOENT`), {
+					code: "ENOENT",
+				}) as NodeJS.ErrnoException;
+				return { error: err };
+			}
+			return { stdout: "" };
+		});
+		const existsSpy = vi.mocked(fs.existsSync).mockReturnValue(false);
+		const onDone = vi.fn(() => {});
+
+		const { frames } = render(<Update onDone={onDone} />);
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+
+		const history = allFrames(frames);
+		expect(history).toContain("Updated anthropic.claude-code (VS Code)");
+		expect(history).not.toContain("(JetBrains)");
+		expect(onDone).toHaveBeenCalledWith(true);
+		existsSpy.mockRestore();
+	});
+
+	test("updates the JetBrains Claude Code plugin when a launcher is on PATH", async () => {
+		stubClaudeCodeDetected(true);
+		stubExecFile((file, args) => {
+			if (file === "npm" && args[0] === "root") return { stdout: "/fake/root" };
+			if (file === "code") {
+				const err = Object.assign(new Error("spawn code ENOENT"), {
+					code: "ENOENT",
+				}) as NodeJS.ErrnoException;
+				return { error: err };
+			}
+			if (file === "idea" && args[0] === "--version") {
+				return { stdout: "2024.3" };
+			}
+			if (file === "idea" && args[0] === "installPlugins") {
+				return { stdout: "ok" };
+			}
+			if (file === "pycharm" || file === "goland") {
+				const err = Object.assign(new Error(`spawn ${file} ENOENT`), {
+					code: "ENOENT",
+				}) as NodeJS.ErrnoException;
+				return { error: err };
+			}
+			return { stdout: "" };
+		});
+		const existsSpy = vi.mocked(fs.existsSync).mockReturnValue(false);
+		const onDone = vi.fn(() => {});
+
+		const { frames } = render(<Update onDone={onDone} />);
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+
+		const history = allFrames(frames);
+		expect(history).toContain("Updated com.anthropic.claude-code (JetBrains)");
 		expect(history).not.toContain("(VS Code)");
 		expect(onDone).toHaveBeenCalledWith(true);
 		existsSpy.mockRestore();

@@ -19,9 +19,11 @@ import {
 export const SHIM_AGENTS = ["claude", "opencode", "codex"] as const;
 export type ShimAgent = (typeof SHIM_AGENTS)[number];
 
-// VS Code is launched via its own `code` binary, not a CoDev shim, so
-// `vscode-continue` has no ShimAgent. Returning null lets callers filter it
-// out of shim install/uninstall flows without per-call special-casing.
+// Editor extension variants (vscode-claude-code / jetbrains-claude-code /
+// vscode-continue / jetbrains-continue) are launched from inside the IDE, not
+// via a CoDev PATH shim, so they have no ShimAgent. Returning null lets
+// callers filter them out of shim install/uninstall flows without per-call
+// special-casing.
 export function toolToShimAgent(tool: Tool): ShimAgent | null {
 	if (tool === "claude-code") return "claude";
 	if (tool === "codex") return "codex";
