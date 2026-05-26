@@ -99,12 +99,15 @@ export function TaskList({ tasks, verb, onDone }: TaskListProps) {
 
 function TaskRow({ row, verb }: { row: Row; verb: TaskVerb }) {
 	const color = row.status === "warned" ? "yellow" : undefined;
+	// Embed the icon-text gap as a literal space in the Text payload rather
+	// than as a `marginRight` between flex children — long warnings that
+	// wrap can otherwise render the gap inconsistently across rows (visible
+	// as `▲Warning:` on one row but `▲ Warning:` on another in the same
+	// install run).
 	return (
 		<Box>
-			<Box marginRight={1}>
-				<StatusIcon status={row.status} />
-			</Box>
-			<Text color={color}>{rowText(row, verb)}</Text>
+			<StatusIcon status={row.status} />
+			<Text color={color}>{` ${rowText(row, verb)}`}</Text>
 		</Box>
 	);
 }
