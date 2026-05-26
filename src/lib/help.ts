@@ -1,11 +1,11 @@
 import { VERSION } from "@/lib/const.js";
 
 export function printVersion() {
-  console.log(`${VERSION}`);
+	console.log(`${VERSION}`);
 }
 
 export function printHelp() {
-  console.log(`CoDev — AI Coding Agent Hub
+	console.log(`CoDev — AI Coding Agent Hub
 
 Usage: codev <command> [options]
 
