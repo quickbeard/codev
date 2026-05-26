@@ -55,6 +55,15 @@ const TOOL_LABEL: Record<Tool, string> = {
 	"jetbrains-continue": "Continue",
 };
 
+// Natural-English list join: "X", "X and Y", "X, Y, and Z".
+export function formatToolList(labels: string[]): string {
+	if (labels.length === 0) return "";
+	if (labels.length === 1) return labels[0] ?? "";
+	if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+	const head = labels.slice(0, -1).join(", ");
+	return `${head}, and ${labels[labels.length - 1]}`;
+}
+
 export function ModelApp() {
 	const { exit } = useApp();
 	const [phase, setPhase] = useState<Phase>("loading");
@@ -292,12 +301,12 @@ export function ModelApp() {
 				)}
 
 				{phase === "done" && chosenModel && (
-					<Box flexDirection="column">
+					<Box flexDirection="column" marginTop={1}>
 						<Text>
 							{"Default model updated to "}
 							<Text color="cyan">{chosenModel}</Text>
 							{" for "}
-							{tools.map((t) => TOOL_LABEL[t]).join(", ")}
+							{formatToolList(tools.map((t) => TOOL_LABEL[t]))}
 							{"."}
 						</Text>
 					</Box>
