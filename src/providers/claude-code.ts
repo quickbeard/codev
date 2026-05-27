@@ -2,6 +2,7 @@ import { existsSync, realpathSync, statSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { diffFromEditInput, textValue } from "@/lib/diff.js";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
 // Claude Code stores sessions under ~/.claude/projects/<munged-cwd>/, where the
@@ -103,69 +104,12 @@ function parseToolResults(content: unknown): ParsedToolResult[] {
 	return results;
 }
 
-function textValue(value: unknown): string {
-	return typeof value === "string" ? value : "";
-}
-
 function filePathFromInput(input: Record<string, unknown>): string {
 	return (
 		textValue(input.file_path) ||
 		textValue(input.filePath) ||
 		textValue(input.path)
 	);
-}
-
-function buildLineDiff(oldText: string, newText: string): string {
-	const oldLines = oldText.split("\n");
-	const newLines = newText.split("\n");
-	const dp = Array.from({ length: oldLines.length + 1 }, () =>
-		Array<number>(newLines.length + 1).fill(0),
-	);
-	const cell = (row: number, column: number) => dp[row]?.[column] ?? 0;
-
-	for (let i = oldLines.length - 1; i >= 0; i--) {
-		for (let j = newLines.length - 1; j >= 0; j--) {
-			const row = dp[i];
-			if (!row) continue;
-			row[j] =
-				oldLines[i] === newLines[j]
-					? cell(i + 1, j + 1) + 1
-					: Math.max(cell(i + 1, j), cell(i, j + 1));
-		}
-	}
-
-	const lines: string[] = [];
-	let i = 0;
-	let j = 0;
-	while (i < oldLines.length && j < newLines.length) {
-		if (oldLines[i] === newLines[j]) {
-			lines.push(` ${oldLines[i]}`);
-			i++;
-			j++;
-		} else if (cell(i + 1, j) >= cell(i, j + 1)) {
-			lines.push(`-${oldLines[i]}`);
-			i++;
-		} else {
-			lines.push(`+${newLines[j]}`);
-			j++;
-		}
-	}
-	while (i < oldLines.length) {
-		lines.push(`-${oldLines[i]}`);
-		i++;
-	}
-	while (j < newLines.length) {
-		lines.push(`+${newLines[j]}`);
-		j++;
-	}
-	return lines.join("\n");
-}
-
-function diffFromEditInput(input: Record<string, unknown>): string {
-	const oldText = textValue(input.old_string);
-	const newText = textValue(input.new_string);
-	if (!oldText && !newText) return "";
-	return buildLineDiff(oldText, newText);
 }
 
 function formatToolUse(

@@ -1,6 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { diffFromEditInput } from "@/lib/diff.js";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
 interface Stmt<P extends unknown[], R> {
@@ -160,30 +161,6 @@ function formatDuration(ms: number): string {
 	return `${ms}ms`;
 }
 
-function buildLineDiff(oldText: string, newText: string): string {
-	const lines: string[] = [];
-	for (const line of oldText.split("\n")) lines.push(`-${line}`);
-	for (const line of newText.split("\n")) lines.push(`+${line}`);
-	return lines.join("\n");
-}
-
-function diffFromEditInput(input: Record<string, unknown>): string {
-	const oldText =
-		typeof input.oldString === "string"
-			? input.oldString
-			: typeof input.old_string === "string"
-				? input.old_string
-				: "";
-	const newText =
-		typeof input.newString === "string"
-			? input.newString
-			: typeof input.new_string === "string"
-				? input.new_string
-				: "";
-	if (!oldText && !newText) return "";
-	return buildLineDiff(oldText, newText);
-}
-
 interface ReasoningPart {
 	type: "reasoning";
 	text: string;
@@ -295,24 +272,18 @@ function parsePart(part: PartRow): string | null {
 		if (toolName === "edit") {
 			const path = typeof input.filePath === "string" ? input.filePath : "";
 			const summary = `Edit file: ${path}`;
-			let diff = "";
-			if (isCompleted) {
-				diff =
-					state.metadata?.diff ||
-					state.metadata?.filediff?.patch ||
-					"Edit applied successfully.";
+			const diff =
+				state.metadata?.diff ||
+				state.metadata?.filediff?.patch ||
+				(isCompleted ? "" : diffFromEditInput(input));
+			let body: string;
+			if (diff) {
+				body = `\`\`\`diff\n${diff}\n\`\`\`${isCompleted ? "" : `\n\nError: ${error || "Tool execution aborted"}`}`;
+			} else if (isCompleted) {
+				body = "Edit applied successfully.";
 			} else {
-				diff =
-					state.metadata?.diff ||
-					state.metadata?.filediff?.patch ||
-					diffFromEditInput(input);
+				body = `Error: ${error || "Tool execution aborted"}`;
 			}
-			const body =
-				diff === "Edit applied successfully."
-					? diff
-					: diff
-						? `\`\`\`diff\n${diff}\n\`\`\`${isCompleted ? "" : `\n\nError: ${error || "Tool execution aborted"}`}`
-						: `Error: ${error || "Tool execution aborted"}`;
 			return `<tool-use data-tool-type="write" data-tool-name="edit" data-edit-status="${isCompleted ? "accepted" : "rejected"}">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 		}
 

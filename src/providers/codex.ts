@@ -2,6 +2,7 @@ import { existsSync, realpathSync, statSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { diffFromEditInput, textValue } from "@/lib/diff.js";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
 function sessionsRoot(): string {
@@ -118,7 +119,6 @@ function formatCodexToolUse(
 	let toolType = "tool";
 	let summary = `Call tool: ${name}`;
 	let body = "";
-	const editDiff = diffFromEditInput(input);
 
 	if (
 		toolName === "exec_command" ||
@@ -184,6 +184,7 @@ function formatCodexToolUse(
 						? input.path
 						: "";
 		summary = `Edit file: ${path}`;
+		const editDiff = diffFromEditInput(input);
 		body = editDiff
 			? `\`\`\`diff\n${editDiff}\n\`\`\`\n\n${isError ? `Error: ${output}` : output}`
 			: isError
@@ -224,30 +225,6 @@ function extractPatchFilePath(patch: string): string {
 	return match?.[1]?.trim() ?? "";
 }
 
-function buildLineDiff(oldText: string, newText: string): string {
-	const lines: string[] = [];
-	for (const line of oldText.split("\n")) lines.push(`-${line}`);
-	for (const line of newText.split("\n")) lines.push(`+${line}`);
-	return lines.join("\n");
-}
-
-function diffFromEditInput(input: Record<string, unknown>): string {
-	const oldText =
-		typeof input.old_string === "string"
-			? input.old_string
-			: typeof input.oldString === "string"
-				? input.oldString
-				: "";
-	const newText =
-		typeof input.new_string === "string"
-			? input.new_string
-			: typeof input.newString === "string"
-				? input.newString
-				: "";
-	if (!oldText && !newText) return "";
-	return buildLineDiff(oldText, newText);
-}
-
 function formatCodexCustomToolUse(
 	name: string,
 	input: unknown,
@@ -264,10 +241,6 @@ function formatCodexCustomToolUse(
 
 	const body = `**Input**:\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
 	return `<tool-use data-tool-type="tool" data-tool-name="${toolName}">\n<details>\n<summary>Call tool: ${name}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
-}
-
-function textValue(value: unknown): string {
-	return typeof value === "string" ? value : "";
 }
 
 async function parseSession(preview: CodexPreview): Promise<Session | null> {
