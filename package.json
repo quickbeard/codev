@@ -15,11 +15,6 @@
     "dist"
   ],
   "packageManager": "pnpm@10.26.0",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
   "scripts": {
     "dev": "tsx src/index.tsx",
     "build": "tsx build.ts",

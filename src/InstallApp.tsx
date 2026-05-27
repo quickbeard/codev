@@ -77,6 +77,17 @@ const POST_LOGIN: Phase[] = [
 	"configure-failed",
 	"done",
 ];
+const POST_INSTALL: Phase[] = [
+	"refreshing-config",
+	"validating-existing",
+	"key-choice",
+	"fetching-key",
+	"manual-creds",
+	"model-choice",
+	"configuring",
+	"configure-failed",
+	"done",
+];
 const POST_REFRESH: Phase[] = [
 	"validating-existing",
 	"key-choice",
@@ -263,11 +274,10 @@ export function InstallApp() {
 			} catch {
 				// Leave shimsInstalled=false so the resume message stays simple.
 			}
-			// Refresh runs invisibly between `installing` and the next visible
-			// step. The user sees install complete, a brief pause, then the
-			// key-choice (or validating-existing) panel — no spinner for the
-			// network call itself. Errors are swallowed by refreshCodevConfig,
-			// so install always advances.
+			// Refresh runs as its own visible step between `installing` and
+			// `validating-existing`/`key-choice`, with a spinner while the
+			// network call is in flight. Errors are swallowed by
+			// refreshCodevConfig, so install always advances.
 			setStep("refreshing-config");
 			if (!auth) {
 				// login() runs before this phase, so this is defensive only.
@@ -404,6 +414,23 @@ export function InstallApp() {
 						title={<Text bold>Installing packages</Text>}
 					>
 						<Install tools={tools} onDone={handleInstallDone} />
+					</Step>
+				)}
+				{POST_INSTALL.includes(step) && (
+					<Step
+						active={step === "refreshing-config"}
+						title={<Text bold>Refreshing CoDev config</Text>}
+					>
+						{step === "refreshing-config" ? (
+							<Box>
+								<Text color="cyan">
+									<Spinner />
+								</Text>
+								<Text> Fetching gateway coordinates...</Text>
+							</Box>
+						) : (
+							<Text dimColor>Refreshed.</Text>
+						)}
 					</Step>
 				)}
 				{POST_REFRESH.includes(step) && savedCreds && (
