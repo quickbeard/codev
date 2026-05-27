@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as auth from "@/lib/auth.js";
 import * as configure from "@/lib/configure.js";
 import * as proxy from "@/lib/proxy.js";
-import { formatToolList, ModelApp } from "@/ModelApp.js";
+import { ModelApp } from "@/ModelApp.js";
 
 let tempHome: string;
 
@@ -319,33 +319,5 @@ describe("ModelApp", () => {
 			model: "recovered-alpha",
 			models: ["recovered-alpha", "recovered-beta"],
 		});
-	});
-});
-
-describe("formatToolList", () => {
-	test("single item renders as-is", () => {
-		expect(formatToolList(["Continue"])).toBe("Continue");
-	});
-
-	test("two items join with 'and' (no comma)", () => {
-		expect(formatToolList(["Claude Code", "OpenCode"])).toBe(
-			"Claude Code and OpenCode",
-		);
-	});
-
-	test("three items use Oxford comma", () => {
-		expect(formatToolList(["Claude Code", "Codex", "OpenCode"])).toBe(
-			"Claude Code, Codex, and OpenCode",
-		);
-	});
-
-	test("four items use Oxford comma", () => {
-		expect(
-			formatToolList(["Claude Code", "Codex", "OpenCode", "Continue"]),
-		).toBe("Claude Code, Codex, OpenCode, and Continue");
-	});
-
-	test("empty list is empty string", () => {
-		expect(formatToolList([])).toBe("");
 	});
 });

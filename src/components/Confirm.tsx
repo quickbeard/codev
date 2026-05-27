@@ -1,11 +1,7 @@
 import { Box, Text } from "ink";
+import type { ReactNode } from "react";
 import { YesNo } from "@/components/YesNo.js";
-import {
-	type BackupKind,
-	getBackupStatus,
-	kindForTool,
-	type Tool,
-} from "@/lib/configure.js";
+import { type BackupKind, kindForTool, type Tool } from "@/lib/configure.js";
 
 interface ConfirmProps {
 	tools: Tool[];
@@ -13,26 +9,11 @@ interface ConfirmProps {
 	readOnly?: boolean;
 }
 
-// Both Continue editor tools share ~/.continue/config.yaml, so we dedupe
-// rows by BackupKind. That keeps the Confirm view from showing two
-// identical Path/Backup lines and from suggesting two restore commands
-// (which would race each other — the first rolls the shared file back,
-// the second sees no backup and errors).
-// `claude-json` / `claude-credentials` entries are present only for
-// Record<BackupKind, …> type completeness; `kindForTool` returns
-// `claude-settings` for every Claude variant, so those rows never render.
-const KIND_LABEL: Record<BackupKind, string> = {
-	"claude-settings": "Claude Code",
-	"claude-json": "Claude Code (onboarding)",
-	"claude-credentials": "Claude Code (credentials)",
-	"codex-config": "Codex",
-	"opencode-config": "OpenCode",
-	"continue-config": "Continue",
-};
-
-// `continue-config` is shared across VS Code + JetBrains, so the restore
-// alias is editor-neutral (`codev restore continue`) rather than naming
-// either editor.
+// One restore command per BackupKind. `kindForTool` returns `claude-settings`
+// for every Claude variant, so the `claude-json` / `claude-credentials`
+// entries are only present for Record<BackupKind, …> type completeness —
+// they're never reached at runtime. Continue's two editor variants share
+// `continue-config`, so the alias is editor-neutral.
 const KIND_RESTORE_CMD: Record<BackupKind, string> = {
 	"claude-settings": "codev restore claude",
 	"claude-json": "codev restore claude",
@@ -42,37 +23,56 @@ const KIND_RESTORE_CMD: Record<BackupKind, string> = {
 	"continue-config": "codev restore continue",
 };
 
+// Render the restore-command list with cyan emphasis on each command,
+// matching `formatToolList`'s Oxford-comma / "and" join rules:
+//   1 →  X
+//   2 →  X and Y
+//   3+ → X, Y, and Z
+function renderCommandList(cmds: string[]): ReactNode {
+	if (cmds.length === 0) return null;
+	const nodes: ReactNode[] = [];
+	// Cmds are deduped by BackupKind upstream, so each command string is
+	// unique within `cmds` and safe to use as a React key. Separators key
+	// off the trailing command to inherit that uniqueness.
+	cmds.forEach((cmd, i) => {
+		if (i > 0) {
+			const isLast = i === cmds.length - 1;
+			let sep: string;
+			if (cmds.length === 2) sep = " and ";
+			else if (isLast) sep = ", and ";
+			else sep = ", ";
+			nodes.push(<Text key={`sep-${cmd}`}>{sep}</Text>);
+		}
+		nodes.push(
+			<Text key={`cmd-${cmd}`} color="cyan">
+				{cmd}
+			</Text>,
+		);
+	});
+	return nodes;
+}
+
 export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
+	// Dedupe by BackupKind so a `vscode-continue` + `jetbrains-continue`
+	// selection emits one restore command, not two; same for Claude variants.
 	const seen = new Set<BackupKind>();
+	const cmds: string[] = [];
+	for (const tool of tools) {
+		const kind = kindForTool(tool);
+		if (seen.has(kind)) continue;
+		seen.add(kind);
+		cmds.push(KIND_RESTORE_CMD[kind]);
+	}
+
 	return (
 		<Box flexDirection="column">
-			{tools.map((tool) => {
-				const kind = kindForTool(tool);
-				if (seen.has(kind)) return null;
-				seen.add(kind);
-				const [status] = getBackupStatus(tool);
-				if (!status) return null;
-				return (
-					<Box key={tool} flexDirection="column">
-						<Text>{`• ${KIND_LABEL[kind]}`}</Text>
-						<Text>{`  Path: ${status.sourcePath}`}</Text>
-						{status.hasBackup ? (
-							<Text>
-								{`  Backup: ${status.backupPath} already exists and will not be overwritten.`}
-							</Text>
-						) : status.hasSource ? (
-							<Text>
-								{`  Backup: ${status.sourcePath} → ${status.backupPath}`}
-							</Text>
-						) : null}
-						<Text>
-							{"  You can revert to your previous settings by running "}
-							<Text color="cyan">{KIND_RESTORE_CMD[kind]}</Text>
-							{". You might need to restart your current session."}
-						</Text>
-					</Box>
-				);
-			})}
+			{cmds.length > 0 && (
+				<Text>
+					{"To revert to your pre-CoDev state, run "}
+					{renderCommandList(cmds)}
+					{"."}
+				</Text>
+			)}
 			{!readOnly && (
 				<Box marginTop={1}>
 					<YesNo defaultAnswer="no" onAnswer={onConfirm} />
@@ -85,9 +85,7 @@ export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
 export function confirmTitle() {
 	return (
 		<Text bold color="yellow">
-			{
-				"Heads up — CoDev will back up your existing settings and replace them with new settings."
-			}
+			{"Heads up — CoDev will change your settings."}
 		</Text>
 	);
 }
