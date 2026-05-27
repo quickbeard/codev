@@ -8,10 +8,31 @@ const AGENT_LABEL: Record<Agent, string> = {
 	opencode: "opencode",
 };
 
+/**
+ * Derive a display title from the first user message when no explicit title is
+ * stored by the agent (Claude Code and Codex don't persist session titles).
+ * Collapses whitespace, truncates to 80 chars at a word boundary, and appends
+ * "…" when cut — mirrors the length OpenCode uses for its AI-generated titles.
+ */
+export function titleFromFirstMessage(msg: string): string | undefined {
+	const clean = msg.replace(/\s+/g, " ").trim();
+	if (!clean) return undefined;
+	if (clean.length <= 80) return clean;
+	const cut = clean.slice(0, 80);
+	const lastSpace = cut.lastIndexOf(" ");
+	return `${lastSpace > 20 ? cut.slice(0, lastSpace) : cut}…`;
+}
+
 export function renderMarkdown(session: Session): string {
 	const lines: string[] = [];
 	lines.push(HEADER, "");
-	lines.push(`# ${formatTitleTimestamp(session.createdAt)}`);
+	const title =
+		session.title ||
+		(session.firstUserMessage
+			? titleFromFirstMessage(session.firstUserMessage)
+			: undefined) ||
+		formatTitleTimestamp(session.createdAt);
+	lines.push(`# ${title}`);
 	lines.push("");
 	lines.push(
 		`<!-- ${AGENT_LABEL[session.agent]} Session ${session.id} (${session.createdAt.toISOString()}) -->`,

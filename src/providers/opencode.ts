@@ -353,6 +353,7 @@ function buildSession(row: SessionRow, db: DB): Session | null {
 		agent: "opencode",
 		createdAt: createdMs ? new Date(createdMs) : new Date(),
 		updatedAt: updatedMs ? new Date(updatedMs) : undefined,
+		title: row.title || undefined,
 		firstUserMessage,
 		messages,
 	};

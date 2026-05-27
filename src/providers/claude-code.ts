@@ -27,6 +27,7 @@ interface RawRecord {
 	type?: string;
 	timestamp?: string;
 	sessionId?: string;
+	aiTitle?: string;
 	message?: {
 		role?: string;
 		content?: unknown;
@@ -230,6 +231,7 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 	if (lines.length === 0) return null;
 
 	let sessionId = "";
+	let aiTitle = "";
 	let createdAt: Date | null = null;
 	let updatedAt: Date | null = null;
 	const messages: Message[] = [];
@@ -280,6 +282,16 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 		}
 		if (!sessionId && typeof rec.sessionId === "string") {
 			sessionId = rec.sessionId;
+		}
+		// Claude Code appends an "ai-title" record each turn with the AI-generated
+		// session title (same text shown in the sidebar). Keep the latest value —
+		// the title can be updated as the conversation evolves.
+		if (
+			rec.type === "ai-title" &&
+			typeof rec.aiTitle === "string" &&
+			rec.aiTitle
+		) {
+			aiTitle = rec.aiTitle;
 		}
 		if (rec.timestamp) {
 			const ts = new Date(rec.timestamp);
@@ -391,6 +403,7 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 		agent: "claude-code",
 		createdAt,
 		updatedAt: updatedAt ?? createdAt,
+		title: aiTitle || undefined,
 		firstUserMessage,
 		messages,
 	};

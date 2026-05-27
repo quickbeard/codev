@@ -15,6 +15,7 @@ export interface Session {
 	agent: Agent;
 	createdAt: Date;
 	updatedAt?: Date;
+	title?: string;
 	firstUserMessage?: string;
 	messages: Message[];
 }
