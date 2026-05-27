@@ -23,6 +23,7 @@ import {
 	type Tool,
 } from "@/lib/configure.js";
 import { isInvalidKeyError } from "@/lib/proxy.js";
+import { formatToolList } from "@/lib/text.js";
 
 // ModelSelect handles its own /v1/models fetch — we don't duplicate it here.
 // The "model-choice" phase mounts ModelSelect (which shows its own spinner
@@ -54,15 +55,6 @@ const TOOL_LABEL: Record<Tool, string> = {
 	"vscode-continue": "Continue",
 	"jetbrains-continue": "Continue",
 };
-
-// Natural-English list join: "X", "X and Y", "X, Y, and Z".
-export function formatToolList(labels: string[]): string {
-	if (labels.length === 0) return "";
-	if (labels.length === 1) return labels[0] ?? "";
-	if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
-	const head = labels.slice(0, -1).join(", ");
-	return `${head}, and ${labels[labels.length - 1]}`;
-}
 
 export function ModelApp() {
 	const { exit } = useApp();
