@@ -1,4 +1,5 @@
 import { render } from "ink";
+import { ConfigApp } from "@/ConfigApp.js";
 import { InstallApp } from "@/InstallApp.js";
 import { LoginApp } from "@/LoginApp.js";
 import { logout } from "@/lib/auth.js";
@@ -70,6 +71,16 @@ switch (command) {
 		break;
 	case "install": {
 		const { waitUntilExit } = render(<InstallApp />);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
+		break;
+	}
+	case "config": {
+		const { waitUntilExit } = render(<ConfigApp />);
 		try {
 			await waitUntilExit();
 			process.exit(0);
