@@ -31,7 +31,11 @@ const JETBRAINS_CLAUDE_CODE_HINT =
 
 interface InstallProps {
 	tools: Tool[];
-	onDone: (success: boolean) => void;
+	// Forwarded straight from TaskList: keys of tools whose install did not
+	// hard-fail (includes both ✓ done and ▲ warned rows). InstallApp uses
+	// the list to either park at install-failed (empty) or advance to
+	// Configure with just the survivors.
+	onDone: (succeededKeys: string[]) => void;
 }
 
 export function Install({ tools, onDone }: InstallProps) {

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { InstallApp } from "@/InstallApp.js";
 import * as auth from "@/lib/auth.js";
 import * as configure from "@/lib/configure.js";
+import * as npm from "@/lib/npm.js";
 import * as proxy from "@/lib/proxy.js";
 
 function stubModels() {
@@ -1088,6 +1089,62 @@ describe("InstallApp fail-stop invariant", () => {
 			model: "m-alpha",
 			models: ["m-alpha", "m-beta"],
 		});
+	});
+
+	test("partial install failure: survivor advances to Configure, failed tool is dropped", async () => {
+		// User selects both Claude Code and Codex. The codex npm install
+		// hard-fails ("disk full"); the claude-code one succeeds. Pre-change
+		// behavior was to park at install-failed and force the user to Ctrl-C.
+		// New behavior: the survivor (claude-code) carries the flow into
+		// Configure, configureCodex is never called, and the codex ✗ row
+		// stays rendered above as the visual cue that one tool dropped out.
+		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		vi.spyOn(npm, "installAndVerify").mockImplementation(async (tool) =>
+			tool === "codex" ? "disk full" : null,
+		);
+		const configureClaudeCodeSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/x",
+					backupPath: "/tmp/x.b",
+					created: true,
+				},
+			]);
+		const configureCodexSpy = vi.spyOn(configure, "configureCodex");
+
+		const { stdin, frames } = render(<InstallApp />);
+
+		// Select Claude Code (row 0), down arrow, select Codex (row 1), Enter.
+		await waitForFrame(frames, "Select the AI agent(s) to install");
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 30));
+		stdin.write("\r");
+		await waitForFrame(frames, "Continue? [y/N]");
+		stdin.write("y\r");
+
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		const history = allFrames(frames);
+		// 1. The flow reached the done screen — not parked at install-failed.
+		expect(history).toContain("Happy coding");
+		// 2. The failed row is visible AND the survivor's row is visible.
+		expect(history).toContain("Failed to install");
+		expect(history).toContain("disk full");
+		// 3. Configure only ran for the survivor — codex was dropped from the
+		//    second half of the flow.
+		expect(configureClaudeCodeSpy).toHaveBeenCalledTimes(1);
+		expect(configureCodexSpy).not.toHaveBeenCalled();
 	});
 });
 
