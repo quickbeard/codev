@@ -39,7 +39,11 @@ import {
 	refreshCodevConfig,
 	saveApiKey,
 } from "@/lib/auth.js";
-import type { Credentials, Tool } from "@/lib/configure.js";
+import {
+	type Credentials,
+	resetClaudeAuth,
+	type Tool,
+} from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 
@@ -229,6 +233,25 @@ export function InstallApp() {
 			}
 			const survivors = succeededKeys as Tool[];
 			setInstalledTools(survivors);
+			// Reset Claude Code's auth state silently when any Claude tool was
+			// installed (CLI or extension). Backs up `~/.claude.json` + writes
+			// `{hasCompletedOnboarding: true}`, and backs up + removes
+			// `~/.claude/.credentials.json`. Best-effort: an error here doesn't
+			// block install. The settings.json snapshot still happens later
+			// inside `configureClaudeCode` / `backupOnly`.
+			const hasClaudeTool = survivors.some(
+				(t) =>
+					t === "claude-code" ||
+					t === "vscode-claude-code" ||
+					t === "jetbrains-claude-code",
+			);
+			if (hasClaudeTool) {
+				try {
+					resetClaudeAuth();
+				} catch {
+					// Swallow — install always advances.
+				}
+			}
 			// Install PATH shims silently — the final "Done!" message merges the
 			// activation hint in. Best-effort: a failure doesn't block install.
 			try {

@@ -18,8 +18,13 @@ interface ConfirmProps {
 // identical Path/Backup lines and from suggesting two restore commands
 // (which would race each other — the first rolls the shared file back,
 // the second sees no backup and errors).
+// `claude-json` / `claude-credentials` entries are present only for
+// Record<BackupKind, …> type completeness; `kindForTool` returns
+// `claude-settings` for every Claude variant, so those rows never render.
 const KIND_LABEL: Record<BackupKind, string> = {
 	"claude-settings": "Claude Code",
+	"claude-json": "Claude Code (onboarding)",
+	"claude-credentials": "Claude Code (credentials)",
 	"codex-config": "Codex",
 	"opencode-config": "OpenCode",
 	"continue-config": "Continue",
@@ -30,6 +35,8 @@ const KIND_LABEL: Record<BackupKind, string> = {
 // either editor.
 const KIND_RESTORE_CMD: Record<BackupKind, string> = {
 	"claude-settings": "codev restore claude",
+	"claude-json": "codev restore claude",
+	"claude-credentials": "codev restore claude",
 	"codex-config": "codev restore codex",
 	"opencode-config": "codev restore opencode",
 	"continue-config": "codev restore continue",
