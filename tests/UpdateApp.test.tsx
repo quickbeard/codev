@@ -51,6 +51,13 @@ function allFrames(frames: string[]): string {
 	return frames.join("\n");
 }
 
+// Windows CI is 2-3× slower than Linux/macOS and vi.waitFor's default ~1s
+// timeout isn't enough for the full UpdateApp render pipeline (detect →
+// updating → TaskList settle → parent setPhase → render Happy coding).
+// 10s matches the slack we give Ink renders elsewhere (see tests/
+// InstallApp.test.tsx#waitForFrame).
+const WAIT_OPTS = { timeout: 10_000, interval: 50 } as const;
+
 afterEach(() => {
 	cleanup();
 });
@@ -70,7 +77,10 @@ describe("UpdateApp", () => {
 			);
 
 		const { frames } = render(<UpdateApp />);
-		await vi.waitFor(() => expect(allFrames(frames)).toContain("Happy coding"));
+		await vi.waitFor(
+			() => expect(allFrames(frames)).toContain("Happy coding"),
+			WAIT_OPTS,
+		);
 
 		const history = allFrames(frames);
 		expect(history).toContain("Updated opencode-ai");
@@ -86,7 +96,10 @@ describe("UpdateApp", () => {
 		const existsSpy = vi.mocked(fs.existsSync).mockReturnValue(false);
 
 		const { frames } = render(<UpdateApp />);
-		await vi.waitFor(() => expect(allFrames(frames)).toContain("Happy coding"));
+		await vi.waitFor(
+			() => expect(allFrames(frames)).toContain("Happy coding"),
+			WAIT_OPTS,
+		);
 
 		const history = allFrames(frames);
 		expect(history).toContain("Nothing to update");
@@ -109,8 +122,9 @@ describe("UpdateApp", () => {
 			);
 
 		const { frames } = render(<UpdateApp />);
-		await vi.waitFor(() =>
-			expect(allFrames(frames)).toContain("Failed to update opencode-ai"),
+		await vi.waitFor(
+			() => expect(allFrames(frames)).toContain("Failed to update opencode-ai"),
+			WAIT_OPTS,
 		);
 
 		const history = allFrames(frames);
