@@ -259,7 +259,11 @@ describe("TaskList", () => {
 				onDone={() => {}}
 			/>,
 		);
-		await new Promise((r) => setTimeout(r, 100));
+		// Poll until both tasks resolve instead of sleeping a fixed window —
+		// Windows CI runs ~2–3× slower than dev laptops, so a 100ms sleep
+		// would land before either setTimeout fires and the assertion below
+		// would see `[]`. vi.waitFor caps at the test timeout (30s in CI).
+		await vi.waitFor(() => expect(order).toHaveLength(2));
 		// If sequential, "slow" would finish before "fast".
 		expect(order).toEqual(["fast", "slow"]);
 	});
