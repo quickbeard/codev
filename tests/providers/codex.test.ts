@@ -360,4 +360,147 @@ describe("codexProvider.listSessions", () => {
 		const sessions = await codexProvider.listSessions(projectCwd);
 		expect(sessions).toEqual([]);
 	});
+
+	test('marks orphan function_call as data-edit-status="aborted"', async () => {
+		writeSession("session-orphan.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-orphan",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "edit a file" },
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:11Z",
+				payload: {
+					type: "function_call",
+					call_id: "fc-orphan",
+					name: "replace_file_content",
+					arguments: JSON.stringify({
+						filePath: "/tmp/x.ts",
+						old_string: "a",
+						new_string: "b",
+					}),
+				},
+			},
+			// No function_call_output — session was interrupted.
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		const assistantContent =
+			sessions[0]?.messages.find((m) => m.role === "assistant")?.content || "";
+		expect(assistantContent).toContain('data-edit-status="aborted"');
+		expect(assistantContent).not.toContain('data-edit-status="rejected"');
+	});
+
+	test("does not inherit prior turn's model when turn_context is missing on a later turn", async () => {
+		writeSession("session-turn-model.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-turn-model",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			// Turn 1: has turn_context — model attaches.
+			{
+				type: "turn_context",
+				timestamp: "2026-04-27T18:32:06Z",
+				payload: { type: "turn_context", model: "gpt-5-2025-08-01" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:07Z",
+				payload: { type: "user_message", message: "first" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:08Z",
+				payload: { type: "agent_message", message: "reply one" },
+			},
+			// Turn 2: NO turn_context. The prior turn's model must NOT leak.
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:09Z",
+				payload: { type: "user_message", message: "second" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "agent_message", message: "reply two" },
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		const session = sessions[0];
+		if (!session) throw new Error("expected one session");
+		const assistantTurns = session.messages.filter(
+			(m) => m.role === "assistant",
+		);
+		expect(assistantTurns.length).toBe(2);
+		expect(assistantTurns[0]?.model).toBe("gpt-5-2025-08-01");
+		expect(assistantTurns[1]?.model).toBeUndefined();
+	});
+
+	test("apply_patch summary lists every file the patch touches", async () => {
+		const patch =
+			"*** Begin Patch\n" +
+			"*** Update File: src/a.ts\n" +
+			"@@\n-old\n+new\n" +
+			"*** Update File: src/b.ts\n" +
+			"@@\n-old\n+new\n" +
+			"*** End Patch";
+		writeSession("session-multi-patch.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-multi-patch",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "patch both" },
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:11Z",
+				payload: {
+					type: "custom_tool_call",
+					call_id: "cp-1",
+					name: "apply_patch",
+					input: patch,
+				},
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:12Z",
+				payload: {
+					type: "custom_tool_call_output",
+					call_id: "cp-1",
+					output: "Done",
+				},
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		const assistantContent =
+			sessions[0]?.messages.find((m) => m.role === "assistant")?.content || "";
+		expect(assistantContent).toContain("src/a.ts");
+		expect(assistantContent).toContain("src/b.ts");
+		expect(assistantContent).toContain("Edit file: src/a.ts, src/b.ts");
+	});
 });

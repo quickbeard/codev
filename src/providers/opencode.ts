@@ -2,6 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { diffFromEditInput } from "@/lib/diff.js";
+import { codeFence } from "@/lib/markdown.js";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
 interface Stmt<P extends unknown[], R> {
@@ -231,7 +232,10 @@ function parsePart(part: PartRow): string | null {
 				typeof input.description === "string" ? input.description : "";
 			const summary = `Run command: ${cmd}`;
 			const descSection = desc ? `Description: ${desc}\n\n` : "";
-			const body = `${descSection}\`\`\`bash\n$ ${cmd}\n${isCompleted ? output : `Error: ${error || "Tool execution aborted"}`}\n\`\`\``;
+			const body = `${descSection}${codeFence(
+				`$ ${cmd}\n${isCompleted ? output : `Error: ${error || "Tool execution aborted"}`}`,
+				"bash",
+			)}`;
 			return `<tool-use data-tool-type="shell" data-tool-name="bash">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 		}
 
@@ -247,7 +251,9 @@ function parsePart(part: PartRow): string | null {
 		if (toolName === "glob") {
 			const pattern = typeof input.pattern === "string" ? input.pattern : "";
 			const summary = `Glob files: ${pattern}`;
-			const body = `\`\`\`\nPattern: ${pattern}\nMatches:\n${isCompleted ? output : `Error: ${error || "Tool execution aborted"}`}\n\`\`\``;
+			const body = codeFence(
+				`Pattern: ${pattern}\nMatches:\n${isCompleted ? output : `Error: ${error || "Tool execution aborted"}`}`,
+			);
 			return `<tool-use data-tool-type="glob" data-tool-name="glob">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 		}
 
@@ -255,7 +261,9 @@ function parsePart(part: PartRow): string | null {
 			const pattern = typeof input.pattern === "string" ? input.pattern : "";
 			const path = typeof input.path === "string" ? input.path : "";
 			const summary = `Grep search: ${pattern}`;
-			const body = `\`\`\`\nPattern: ${pattern}\nPath: ${path}\nMatches:\n${isCompleted ? output : `Error: ${error || "Tool execution aborted"}`}\n\`\`\``;
+			const body = codeFence(
+				`Pattern: ${pattern}\nPath: ${path}\nMatches:\n${isCompleted ? output : `Error: ${error || "Tool execution aborted"}`}`,
+			);
 			return `<tool-use data-tool-type="grep" data-tool-name="grep">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 		}
 
@@ -264,7 +272,7 @@ function parsePart(part: PartRow): string | null {
 			const content = typeof input.content === "string" ? input.content : "";
 			const summary = `Edit file: ${path}`;
 			const body = isCompleted
-				? `\`\`\`\n${content}\n\`\`\``
+				? codeFence(content)
 				: `Error: ${error || "Tool execution aborted"}`;
 			return `<tool-use data-tool-type="write" data-tool-name="write" data-edit-status="${isCompleted ? "accepted" : "rejected"}">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 		}
@@ -278,7 +286,7 @@ function parsePart(part: PartRow): string | null {
 				(isCompleted ? "" : diffFromEditInput(input));
 			let body: string;
 			if (diff) {
-				body = `\`\`\`diff\n${diff}\n\`\`\`${isCompleted ? "" : `\n\nError: ${error || "Tool execution aborted"}`}`;
+				body = `${codeFence(diff, "diff")}${isCompleted ? "" : `\n\nError: ${error || "Tool execution aborted"}`}`;
 			} else if (isCompleted) {
 				body = "Edit applied successfully.";
 			} else {
@@ -300,7 +308,7 @@ function parsePart(part: PartRow): string | null {
 
 		// Fallback for any other/generic tool
 		const summary = `Call tool: ${toolName}`;
-		const body = `\`\`\`json\n${JSON.stringify(state, null, 2)}\n\`\`\``;
+		const body = codeFence(JSON.stringify(state, null, 2), "json");
 		return `<tool-use data-tool-type="tool" data-tool-name="${toolName}">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 	}
 

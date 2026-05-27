@@ -37,6 +37,21 @@ export function renderMarkdown(session: Session): string {
 	return `${lines.join("\n").trimEnd()}\n`;
 }
 
+// Picks a fence longer than any run of backticks in `content`, so user-supplied
+// strings (patch bodies, command output, file contents) can't break out of the
+// fenced block by containing a literal triple-backtick.
+export function codeFence(content: string, lang = ""): string {
+	let max = 2;
+	const re = /`{3,}/g;
+	let m: RegExpExecArray | null = re.exec(content);
+	while (m !== null) {
+		if (m[0].length > max) max = m[0].length;
+		m = re.exec(content);
+	}
+	const fence = "`".repeat(max + 1);
+	return `${fence}${lang}\n${content}\n${fence}`;
+}
+
 function formatTitleTimestamp(date: Date): string {
 	const pad = (n: number) => String(n).padStart(2, "0");
 	return (
