@@ -11,7 +11,12 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import TOML from "@iarna/toml";
-import { AI_GATEWAY_OPENAI_URL, AI_GATEWAY_URL } from "@/lib/const.js";
+import {
+	AI_GATEWAY_OPENAI_URL,
+	AI_GATEWAY_URL,
+	CLAUDE_AUTO_COMPACT_WINDOW,
+	CLAUDE_AUTOCOMPACT_PCT,
+} from "@/lib/const.js";
 
 export type Tool =
 	| "claude-code"
@@ -93,6 +98,8 @@ const CLAUDE_K = {
 	sonnet: atob("QU5USFJPUElDX0RFRkFVTFRfU09OTkVUX01PREVM"),
 	haiku: atob("QU5USFJPUElDX0RFRkFVTFRfSEFJS1VfTU9ERUw="),
 	agentTeams: atob("Q0xBVURFX0NPREVfRVhQRVJJTUVOVEFMX0FHRU5UX1RFQU1T"),
+	autoCompactWindow: atob("Q0xBVURFX0NPREVfQVVUT19DT01QQUNUX1dJTkRPVw=="),
+	autoCompactPct: atob("Q0xBVURFX0FVVE9DT01QQUNUX1BDVF9PVkVSUklERQ=="),
 };
 
 const CODEX_K = {
@@ -395,6 +402,8 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 			[CLAUDE_K.sonnet]: model,
 			[CLAUDE_K.haiku]: model,
 			[CLAUDE_K.agentTeams]: "1",
+			[CLAUDE_K.autoCompactWindow]: CLAUDE_AUTO_COMPACT_WINDOW,
+			[CLAUDE_K.autoCompactPct]: CLAUDE_AUTOCOMPACT_PCT,
 		},
 	});
 
