@@ -307,4 +307,150 @@ describe("claudeCodeProvider.listSessions", () => {
 		const sessions = await claudeCodeProvider.listSessions(projectCwd);
 		expect(sessions).toEqual([]);
 	});
+
+	test('marks orphan tool_use as data-edit-status="aborted", not rejected', async () => {
+		// Session ends with a tool_use that never received a tool_result —
+		// the kind of interruption an analytics consumer must NOT count as
+		// a user rejection.
+		const lines = [
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:05Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: { role: "user", content: "Edit random.ts" },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				timestamp: "2026-04-27T18:32:10Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "t-orphan",
+							name: "Edit",
+							input: {
+								file_path: "/tmp/random.ts",
+								old_string: "x",
+								new_string: "y",
+							},
+						},
+					],
+				},
+			}),
+		];
+		writeFileSync(join(claudeProjectDir, "session.jsonl"), lines.join("\n"));
+
+		const sessions = await claudeCodeProvider.listSessions(projectCwd);
+		const assistantContent = sessions[0]?.messages[1]?.content || "";
+		expect(assistantContent).toContain('data-edit-status="aborted"');
+		expect(assistantContent).not.toContain('data-edit-status="rejected"');
+	});
+
+	test("renders mixed tool_result + text user content as both tool output and a user turn", async () => {
+		const lines = [
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:00Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: { role: "user", content: "Read foo.ts" },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				timestamp: "2026-04-27T18:32:05Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "t-mix",
+							name: "Read",
+							input: { file_path: "/tmp/foo.ts" },
+						},
+					],
+				},
+			}),
+			// Single user record with BOTH tool_result and a fresh user text.
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:10Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t-mix",
+							text: "export const foo = 1;",
+						},
+						{ type: "text", text: "Now rename it to bar." },
+					],
+				},
+			}),
+		];
+		writeFileSync(join(claudeProjectDir, "session.jsonl"), lines.join("\n"));
+
+		const sessions = await claudeCodeProvider.listSessions(projectCwd);
+		const session = sessions[0];
+		if (!session) throw new Error("expected one session");
+		// Three messages: user prompt, assistant turn (with tool_use rendered),
+		// then a new user turn from the trailing text block.
+		expect(session.messages.length).toBe(3);
+		expect(session.messages[2]?.role).toBe("user");
+		expect(session.messages[2]?.content).toContain("Now rename it to bar.");
+		expect(session.messages[1]?.content).toContain("export const foo = 1;");
+	});
+
+	test("wraps tool output in a long-enough fence when it contains triple backticks", async () => {
+		// The output contains a literal ``` — naive ```bash wrapping would
+		// terminate the fence early. codeFence must pick a longer fence.
+		const tripleBacktickOutput = "before ``` after";
+		const lines = [
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:00Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: { role: "user", content: "run something" },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				timestamp: "2026-04-27T18:32:05Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "t-fence",
+							name: "Bash",
+							input: { command: "echo hi" },
+						},
+					],
+				},
+			}),
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:10Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t-fence",
+							text: tripleBacktickOutput,
+						},
+					],
+				},
+			}),
+		];
+		writeFileSync(join(claudeProjectDir, "session.jsonl"), lines.join("\n"));
+
+		const sessions = await claudeCodeProvider.listSessions(projectCwd);
+		const assistantContent = sessions[0]?.messages[1]?.content || "";
+		expect(assistantContent).toContain("````bash");
+		expect(assistantContent).toContain(tripleBacktickOutput);
+	});
 });

@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { diffFromEditInput, textValue } from "@/lib/diff.js";
+import { codeFence } from "@/lib/markdown.js";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
 function sessionsRoot(): string {
@@ -109,11 +110,15 @@ async function findSessions(cwd: string): Promise<CodexPreview[]> {
 	return result;
 }
 
+// `aborted` distinguishes an orphan function_call (no output ever arrived)
+// from a function_call_output with is_error=true (rejection / tool failure).
+// Edit-acceptance analytics need to keep those apart.
 function formatCodexToolUse(
 	name: string,
 	input: Record<string, unknown>,
 	output: string,
 	isError: boolean,
+	aborted = false,
 ): string {
 	const toolName = name.toLowerCase();
 	let toolType = "tool";
@@ -133,7 +138,10 @@ function formatCodexToolUse(
 					? input.command
 					: "";
 		summary = `Run command: ${cmd}`;
-		body = `\`\`\`bash\n$ ${cmd}\n${isError ? `Error: ${output}` : output}\n\`\`\``;
+		body = codeFence(
+			`$ ${cmd}\n${isError ? `Error: ${output}` : output}`,
+			"bash",
+		);
 	} else if (
 		toolName === "read_file" ||
 		toolName === "read" ||
@@ -153,7 +161,9 @@ function formatCodexToolUse(
 		const pattern = typeof input.pattern === "string" ? input.pattern : "";
 		const path = typeof input.path === "string" ? input.path : "";
 		summary = `Grep search: ${pattern}`;
-		body = `\`\`\`\nPattern: ${pattern}\nPath: ${path}\nMatches:\n${isError ? `Error: ${output}` : output}\n\`\`\``;
+		body = codeFence(
+			`Pattern: ${pattern}\nPath: ${path}\nMatches:\n${isError ? `Error: ${output}` : output}`,
+		);
 	} else if (toolName === "write_file" || toolName === "write") {
 		toolType = "write";
 		const path =
@@ -164,11 +174,7 @@ function formatCodexToolUse(
 					: "";
 		const content = typeof input.content === "string" ? input.content : "";
 		summary = `Edit file: ${path}`;
-		body = isError
-			? `Error: ${output}`
-			: content
-				? `\`\`\`\n${content}\n\`\`\``
-				: output;
+		body = isError ? `Error: ${output}` : content ? codeFence(content) : output;
 	} else if (
 		toolName === "replace_file_content" ||
 		toolName === "edit" ||
@@ -186,14 +192,14 @@ function formatCodexToolUse(
 		summary = `Edit file: ${path}`;
 		const editDiff = diffFromEditInput(input);
 		body = editDiff
-			? `\`\`\`diff\n${editDiff}\n\`\`\`\n\n${isError ? `Error: ${output}` : output}`
+			? `${codeFence(editDiff, "diff")}\n\n${isError ? `Error: ${output}` : output}`
 			: isError
 				? `Error: ${output}`
 				: output.includes("<<<") ||
 						output.includes("---") ||
 						output.includes("+++")
-					? `\`\`\`diff\n${output}\n\`\`\``
-					: `\`\`\`\n${output}\n\`\`\``;
+					? codeFence(output, "diff")
+					: codeFence(output);
 	} else if (
 		toolName === "subagent" ||
 		toolName === "invoke_subagent" ||
@@ -206,23 +212,39 @@ function formatCodexToolUse(
 		body = `**Prompt**:\n${prompt}\n\n**Result**:\n${isError ? `Error: ${output}` : output}`;
 	} else {
 		summary = `Call tool: ${name}`;
-		body = `**Input**:\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
+		body = `**Input**:\n${codeFence(JSON.stringify(input, null, 2), "json")}\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
 	}
 
 	const editStatus =
 		toolType === "write"
-			? ` data-edit-status="${isError ? "rejected" : "accepted"}"`
+			? ` data-edit-status="${aborted ? "aborted" : isError ? "rejected" : "accepted"}"`
 			: "";
 	return `<tool-use data-tool-type="${toolType}" data-tool-name="${toolName}"${editStatus}>\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 }
 
-function extractPatchFilePath(patch: string): string {
-	const match =
-		patch.match(/^\*\*\* Update File:\s*(.+)$/m) ??
-		patch.match(/^\*\*\* Add File:\s*(.+)$/m) ??
-		patch.match(/^---\s+a\/(.+)$/m) ??
-		patch.match(/^\+\+\+\s+b\/(.+)$/m);
-	return match?.[1]?.trim() ?? "";
+// Collect every file path mentioned in the patch. apply_patch can touch
+// multiple files; previously we only surfaced the first one in the summary.
+function extractPatchFilePaths(patch: string): string[] {
+	const paths: string[] = [];
+	const seen = new Set<string>();
+	const patterns = [
+		/^\*\*\* Update File:\s*(.+)$/gm,
+		/^\*\*\* Add File:\s*(.+)$/gm,
+		/^---\s+a\/(.+)$/gm,
+		/^\+\+\+\s+b\/(.+)$/gm,
+	];
+	for (const re of patterns) {
+		let m: RegExpExecArray | null = re.exec(patch);
+		while (m !== null) {
+			const p = m[1]?.trim();
+			if (p && !seen.has(p)) {
+				seen.add(p);
+				paths.push(p);
+			}
+			m = re.exec(patch);
+		}
+	}
+	return paths;
 }
 
 function formatCodexCustomToolUse(
@@ -230,16 +252,19 @@ function formatCodexCustomToolUse(
 	input: unknown,
 	output: string,
 	isError: boolean,
+	aborted = false,
 ): string {
 	const toolName = name.toLowerCase();
 	if (toolName === "apply_patch") {
 		const patch = typeof input === "string" ? input : "";
-		const path = extractPatchFilePath(patch);
-		const body = `\`\`\`diff\n${patch}\n\`\`\`\n\n${isError ? `Error: ${output}` : output}`;
-		return `<tool-use data-tool-type="write" data-tool-name="${toolName}" data-edit-status="${isError ? "rejected" : "accepted"}">\n<details>\n<summary>Edit file: ${path}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
+		const paths = extractPatchFilePaths(patch);
+		const pathSummary = paths.length > 0 ? paths.join(", ") : "";
+		const body = `${codeFence(patch, "diff")}\n\n${isError ? `Error: ${output}` : output}`;
+		const editStatus = aborted ? "aborted" : isError ? "rejected" : "accepted";
+		return `<tool-use data-tool-type="write" data-tool-name="${toolName}" data-edit-status="${editStatus}">\n<details>\n<summary>Edit file: ${pathSummary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 	}
 
-	const body = `**Input**:\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
+	const body = `**Input**:\n${codeFence(JSON.stringify(input, null, 2), "json")}\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
 	return `<tool-use data-tool-type="tool" data-tool-name="${toolName}">\n<details>\n<summary>Call tool: ${name}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 }
 
@@ -296,6 +321,18 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 		activeAssistantModel = undefined;
 	}
 
+	// Attach pendingTurnModel to the active assistant turn AND clear it. The
+	// clear is what makes a missing turn_context on a later turn safe: without
+	// it, a turn with no turn_context would silently inherit the prior turn's
+	// model. Sticky-first within a turn is preserved by the
+	// `if (!activeAssistantModel)` guard each caller does before calling.
+	function consumeTurnModel() {
+		if (!activeAssistantModel && pendingTurnModel) {
+			activeAssistantModel = pendingTurnModel;
+		}
+		pendingTurnModel = undefined;
+	}
+
 	// Skip the first line (metadata) — already consumed in readMeta.
 	for (let i = 1; i < lines.length; i++) {
 		const raw = lines[i];
@@ -343,8 +380,7 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				if (content) {
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = recTimestamp;
-					if (!activeAssistantModel && pendingTurnModel)
-						activeAssistantModel = pendingTurnModel;
+					consumeTurnModel();
 					appendContent(content);
 				}
 			} else if (ptype === "agent_reasoning") {
@@ -354,8 +390,7 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				if (text) {
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = recTimestamp;
-					if (!activeAssistantModel && pendingTurnModel)
-						activeAssistantModel = pendingTurnModel;
+					consumeTurnModel();
 					appendContent(
 						`<details><summary>Thought</summary>\n\n${text}\n</details>\n`,
 					);
@@ -374,8 +409,7 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				if (thought) {
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = recTimestamp;
-					if (!activeAssistantModel && pendingTurnModel)
-						activeAssistantModel = pendingTurnModel;
+					consumeTurnModel();
 					appendContent(
 						`<details><summary>Thought</summary>\n\n${thought}\n</details>\n`,
 					);
@@ -387,8 +421,7 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				if (content) {
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = recTimestamp;
-					if (!activeAssistantModel && pendingTurnModel)
-						activeAssistantModel = pendingTurnModel;
+					consumeTurnModel();
 					appendContent(content);
 				}
 			} else if (ptype === "function_call") {
@@ -431,14 +464,14 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 					);
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = toolUse.timestamp || recTimestamp;
-					if (!activeAssistantModel && pendingTurnModel)
-						activeAssistantModel = pendingTurnModel;
+					consumeTurnModel();
 					appendContent(formatted);
 					pendingToolUses.delete(callId);
-				} else {
-					const formatted = `<tool-use data-tool-type="tool" data-tool-name="generic">\n<details>\n<summary>Tool output</summary>\n\n${output}\n</details>\n</tool-use>\n`;
-					appendContent(formatted);
 				}
+				// Unmatched function_call_output: the paired function_call is
+				// missing (truncated log, schema drift). Drop silently rather
+				// than emit a placeholder envelope whose data-tool-name slug
+				// would pollute analytics.
 			} else if (ptype === "custom_tool_call") {
 				const callId = textValue(payload.call_id);
 				const name = textValue(payload.name);
@@ -464,8 +497,7 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 					);
 					if (!activeAssistantTimestamp)
 						activeAssistantTimestamp = toolUse.timestamp || recTimestamp;
-					if (!activeAssistantModel && pendingTurnModel)
-						activeAssistantModel = pendingTurnModel;
+					consumeTurnModel();
 					appendContent(formatted);
 					pendingCustomToolUses.delete(callId);
 				}
@@ -479,6 +511,7 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 			toolUse.arguments,
 			"Tool execution aborted (no result recorded)",
 			true,
+			true,
 		);
 		if (!activeAssistantTimestamp) activeAssistantTimestamp = toolUse.timestamp;
 		appendContent(formatted);
@@ -489,6 +522,7 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 			toolUse.name,
 			toolUse.input,
 			"Tool execution aborted (no result recorded)",
+			true,
 			true,
 		);
 		if (!activeAssistantTimestamp) activeAssistantTimestamp = toolUse.timestamp;

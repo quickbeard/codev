@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { diffFromEditInput, textValue } from "@/lib/diff.js";
+import { codeFence } from "@/lib/markdown.js";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
 // Claude Code stores sessions under ~/.claude/projects/<munged-cwd>/, where the
@@ -48,13 +49,6 @@ function extractText(content: unknown): string {
 		}
 	}
 	return parts.join("\n");
-}
-
-function isToolResultContent(content: unknown): boolean {
-	if (!Array.isArray(content) || content.length === 0) return false;
-	const first = content[0];
-	if (!first || typeof first !== "object") return false;
-	return (first as { type?: string }).type === "tool_result";
 }
 
 interface ParsedToolResult {
@@ -113,11 +107,21 @@ function filePathFromInput(input: Record<string, unknown>): string {
 	);
 }
 
+// `aborted` distinguishes an orphan tool_use (no result line ever arrived,
+// e.g. the session was interrupted) from a tool_use whose result came back
+// with `is_error: true` (the user rejected the edit, or the tool itself
+// failed). Edit-acceptance analytics need to keep those apart: an aborted
+// edit isn't a refused edit.
+//
+// `name` keeps its original casing in the human-readable summary so
+// "Edit" and "Read" still render naturally. The `data-tool-name` attribute
+// is lowercased for downstream consumers that key on the slug.
 function formatToolUse(
 	name: string,
 	input: Record<string, unknown>,
 	output: string,
 	isError: boolean,
+	aborted = false,
 ): string {
 	const toolName = name.toLowerCase();
 	let toolType = "tool";
@@ -138,7 +142,10 @@ function formatToolUse(
 					? input.cmd
 					: "";
 		summary = `Run command: ${cmd}`;
-		body = `\`\`\`bash\n$ ${cmd}\n${isError ? `Error: ${output}` : output}\n\`\`\``;
+		body = codeFence(
+			`$ ${cmd}\n${isError ? `Error: ${output}` : output}`,
+			"bash",
+		);
 	} else if (
 		toolName === "view" ||
 		toolName === "read" ||
@@ -158,13 +165,17 @@ function formatToolUse(
 					? input.globPattern
 					: "";
 		summary = `Glob files: ${pattern}`;
-		body = `\`\`\`\nPattern: ${pattern}\nMatches:\n${isError ? `Error: ${output}` : output}\n\`\`\``;
+		body = codeFence(
+			`Pattern: ${pattern}\nMatches:\n${isError ? `Error: ${output}` : output}`,
+		);
 	} else if (toolName === "grep" || toolName === "grep_search") {
 		toolType = "grep";
 		const pattern = typeof input.pattern === "string" ? input.pattern : "";
 		const path = typeof input.path === "string" ? input.path : "";
 		summary = `Grep search: ${pattern}`;
-		body = `\`\`\`\nPattern: ${pattern}\nPath: ${path}\nMatches:\n${isError ? `Error: ${output}` : output}\n\`\`\``;
+		body = codeFence(
+			`Pattern: ${pattern}\nPath: ${path}\nMatches:\n${isError ? `Error: ${output}` : output}`,
+		);
 	} else if (
 		toolName === "write" ||
 		toolName === "write_file" ||
@@ -174,11 +185,7 @@ function formatToolUse(
 		const path = filePathFromInput(input);
 		const content = typeof input.content === "string" ? input.content : "";
 		summary = `Edit file: ${path}`;
-		body = isError
-			? `Error: ${output}`
-			: content
-				? `\`\`\`\n${content}\n\`\`\``
-				: output;
+		body = isError ? `Error: ${output}` : content ? codeFence(content) : output;
 	} else if (
 		toolName === "edit" ||
 		toolName === "replace_file_content" ||
@@ -191,16 +198,16 @@ function formatToolUse(
 		const diff = diffFromEditInput(input);
 		if (isError) {
 			body = diff
-				? `\`\`\`diff\n${diff}\n\`\`\`\n\nError: ${output}`
+				? `${codeFence(diff, "diff")}\n\nError: ${output}`
 				: `Error: ${output}`;
 		} else {
 			body = diff
-				? `\`\`\`diff\n${diff}\n\`\`\`\n\n${output}`
+				? `${codeFence(diff, "diff")}\n\n${output}`
 				: output.includes("<<<") ||
 						output.includes("---") ||
 						output.includes("+++")
-					? `\`\`\`diff\n${output}\n\`\`\``
-					: `\`\`\`\n${output}\n\`\`\``;
+					? codeFence(output, "diff")
+					: codeFence(output);
 		}
 	} else if (
 		toolName === "agent" ||
@@ -215,12 +222,12 @@ function formatToolUse(
 		body = `**Prompt**:\n${prompt}\n\n**Result**:\n${isError ? `Error: ${output}` : output}`;
 	} else {
 		summary = `Call tool: ${name}`;
-		body = `**Input**:\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
+		body = `**Input**:\n${codeFence(JSON.stringify(input, null, 2), "json")}\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
 	}
 
 	const editStatus =
 		toolType === "write"
-			? ` data-edit-status="${isError ? "rejected" : "accepted"}"`
+			? ` data-edit-status="${aborted ? "aborted" : isError ? "rejected" : "accepted"}"`
 			: "";
 	return `<tool-use data-tool-type="${toolType}" data-tool-name="${toolName}"${editStatus}>\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 }
@@ -305,41 +312,45 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 		const role = rec.message?.role;
 
 		if (rec.type === "user" || role === "user") {
-			const isTool = isToolResultContent(content);
-			if (isTool) {
-				const toolResults = parseToolResults(content);
-				for (const result of toolResults) {
-					const toolUse = pendingToolUses.get(result.toolUseId);
-					if (toolUse) {
-						const formatted = formatToolUse(
-							toolUse.name,
-							toolUse.input,
-							result.content,
-							result.isError,
-						);
-						if (!activeAssistantTimestamp) {
-							activeAssistantTimestamp = toolUse.timestamp || rec.timestamp;
-						}
-						appendContent(formatted);
-						pendingToolUses.delete(result.toolUseId);
+			// Walk blocks in order so a mixed [text, tool_result] (or the reverse)
+			// renders both halves: tool_result blocks extend the current assistant
+			// turn; text blocks flush it and push a user message.
+			const toolResults = parseToolResults(content);
+			for (const result of toolResults) {
+				const toolUse = pendingToolUses.get(result.toolUseId);
+				if (toolUse) {
+					const formatted = formatToolUse(
+						toolUse.name,
+						toolUse.input,
+						result.content,
+						result.isError,
+					);
+					if (!activeAssistantTimestamp) {
+						activeAssistantTimestamp = toolUse.timestamp || rec.timestamp;
 					}
+					appendContent(formatted);
+					pendingToolUses.delete(result.toolUseId);
 				}
-			} else {
-				const text = extractText(content);
-				if (text) {
-					flushAssistant();
-					messages.push({
-						role: "user",
-						content: text,
-						timestamp: rec.timestamp,
-					});
-					if (!firstUserMessage) firstUserMessage = text;
-				}
+			}
+			const text = extractText(content);
+			if (text) {
+				flushAssistant();
+				messages.push({
+					role: "user",
+					content: text,
+					timestamp: rec.timestamp,
+				});
+				if (!firstUserMessage) firstUserMessage = text;
 			}
 		} else if (rec.type === "assistant" || role === "assistant") {
 			if (!activeAssistantTimestamp) {
 				activeAssistantTimestamp = rec.timestamp;
 			}
+			// Sticky-first: a Claude Code assistant turn can span multiple JSONL
+			// records (text + thinking + tool_use chunks), but `model` is the
+			// same on every chunk of one turn. Locking in the first observed
+			// model is simpler than reconciling per-chunk values and avoids
+			// flipping the recorded model if a chunk omits the field.
 			if (!activeAssistantModel && rec.message?.model) {
 				activeAssistantModel = rec.message.model;
 			}
@@ -387,6 +398,7 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 			toolUse.name,
 			toolUse.input,
 			"Tool execution aborted (no result recorded)",
+			true,
 			true,
 		);
 		if (!activeAssistantTimestamp) {
