@@ -45,8 +45,10 @@ function reportRestoreResult(result: RestoreResult): void {
 }
 
 export function runRestore(tool: Tool): number {
-	const result = restoreTool(tool);
-	reportRestoreResult(result);
+	const results = restoreTool(tool);
+	for (const result of results) {
+		reportRestoreResult(result);
+	}
 	return 0;
 }
 
@@ -61,9 +63,11 @@ const SWEEP_TOOLS: Tool[] = [
 	"vscode-continue",
 ];
 
-// Bare `codev restore` — process every tool. Each tool ends in one of three
-// states (restored / deleted-live / noop). Exit 1 only if every tool was
-// noop or any threw; otherwise 0.
+// Bare `codev restore` — process every tool. Each result ends in one of
+// three states (restored / deleted-live / noop). Counters aggregate across
+// all results from all sweep tools (claude-code contributes three results,
+// the others one). Exit 1 only if every result was noop or any tool threw;
+// otherwise 0.
 export function runRestoreAll(): number {
 	let acted = 0;
 	let failed = 0;
@@ -71,10 +75,12 @@ export function runRestoreAll(): number {
 
 	for (const tool of SWEEP_TOOLS) {
 		try {
-			const result = restoreTool(tool);
-			reportRestoreResult(result);
-			if (result.status === "noop") noop++;
-			else acted++;
+			const results = restoreTool(tool);
+			for (const result of results) {
+				reportRestoreResult(result);
+				if (result.status === "noop") noop++;
+				else acted++;
+			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			console.error(`Failed to restore ${tool}: ${msg}`);

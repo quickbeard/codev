@@ -39,7 +39,11 @@ import {
 	refreshCodevConfig,
 	saveApiKey,
 } from "@/lib/auth.js";
-import type { Credentials, Tool } from "@/lib/configure.js";
+import {
+	type Credentials,
+	resetClaudeAuth,
+	type Tool,
+} from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 
@@ -106,6 +110,12 @@ export function InstallApp() {
 	const { exit } = useApp();
 	const [step, setStep] = useState<Phase>("select");
 	const [tools, setTools] = useState<Tool[]>([]);
+	// Survivors of the install step — populated from TaskList's succeededKeys.
+	// Drives shim install + the Configure step, so failed tools are quietly
+	// dropped from the second half of the flow. We keep `tools` (the
+	// original selection) untouched so the readOnly Confirm history still
+	// shows what the user picked.
+	const [installedTools, setInstalledTools] = useState<Tool[]>([]);
 	// Whether the user picked an extension sentinel row in ToolSelect —
 	// drives whether EditorSelect is shown (active or readOnly) in later
 	// phases. Stored separately from `tools` so the readOnly editor sub-step
@@ -204,23 +214,48 @@ export function InstallApp() {
 			});
 	}, []);
 
-	// On failure we set a terminal `*-failed` phase and stop advancing. The
-	// step's error frame stays rendered so the user can read it; exiting the
-	// app is left to the user (Ctrl-C), matching Login/Configure's prior
-	// hang-on-error behavior. Soft warnings (Continue extension/plugin
-	// install couldn't run cleanly) are rendered as yellow ▲ rows in the
-	// install TaskList itself — they don't flip `success` and don't need to
-	// propagate further.
+	// Total-failure-only hang: when every selected tool hard-failed (empty
+	// succeededKeys) we set the terminal `install-failed` phase and stop
+	// advancing. The step's error frame stays rendered so the user can read
+	// it; exiting the app is left to the user (Ctrl-C), matching
+	// Login/Configure's prior hang-on-error behavior. When at least one
+	// tool succeeded (or soft-warned), the flow advances with just the
+	// survivors and Configure only writes their configs — the failed rows
+	// stay rendered as red ✗ above so the user still sees what dropped out.
+	// Soft warnings (Continue extension/plugin install couldn't run cleanly)
+	// are rendered as yellow ▲ rows by TaskList and are included in the
+	// survivor set.
 	const handleInstallDone = useCallback(
-		(success: boolean) => {
-			if (!success) {
+		(succeededKeys: string[]) => {
+			if (succeededKeys.length === 0) {
 				setStep("install-failed");
 				return;
+			}
+			const survivors = succeededKeys as Tool[];
+			setInstalledTools(survivors);
+			// Reset Claude Code's auth state silently when any Claude tool was
+			// installed (CLI or extension). Backs up `~/.claude.json` + writes
+			// `{hasCompletedOnboarding: true}`, and backs up + removes
+			// `~/.claude/.credentials.json`. Best-effort: an error here doesn't
+			// block install. The settings.json snapshot still happens later
+			// inside `configureClaudeCode` / `backupOnly`.
+			const hasClaudeTool = survivors.some(
+				(t) =>
+					t === "claude-code" ||
+					t === "vscode-claude-code" ||
+					t === "jetbrains-claude-code",
+			);
+			if (hasClaudeTool) {
+				try {
+					resetClaudeAuth();
+				} catch {
+					// Swallow — install always advances.
+				}
 			}
 			// Install PATH shims silently — the final "Done!" message merges the
 			// activation hint in. Best-effort: a failure doesn't block install.
 			try {
-				const shimAgents = tools
+				const shimAgents = survivors
 					.map(toolToShimAgent)
 					.filter((agent) => agent !== null);
 				if (shimAgents.length > 0) installShims(shimAgents);
@@ -243,7 +278,7 @@ export function InstallApp() {
 				advancePastInstall();
 			});
 		},
-		[tools, auth, advancePastInstall],
+		[auth, advancePastInstall],
 	);
 
 	const handleAuthMethod = useCallback(
@@ -452,7 +487,7 @@ export function InstallApp() {
 							title={configureTitle(authMethod === "skip")}
 						>
 							<Configure
-								tools={tools}
+								tools={installedTools}
 								creds={creds}
 								shimsInstalled={shimsInstalled}
 								onDone={handleConfigureDone}

@@ -96,23 +96,52 @@ function runUnhook(): StepResult {
 function runRestoreOrDelete(tool: Tool): StepResult {
 	const label = TOOL_LABEL[tool];
 	try {
-		const result = restoreTool(tool);
-		switch (result.status) {
-			case "restored":
-				return {
-					label,
-					detail: `restored from ${result.backupPath}`,
-					status: "ok",
-				};
-			case "deleted-live":
-				return {
-					label,
-					detail: `no backup; deleted ${result.sourcePath}`,
-					status: "ok",
-				};
-			case "noop":
+		const results = restoreTool(tool);
+		// Single-file tools surface their per-file message verbatim. Claude
+		// returns three results; we roll them up into one counts-based detail
+		// since the per-file noise would otherwise overwhelm the remove view.
+		if (results.length === 1) {
+			const result = results[0];
+			if (!result) {
 				return { label, detail: "nothing to restore", status: "noop" };
+			}
+			switch (result.status) {
+				case "restored":
+					return {
+						label,
+						detail: `restored from ${result.backupPath}`,
+						status: "ok",
+					};
+				case "deleted-live":
+					return {
+						label,
+						detail: `no backup; deleted ${result.sourcePath}`,
+						status: "ok",
+					};
+				case "noop":
+					return { label, detail: "nothing to restore", status: "noop" };
+			}
 		}
+		let restored = 0;
+		let deleted = 0;
+		let noop = 0;
+		for (const r of results) {
+			if (r.status === "restored") restored++;
+			else if (r.status === "deleted-live") deleted++;
+			else noop++;
+		}
+		if (restored === 0 && deleted === 0) {
+			return { label, detail: "nothing to restore", status: "noop" };
+		}
+		const parts: string[] = [];
+		if (restored > 0)
+			parts.push(`restored ${restored} file${restored === 1 ? "" : "s"}`);
+		if (deleted > 0)
+			parts.push(
+				`deleted ${deleted} file${deleted === 1 ? "" : "s"} (no backup)`,
+			);
+		if (noop > 0) parts.push(`${noop} already clean`);
+		return { label, detail: parts.join("; "), status: "ok" };
 	} catch (err) {
 		return { label, detail: errorMessage(err), status: "failed" };
 	}
