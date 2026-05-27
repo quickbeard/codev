@@ -131,6 +131,11 @@ export function InstallApp() {
 	const [existingMessage, setExistingMessage] = useState<string | null>(null);
 	const [shimsInstalled, setShimsInstalled] = useState(false);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
+	// Set only when refreshCodevConfig fails. Drives a yellow ▲ row that
+	// appears between the install Step and the next visible Step. Stays null
+	// (and the row stays unmounted) on the success path, so refresh remains
+	// invisible when it works.
+	const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
 
 	const handleToolSelectConfirm = (selected: ToolSelectValue[]) => {
 		const hasClaudeCodeExt = selected.includes(CLAUDE_CODE_EXT_SENTINEL);
@@ -267,14 +272,17 @@ export function InstallApp() {
 			// step. The user sees install complete, a brief pause, then the
 			// key-choice (or validating-existing) panel — no spinner for the
 			// network call itself. Errors are swallowed by refreshCodevConfig,
-			// so install always advances.
+			// so install always advances; we capture the warning message via
+			// onLog and surface it as a yellow ▲ row in the rendered tree.
 			setStep("refreshing-config");
 			if (!auth) {
 				// login() runs before this phase, so this is defensive only.
 				advancePastInstall();
 				return;
 			}
-			refreshCodevConfig(auth.access_token, () => {}).finally(() => {
+			refreshCodevConfig(auth.access_token, (msg) => {
+				setRefreshWarning(msg);
+			}).finally(() => {
 				advancePastInstall();
 			});
 		},
@@ -404,6 +412,14 @@ export function InstallApp() {
 						title={<Text bold>Installing packages</Text>}
 					>
 						<Install tools={tools} onDone={handleInstallDone} />
+					</Step>
+				)}
+				{POST_REFRESH.includes(step) && refreshWarning && (
+					<Step title={<Text bold>Refresh CoDev config</Text>}>
+						<Box>
+							<Text color="yellow">▲</Text>
+							<Text color="yellow">{` ${refreshWarning}`}</Text>
+						</Box>
 					</Step>
 				)}
 				{POST_REFRESH.includes(step) && savedCreds && (
