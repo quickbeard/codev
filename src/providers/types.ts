@@ -7,6 +7,7 @@ export interface Message {
 	role: "user" | "assistant";
 	content: string;
 	timestamp?: string;
+	model?: string;
 }
 
 export interface Session {
@@ -14,6 +15,7 @@ export interface Session {
 	agent: Agent;
 	createdAt: Date;
 	updatedAt?: Date;
+	title?: string;
 	firstUserMessage?: string;
 	messages: Message[];
 }

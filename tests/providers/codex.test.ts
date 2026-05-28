@@ -111,9 +111,230 @@ describe("codexProvider.listSessions", () => {
 		expect(s.id).toBe("ses-1");
 		expect(s.agent).toBe("codex");
 		expect(s.firstUserMessage).toBe("Refactor the auth module");
-		// Reasoning events are intentionally dropped — only user/agent messages remain.
 		expect(s.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
-		expect(s.messages[1]?.content).toBe("I'll start with auth.ts");
+		expect(s.messages[1]?.content).toBe(
+			"<details><summary>Thought</summary>\n\nThinking...\n</details>\nI'll start with auth.ts",
+		);
+	});
+
+	test("parses tool calls and tool outputs in Codex sessions", async () => {
+		writeSession("session-tool.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-tool",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "Run the tests" },
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:20Z",
+				payload: {
+					type: "function_call",
+					name: "exec_command",
+					arguments: '{"cmd":"npm run test"}',
+					call_id: "c-tool-1",
+				},
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:25Z",
+				payload: {
+					type: "function_call_output",
+					call_id: "c-tool-1",
+					output: "Output:\nAll tests passed!",
+					is_error: false,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:30Z",
+				payload: { type: "agent_message", message: "Done!" },
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		expect(sessions.length).toBe(1);
+		const s = sessions[0];
+		if (!s) throw new Error("expected session");
+		expect(s.messages.length).toBe(2);
+		const assistantContent = s.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="shell" data-tool-name="exec_command">',
+		);
+		expect(assistantContent).toContain("npm run test");
+		expect(assistantContent).toContain("All tests passed!");
+		expect(assistantContent).toContain("Done!");
+	});
+
+	test("parses apply_patch custom tool calls as write diffs", async () => {
+		writeSession("session-patch.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-patch",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "Patch random.ts" },
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:20Z",
+				payload: {
+					type: "custom_tool_call",
+					name: "apply_patch",
+					input:
+						"*** Begin Patch\n*** Update File: /tmp/random.ts\n@@\n-old line\n+new line\n+another line\n*** End Patch\n",
+					call_id: "patch-1",
+				},
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:25Z",
+				payload: {
+					type: "custom_tool_call_output",
+					call_id: "patch-1",
+					output: "Success. Updated the following files:\nM /tmp/random.ts\n",
+					is_error: false,
+				},
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		expect(sessions.length).toBe(1);
+		const s = sessions[0];
+		if (!s) throw new Error("expected session");
+		const assistantContent = s.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="apply_patch" data-edit-status="accepted">',
+		);
+		expect(assistantContent).toContain(
+			"<summary>Edit file: /tmp/random.ts</summary>",
+		);
+		expect(assistantContent).toContain("```diff\n*** Begin Patch");
+		expect(assistantContent).toContain("-old line");
+		expect(assistantContent).toContain("+new line");
+		expect(assistantContent).toContain("Success. Updated the following files");
+	});
+
+	test("keeps rejected apply_patch custom tool calls as rejected diffs", async () => {
+		writeSession("session-rejected-patch.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-rejected-patch",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "Patch random.ts" },
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:20Z",
+				payload: {
+					type: "custom_tool_call",
+					name: "apply_patch",
+					input:
+						"*** Begin Patch\n*** Update File: /tmp/random.ts\n@@\n-old line\n+new line\n*** End Patch\n",
+					call_id: "patch-1",
+				},
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:25Z",
+				payload: {
+					type: "custom_tool_call_output",
+					call_id: "patch-1",
+					output: "The user rejected this edit.",
+					is_error: true,
+				},
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		const assistantContent = sessions[0]?.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="apply_patch" data-edit-status="rejected">',
+		);
+		expect(assistantContent).toContain("```diff\n*** Begin Patch");
+		expect(assistantContent).toContain("-old line");
+		expect(assistantContent).toContain("+new line");
+		expect(assistantContent).toContain("Error: The user rejected this edit.");
+	});
+
+	test("extracts model from turn_context and attaches it to assistant messages", async () => {
+		writeSession("session-model.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-model",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+					model_provider: "openai",
+				},
+			},
+			// turn_context arrives before the user_message in each turn
+			{
+				type: "turn_context",
+				timestamp: "2026-04-27T18:32:08Z",
+				payload: { turn_id: "t-1", model: "gpt-5.5" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "Fix the auth bug" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:20Z",
+				payload: { type: "agent_message", message: "Sure, I'll fix it." },
+			},
+			// Second turn with same model
+			{
+				type: "turn_context",
+				timestamp: "2026-04-27T18:32:25Z",
+				payload: { turn_id: "t-2", model: "gpt-5.5" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:30Z",
+				payload: { type: "user_message", message: "Looks good, thanks!" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:40Z",
+				payload: { type: "agent_message", message: "You're welcome!" },
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		const s = sessions[0];
+		if (!s) throw new Error("expected session");
+		expect(s.messages.length).toBe(4);
+		// Assistant messages should carry the model
+		expect(s.messages[1]?.model).toBe("gpt-5.5");
+		expect(s.messages[3]?.model).toBe("gpt-5.5");
+		// User messages should not have a model
+		expect(s.messages[0]?.model).toBeUndefined();
 	});
 
 	test("excludes sessions whose cwd does not match", async () => {
@@ -138,5 +359,148 @@ describe("codexProvider.listSessions", () => {
 
 		const sessions = await codexProvider.listSessions(projectCwd);
 		expect(sessions).toEqual([]);
+	});
+
+	test('marks orphan function_call as data-edit-status="aborted"', async () => {
+		writeSession("session-orphan.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-orphan",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "edit a file" },
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:11Z",
+				payload: {
+					type: "function_call",
+					call_id: "fc-orphan",
+					name: "replace_file_content",
+					arguments: JSON.stringify({
+						filePath: "/tmp/x.ts",
+						old_string: "a",
+						new_string: "b",
+					}),
+				},
+			},
+			// No function_call_output — session was interrupted.
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		const assistantContent =
+			sessions[0]?.messages.find((m) => m.role === "assistant")?.content || "";
+		expect(assistantContent).toContain('data-edit-status="aborted"');
+		expect(assistantContent).not.toContain('data-edit-status="rejected"');
+	});
+
+	test("does not inherit prior turn's model when turn_context is missing on a later turn", async () => {
+		writeSession("session-turn-model.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-turn-model",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			// Turn 1: has turn_context — model attaches.
+			{
+				type: "turn_context",
+				timestamp: "2026-04-27T18:32:06Z",
+				payload: { type: "turn_context", model: "gpt-5-2025-08-01" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:07Z",
+				payload: { type: "user_message", message: "first" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:08Z",
+				payload: { type: "agent_message", message: "reply one" },
+			},
+			// Turn 2: NO turn_context. The prior turn's model must NOT leak.
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:09Z",
+				payload: { type: "user_message", message: "second" },
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "agent_message", message: "reply two" },
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		const session = sessions[0];
+		if (!session) throw new Error("expected one session");
+		const assistantTurns = session.messages.filter(
+			(m) => m.role === "assistant",
+		);
+		expect(assistantTurns.length).toBe(2);
+		expect(assistantTurns[0]?.model).toBe("gpt-5-2025-08-01");
+		expect(assistantTurns[1]?.model).toBeUndefined();
+	});
+
+	test("apply_patch summary lists every file the patch touches", async () => {
+		const patch =
+			"*** Begin Patch\n" +
+			"*** Update File: src/a.ts\n" +
+			"@@\n-old\n+new\n" +
+			"*** Update File: src/b.ts\n" +
+			"@@\n-old\n+new\n" +
+			"*** End Patch";
+		writeSession("session-multi-patch.jsonl", [
+			{
+				type: "session_meta",
+				timestamp: "2026-04-27T18:32:05Z",
+				payload: {
+					id: "ses-multi-patch",
+					timestamp: "2026-04-27T18:32:05Z",
+					cwd: projectCwd,
+				},
+			},
+			{
+				type: "event_msg",
+				timestamp: "2026-04-27T18:32:10Z",
+				payload: { type: "user_message", message: "patch both" },
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:11Z",
+				payload: {
+					type: "custom_tool_call",
+					call_id: "cp-1",
+					name: "apply_patch",
+					input: patch,
+				},
+			},
+			{
+				type: "response_item",
+				timestamp: "2026-04-27T18:32:12Z",
+				payload: {
+					type: "custom_tool_call_output",
+					call_id: "cp-1",
+					output: "Done",
+				},
+			},
+		]);
+
+		const sessions = await codexProvider.listSessions(projectCwd);
+		const assistantContent =
+			sessions[0]?.messages.find((m) => m.role === "assistant")?.content || "";
+		expect(assistantContent).toContain("src/a.ts");
+		expect(assistantContent).toContain("src/b.ts");
+		expect(assistantContent).toContain("Edit file: src/a.ts, src/b.ts");
 	});
 });

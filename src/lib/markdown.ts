@@ -8,27 +8,69 @@ const AGENT_LABEL: Record<Agent, string> = {
 	opencode: "opencode",
 };
 
+/**
+ * Derive a display title from the first user message when no explicit title is
+ * stored by the agent (Claude Code and Codex don't persist session titles).
+ * Collapses whitespace, truncates to 80 chars at a word boundary, and appends
+ * "…" when cut — mirrors the length OpenCode uses for its AI-generated titles.
+ */
+export function titleFromFirstMessage(msg: string): string | undefined {
+	const clean = msg.replace(/\s+/g, " ").trim();
+	if (!clean) return undefined;
+	if (clean.length <= 80) return clean;
+	const cut = clean.slice(0, 80);
+	const lastSpace = cut.lastIndexOf(" ");
+	return `${lastSpace > 20 ? cut.slice(0, lastSpace) : cut}…`;
+}
+
 export function renderMarkdown(session: Session): string {
 	const lines: string[] = [];
 	lines.push(HEADER, "");
-	lines.push(`# ${formatTitleTimestamp(session.createdAt)}`);
+	const title =
+		session.title ||
+		(session.firstUserMessage
+			? titleFromFirstMessage(session.firstUserMessage)
+			: undefined) ||
+		formatTitleTimestamp(session.createdAt);
+	lines.push(`# ${title}`);
 	lines.push("");
 	lines.push(
 		`<!-- ${AGENT_LABEL[session.agent]} Session ${session.id} (${session.createdAt.toISOString()}) -->`,
 	);
 	lines.push("");
 
-	let prevRole: string | null = null;
+	let isFirst = true;
 	for (const msg of session.messages) {
-		if (prevRole && prevRole !== msg.role) {
+		if (!isFirst) {
 			lines.push("---", "");
 		}
-		lines.push(`## ${msg.role === "user" ? "User" : "Assistant"}`, "");
+		isFirst = false;
+		const heading =
+			msg.role === "user"
+				? "## User"
+				: msg.model
+					? `## Assistant (${msg.model})`
+					: "## Assistant";
+		lines.push(heading, "");
 		lines.push(msg.content.trimEnd(), "");
-		prevRole = msg.role;
 	}
 
 	return `${lines.join("\n").trimEnd()}\n`;
+}
+
+// Picks a fence longer than any run of backticks in `content`, so user-supplied
+// strings (patch bodies, command output, file contents) can't break out of the
+// fenced block by containing a literal triple-backtick.
+export function codeFence(content: string, lang = ""): string {
+	let max = 2;
+	const re = /`{3,}/g;
+	let m: RegExpExecArray | null = re.exec(content);
+	while (m !== null) {
+		if (m[0].length > max) max = m[0].length;
+		m = re.exec(content);
+	}
+	const fence = "`".repeat(max + 1);
+	return `${fence}${lang}\n${content}\n${fence}`;
 }
 
 function formatTitleTimestamp(date: Date): string {

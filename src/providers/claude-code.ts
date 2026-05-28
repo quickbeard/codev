@@ -2,6 +2,7 @@ import { existsSync, realpathSync, statSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { renderToolUse } from "@/lib/tool-render.js";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
 // Claude Code stores sessions under ~/.claude/projects/<munged-cwd>/, where the
@@ -26,9 +27,11 @@ interface RawRecord {
 	type?: string;
 	timestamp?: string;
 	sessionId?: string;
+	aiTitle?: string;
 	message?: {
 		role?: string;
 		content?: unknown;
+		model?: string;
 	};
 }
 
@@ -47,11 +50,52 @@ function extractText(content: unknown): string {
 	return parts.join("\n");
 }
 
-function isToolResultContent(content: unknown): boolean {
-	if (!Array.isArray(content) || content.length === 0) return false;
-	const first = content[0];
-	if (!first || typeof first !== "object") return false;
-	return (first as { type?: string }).type === "tool_result";
+interface ParsedToolResult {
+	toolUseId: string;
+	isError: boolean;
+	content: string;
+}
+
+function parseToolResults(content: unknown): ParsedToolResult[] {
+	if (!Array.isArray(content)) return [];
+	const results: ParsedToolResult[] = [];
+	for (const item of content) {
+		if (item && typeof item === "object") {
+			const obj = item as Record<string, unknown>;
+			if (obj.type === "tool_result") {
+				const toolUseId =
+					typeof obj.tool_use_id === "string" ? obj.tool_use_id : "";
+				const isError = !!obj.is_error;
+				let text = "";
+				const innerContent = obj.content;
+				if (typeof innerContent === "string") {
+					text = innerContent;
+				} else if (Array.isArray(innerContent)) {
+					const parts: string[] = [];
+					for (const innerItem of innerContent) {
+						if (innerItem && typeof innerItem === "object") {
+							const innerObj = innerItem as Record<string, unknown>;
+							if (
+								innerObj.type === "text" &&
+								typeof innerObj.text === "string"
+							) {
+								parts.push(innerObj.text);
+							} else if (typeof innerObj.text === "string") {
+								parts.push(innerObj.text);
+							}
+						} else if (typeof innerItem === "string") {
+							parts.push(innerItem);
+						}
+					}
+					text = parts.join("\n");
+				} else if (typeof obj.text === "string") {
+					text = obj.text;
+				}
+				results.push({ toolUseId, isError, content: text });
+			}
+		}
+	}
+	return results;
 }
 
 async function parseSessionFile(filePath: string): Promise<Session | null> {
@@ -60,10 +104,47 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 	if (lines.length === 0) return null;
 
 	let sessionId = "";
+	let aiTitle = "";
 	let createdAt: Date | null = null;
 	let updatedAt: Date | null = null;
 	const messages: Message[] = [];
 	let firstUserMessage = "";
+
+	let activeAssistantContent = "";
+	let activeAssistantTimestamp: string | undefined;
+	let activeAssistantModel: string | undefined;
+
+	const pendingToolUses = new Map<
+		string,
+		{ name: string; input: Record<string, unknown>; timestamp?: string }
+	>();
+
+	function appendContent(next: string) {
+		if (!next) return;
+		if (activeAssistantContent) {
+			if (activeAssistantContent.endsWith("\n")) {
+				activeAssistantContent += next;
+			} else {
+				activeAssistantContent += `\n\n${next}`;
+			}
+		} else {
+			activeAssistantContent = next;
+		}
+	}
+
+	function flushAssistant() {
+		if (activeAssistantContent.trim()) {
+			messages.push({
+				role: "assistant",
+				content: activeAssistantContent.trim(),
+				timestamp: activeAssistantTimestamp,
+				model: activeAssistantModel,
+			});
+		}
+		activeAssistantContent = "";
+		activeAssistantTimestamp = undefined;
+		activeAssistantModel = undefined;
+	}
 
 	for (const line of lines) {
 		let rec: RawRecord;
@@ -75,6 +156,16 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 		if (!sessionId && typeof rec.sessionId === "string") {
 			sessionId = rec.sessionId;
 		}
+		// Claude Code appends an "ai-title" record each turn with the AI-generated
+		// session title (same text shown in the sidebar). Keep the latest value —
+		// the title can be updated as the conversation evolves.
+		if (
+			rec.type === "ai-title" &&
+			typeof rec.aiTitle === "string" &&
+			rec.aiTitle
+		) {
+			aiTitle = rec.aiTitle;
+		}
 		if (rec.timestamp) {
 			const ts = new Date(rec.timestamp);
 			if (!Number.isNaN(ts.getTime())) {
@@ -85,22 +176,104 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 
 		const content = rec.message?.content;
 		const role = rec.message?.role;
-		const text = extractText(content);
-		if (!text) continue;
 
-		if (rec.type === "user") {
-			// Skip tool-result messages — they're agent-internal turns, not user input.
-			if (isToolResultContent(content)) continue;
-			messages.push({ role: "user", content: text, timestamp: rec.timestamp });
-			if (!firstUserMessage) firstUserMessage = text;
+		if (rec.type === "user" || role === "user") {
+			// Walk blocks in order so a mixed [text, tool_result] (or the reverse)
+			// renders both halves: tool_result blocks extend the current assistant
+			// turn; text blocks flush it and push a user message.
+			const toolResults = parseToolResults(content);
+			for (const result of toolResults) {
+				const toolUse = pendingToolUses.get(result.toolUseId);
+				if (toolUse) {
+					const formatted = renderToolUse(
+						toolUse.name,
+						toolUse.input,
+						result.content,
+						result.isError,
+					);
+					if (!activeAssistantTimestamp) {
+						activeAssistantTimestamp = toolUse.timestamp || rec.timestamp;
+					}
+					appendContent(formatted);
+					pendingToolUses.delete(result.toolUseId);
+				}
+			}
+			const text = extractText(content);
+			if (text) {
+				flushAssistant();
+				messages.push({
+					role: "user",
+					content: text,
+					timestamp: rec.timestamp,
+				});
+				if (!firstUserMessage) firstUserMessage = text;
+			}
 		} else if (rec.type === "assistant" || role === "assistant") {
-			messages.push({
-				role: "assistant",
-				content: text,
-				timestamp: rec.timestamp,
-			});
+			if (!activeAssistantTimestamp) {
+				activeAssistantTimestamp = rec.timestamp;
+			}
+			// Sticky-first: a Claude Code assistant turn can span multiple JSONL
+			// records (text + thinking + tool_use chunks), but `model` is the
+			// same on every chunk of one turn. Locking in the first observed
+			// model is simpler than reconciling per-chunk values and avoids
+			// flipping the recorded model if a chunk omits the field.
+			if (!activeAssistantModel && rec.message?.model) {
+				activeAssistantModel = rec.message.model;
+			}
+
+			if (typeof content === "string") {
+				appendContent(content);
+			} else if (Array.isArray(content)) {
+				for (const block of content) {
+					if (block && typeof block === "object") {
+						const obj = block as Record<string, unknown>;
+						if (obj.type === "text" && typeof obj.text === "string") {
+							appendContent(obj.text);
+						} else if (
+							obj.type === "thinking" &&
+							typeof obj.thinking === "string"
+						) {
+							if (obj.thinking.trim()) {
+								appendContent(
+									`<details><summary>Thought</summary>\n\n${obj.thinking.trim()}\n</details>\n`,
+								);
+							}
+						} else if (obj.type === "tool_use") {
+							const id = typeof obj.id === "string" ? obj.id : "";
+							const name = typeof obj.name === "string" ? obj.name : "";
+							const input =
+								obj.input && typeof obj.input === "object"
+									? (obj.input as Record<string, unknown>)
+									: {};
+							if (id && name) {
+								pendingToolUses.set(id, {
+									name,
+									input,
+									timestamp: rec.timestamp,
+								});
+							}
+						}
+					}
+				}
+			}
 		}
 	}
+
+	for (const toolUse of pendingToolUses.values()) {
+		const formatted = renderToolUse(
+			toolUse.name,
+			toolUse.input,
+			"Tool execution aborted (no result recorded)",
+			true,
+			true,
+		);
+		if (!activeAssistantTimestamp) {
+			activeAssistantTimestamp = toolUse.timestamp;
+		}
+		appendContent(formatted);
+	}
+
+	flushAssistant();
 
 	if (messages.length === 0 || !sessionId || !createdAt) return null;
 	return {
@@ -108,6 +281,7 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 		agent: "claude-code",
 		createdAt,
 		updatedAt: updatedAt ?? createdAt,
+		title: aiTitle || undefined,
 		firstUserMessage,
 		messages,
 	};
