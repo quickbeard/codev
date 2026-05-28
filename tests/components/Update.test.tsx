@@ -52,6 +52,11 @@ function allFrames(frames: string[]): string {
 	return frames.join("\n");
 }
 
+// Windows CI is 2-3× slower than Linux/macOS and vi.waitFor's default ~1s
+// timeout isn't enough for the full Update render pipeline (detect →
+// updating → TaskList settle → onDone). Mirrors UpdateApp.test.tsx.
+const WAIT_OPTS = { timeout: 10_000, interval: 50 } as const;
+
 afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();
@@ -122,7 +127,7 @@ describe("Update", () => {
 		const onDone = vi.fn(() => {});
 
 		const { frames } = render(<Update onDone={onDone} />);
-		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled(), WAIT_OPTS);
 
 		const history = allFrames(frames);
 		expect(history).toContain("opencode-ai");
@@ -149,7 +154,7 @@ describe("Update", () => {
 		const onDone = vi.fn(() => {});
 
 		const { frames } = render(<Update onDone={onDone} />);
-		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled(), WAIT_OPTS);
 
 		const history = allFrames(frames);
 		expect(history).toContain("Failed to update opencode-ai");
@@ -183,7 +188,7 @@ describe("Update", () => {
 		const onDone = vi.fn(() => {});
 
 		const { frames } = render(<Update onDone={onDone} />);
-		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled(), WAIT_OPTS);
 
 		const history = allFrames(frames);
 		expect(history).toContain("Updated continue.continue (VS Code)");
@@ -223,7 +228,7 @@ describe("Update", () => {
 		const onDone = vi.fn(() => {});
 
 		const { frames } = render(<Update onDone={onDone} />);
-		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled(), WAIT_OPTS);
 
 		const history = allFrames(frames);
 		expect(history).toContain(
@@ -259,7 +264,7 @@ describe("Update", () => {
 		const onDone = vi.fn(() => {});
 
 		const { frames } = render(<Update onDone={onDone} />);
-		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled(), WAIT_OPTS);
 
 		const history = allFrames(frames);
 		expect(history).toContain("Updated anthropic.claude-code (VS Code)");
@@ -296,7 +301,7 @@ describe("Update", () => {
 		const onDone = vi.fn(() => {});
 
 		const { frames } = render(<Update onDone={onDone} />);
-		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled(), WAIT_OPTS);
 
 		const history = allFrames(frames);
 		expect(history).toContain("Updated com.anthropic.code.plugin (JetBrains)");
@@ -330,7 +335,7 @@ describe("Update", () => {
 		const onDone = vi.fn(() => {});
 
 		const { frames } = render(<Update onDone={onDone} />);
-		await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled(), WAIT_OPTS);
 
 		const history = allFrames(frames);
 		expect(history).toContain("Nothing to update");
