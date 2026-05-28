@@ -348,6 +348,47 @@ describe("openCodeProvider.listSessions", () => {
 		expect(assistantContent).toContain("Error: Tool execution aborted");
 	});
 
+	test("reconstructs diff from old/newString when a completed edit has no metadata", async () => {
+		// Older OpenCode runs (and any session whose patch-metadata side-channel
+		// is missing) must still surface what changed on an accepted edit —
+		// otherwise edit-acceptance analytics undercount accepted LOC.
+		seedProjectAndSession();
+		const db = new Database(dbPath);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-no-meta",
+				"msg-2",
+				"ses-1",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 33, 4) / 1000),
+				JSON.stringify({
+					type: "tool",
+					tool: "edit",
+					callID: "edit-no-meta",
+					state: {
+						status: "completed",
+						input: {
+							filePath: "/tmp/c.ts",
+							oldString: "const lucky = false;",
+							newString: "const lucky = true;",
+						},
+					},
+				}),
+			],
+		);
+		db.close();
+
+		const sessions = await openCodeProvider.listSessions(projectCwd);
+		const assistantContent = sessions[0]?.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="edit" data-edit-status="accepted">',
+		);
+		expect(assistantContent).toContain("-const lucky = false;");
+		expect(assistantContent).toContain("+const lucky = true;");
+		expect(assistantContent).not.toContain("Edit applied successfully.");
+	});
+
 	test("honors XDG_DATA_HOME for the database location", async () => {
 		const xdg = realpathSync(
 			mkdtempSync(join(tmpdir(), "codev-opencode-xdg-")),

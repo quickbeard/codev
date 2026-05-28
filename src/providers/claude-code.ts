@@ -2,8 +2,7 @@ import { existsSync, realpathSync, statSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { diffFromEditInput, textValue } from "@/lib/diff.js";
-import { codeFence } from "@/lib/markdown.js";
+import { renderToolUse } from "@/lib/tool-render.js";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
 // Claude Code stores sessions under ~/.claude/projects/<munged-cwd>/, where the
@@ -99,139 +98,6 @@ function parseToolResults(content: unknown): ParsedToolResult[] {
 	return results;
 }
 
-function filePathFromInput(input: Record<string, unknown>): string {
-	return (
-		textValue(input.file_path) ||
-		textValue(input.filePath) ||
-		textValue(input.path)
-	);
-}
-
-// `aborted` distinguishes an orphan tool_use (no result line ever arrived,
-// e.g. the session was interrupted) from a tool_use whose result came back
-// with `is_error: true` (the user rejected the edit, or the tool itself
-// failed). Edit-acceptance analytics need to keep those apart: an aborted
-// edit isn't a refused edit.
-//
-// `name` keeps its original casing in the human-readable summary so
-// "Edit" and "Read" still render naturally. The `data-tool-name` attribute
-// is lowercased for downstream consumers that key on the slug.
-function formatToolUse(
-	name: string,
-	input: Record<string, unknown>,
-	output: string,
-	isError: boolean,
-	aborted = false,
-): string {
-	const toolName = name.toLowerCase();
-	let toolType = "tool";
-	let summary = `Call tool: ${name}`;
-	let body = "";
-
-	if (
-		toolName === "bash" ||
-		toolName === "shell" ||
-		toolName === "run_command" ||
-		toolName === "exec_command"
-	) {
-		toolType = "shell";
-		const cmd =
-			typeof input.command === "string"
-				? input.command
-				: typeof input.cmd === "string"
-					? input.cmd
-					: "";
-		summary = `Run command: ${cmd}`;
-		body = codeFence(
-			`$ ${cmd}\n${isError ? `Error: ${output}` : output}`,
-			"bash",
-		);
-	} else if (
-		toolName === "view" ||
-		toolName === "read" ||
-		toolName === "read_file" ||
-		toolName === "view_file"
-	) {
-		toolType = "read";
-		const path = filePathFromInput(input);
-		summary = `Read file: ${path}`;
-		body = isError ? `Error: ${output}` : output;
-	} else if (toolName === "glob" || toolName === "glob_files") {
-		toolType = "glob";
-		const pattern =
-			typeof input.pattern === "string"
-				? input.pattern
-				: typeof input.globPattern === "string"
-					? input.globPattern
-					: "";
-		summary = `Glob files: ${pattern}`;
-		body = codeFence(
-			`Pattern: ${pattern}\nMatches:\n${isError ? `Error: ${output}` : output}`,
-		);
-	} else if (toolName === "grep" || toolName === "grep_search") {
-		toolType = "grep";
-		const pattern = typeof input.pattern === "string" ? input.pattern : "";
-		const path = typeof input.path === "string" ? input.path : "";
-		summary = `Grep search: ${pattern}`;
-		body = codeFence(
-			`Pattern: ${pattern}\nPath: ${path}\nMatches:\n${isError ? `Error: ${output}` : output}`,
-		);
-	} else if (
-		toolName === "write" ||
-		toolName === "write_file" ||
-		toolName === "save_file"
-	) {
-		toolType = "write";
-		const path = filePathFromInput(input);
-		const content = typeof input.content === "string" ? input.content : "";
-		summary = `Edit file: ${path}`;
-		body = isError ? `Error: ${output}` : content ? codeFence(content) : output;
-	} else if (
-		toolName === "edit" ||
-		toolName === "replace_file_content" ||
-		toolName === "multi_replace_file_content" ||
-		toolName === "edit_file"
-	) {
-		toolType = "write";
-		const path = filePathFromInput(input) || textValue(input.TargetFile);
-		summary = `Edit file: ${path}`;
-		const diff = diffFromEditInput(input);
-		if (isError) {
-			body = diff
-				? `${codeFence(diff, "diff")}\n\nError: ${output}`
-				: `Error: ${output}`;
-		} else {
-			body = diff
-				? `${codeFence(diff, "diff")}\n\n${output}`
-				: output.includes("<<<") ||
-						output.includes("---") ||
-						output.includes("+++")
-					? codeFence(output, "diff")
-					: codeFence(output);
-		}
-	} else if (
-		toolName === "agent" ||
-		toolName === "task" ||
-		toolName === "invoke_subagent" ||
-		toolName === "subagent"
-	) {
-		toolType = "task";
-		const desc = typeof input.description === "string" ? input.description : "";
-		const prompt = typeof input.prompt === "string" ? input.prompt : "";
-		summary = `Spawn subagent: ${desc || name}`;
-		body = `**Prompt**:\n${prompt}\n\n**Result**:\n${isError ? `Error: ${output}` : output}`;
-	} else {
-		summary = `Call tool: ${name}`;
-		body = `**Input**:\n${codeFence(JSON.stringify(input, null, 2), "json")}\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
-	}
-
-	const editStatus =
-		toolType === "write"
-			? ` data-edit-status="${aborted ? "aborted" : isError ? "rejected" : "accepted"}"`
-			: "";
-	return `<tool-use data-tool-type="${toolType}" data-tool-name="${toolName}"${editStatus}>\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
-}
-
 async function parseSessionFile(filePath: string): Promise<Session | null> {
 	const raw = await readFile(filePath, "utf-8");
 	const lines = raw.split("\n").filter((l) => l.trim().length > 0);
@@ -319,7 +185,7 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 			for (const result of toolResults) {
 				const toolUse = pendingToolUses.get(result.toolUseId);
 				if (toolUse) {
-					const formatted = formatToolUse(
+					const formatted = renderToolUse(
 						toolUse.name,
 						toolUse.input,
 						result.content,
@@ -394,7 +260,7 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 	}
 
 	for (const toolUse of pendingToolUses.values()) {
-		const formatted = formatToolUse(
+		const formatted = renderToolUse(
 			toolUse.name,
 			toolUse.input,
 			"Tool execution aborted (no result recorded)",

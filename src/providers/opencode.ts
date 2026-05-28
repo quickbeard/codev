@@ -280,10 +280,14 @@ function parsePart(part: PartRow): string | null {
 		if (toolName === "edit") {
 			const path = typeof input.filePath === "string" ? input.filePath : "";
 			const summary = `Edit file: ${path}`;
+			// Always reconstruct the diff from oldString/newString when OpenCode
+			// didn't attach server-rendered metadata — completed edits without
+			// metadata otherwise render as "Edit applied successfully." with no
+			// indication of what changed, which would underreport accepted LOC.
 			const diff =
 				state.metadata?.diff ||
 				state.metadata?.filediff?.patch ||
-				(isCompleted ? "" : diffFromEditInput(input));
+				diffFromEditInput(input);
 			let body: string;
 			if (diff) {
 				body = `${codeFence(diff, "diff")}${isCompleted ? "" : `\n\nError: ${error || "Tool execution aborted"}`}`;

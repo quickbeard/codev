@@ -85,7 +85,7 @@ describe("renderMarkdown", () => {
 		expect(md).toContain("# 2026-04-27 18:32:05Z");
 	});
 
-	test("inserts --- divider when role changes", () => {
+	test("inserts --- divider between every adjacent message", () => {
 		const md = renderMarkdown(
 			fixture({
 				messages: [
@@ -97,6 +97,21 @@ describe("renderMarkdown", () => {
 		);
 		const dividers = md.match(/^---$/gm) ?? [];
 		expect(dividers.length).toBe(2);
+	});
+
+	test("inserts --- divider between same-role neighbors too", () => {
+		// New parsers normally consolidate adjacent same-role chunks, but if two
+		// neighbors of the same role slip through, the divider still applies.
+		const md = renderMarkdown(
+			fixture({
+				messages: [
+					{ role: "user", content: "Q1" },
+					{ role: "user", content: "Q2" },
+				],
+			}),
+		);
+		const dividers = md.match(/^---$/gm) ?? [];
+		expect(dividers.length).toBe(1);
 	});
 
 	test("ends with a single trailing newline", () => {

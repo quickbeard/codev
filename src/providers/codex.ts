@@ -2,8 +2,9 @@ import { existsSync, realpathSync, statSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { diffFromEditInput, textValue } from "@/lib/diff.js";
+import { textValue } from "@/lib/diff.js";
 import { codeFence } from "@/lib/markdown.js";
+import { renderToolUse } from "@/lib/tool-render.js";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
 function sessionsRoot(): string {
@@ -108,118 +109,6 @@ async function findSessions(cwd: string): Promise<CodexPreview[]> {
 		}
 	}
 	return result;
-}
-
-// `aborted` distinguishes an orphan function_call (no output ever arrived)
-// from a function_call_output with is_error=true (rejection / tool failure).
-// Edit-acceptance analytics need to keep those apart.
-function formatCodexToolUse(
-	name: string,
-	input: Record<string, unknown>,
-	output: string,
-	isError: boolean,
-	aborted = false,
-): string {
-	const toolName = name.toLowerCase();
-	let toolType = "tool";
-	let summary = `Call tool: ${name}`;
-	let body = "";
-
-	if (
-		toolName === "exec_command" ||
-		toolName === "bash" ||
-		toolName === "shell"
-	) {
-		toolType = "shell";
-		const cmd =
-			typeof input.cmd === "string"
-				? input.cmd
-				: typeof input.command === "string"
-					? input.command
-					: "";
-		summary = `Run command: ${cmd}`;
-		body = codeFence(
-			`$ ${cmd}\n${isError ? `Error: ${output}` : output}`,
-			"bash",
-		);
-	} else if (
-		toolName === "read_file" ||
-		toolName === "read" ||
-		toolName === "view_file"
-	) {
-		toolType = "read";
-		const path =
-			typeof input.filePath === "string"
-				? input.filePath
-				: typeof input.path === "string"
-					? input.path
-					: "";
-		summary = `Read file: ${path}`;
-		body = isError ? `Error: ${output}` : output;
-	} else if (toolName === "grep" || toolName === "grep_search") {
-		toolType = "grep";
-		const pattern = typeof input.pattern === "string" ? input.pattern : "";
-		const path = typeof input.path === "string" ? input.path : "";
-		summary = `Grep search: ${pattern}`;
-		body = codeFence(
-			`Pattern: ${pattern}\nPath: ${path}\nMatches:\n${isError ? `Error: ${output}` : output}`,
-		);
-	} else if (toolName === "write_file" || toolName === "write") {
-		toolType = "write";
-		const path =
-			typeof input.filePath === "string"
-				? input.filePath
-				: typeof input.path === "string"
-					? input.path
-					: "";
-		const content = typeof input.content === "string" ? input.content : "";
-		summary = `Edit file: ${path}`;
-		body = isError ? `Error: ${output}` : content ? codeFence(content) : output;
-	} else if (
-		toolName === "replace_file_content" ||
-		toolName === "edit" ||
-		toolName === "multi_replace_file_content"
-	) {
-		toolType = "write";
-		const path =
-			typeof input.TargetFile === "string"
-				? input.TargetFile
-				: typeof input.filePath === "string"
-					? input.filePath
-					: typeof input.path === "string"
-						? input.path
-						: "";
-		summary = `Edit file: ${path}`;
-		const editDiff = diffFromEditInput(input);
-		body = editDiff
-			? `${codeFence(editDiff, "diff")}\n\n${isError ? `Error: ${output}` : output}`
-			: isError
-				? `Error: ${output}`
-				: output.includes("<<<") ||
-						output.includes("---") ||
-						output.includes("+++")
-					? codeFence(output, "diff")
-					: codeFence(output);
-	} else if (
-		toolName === "subagent" ||
-		toolName === "invoke_subagent" ||
-		toolName === "task"
-	) {
-		toolType = "task";
-		const desc = typeof input.description === "string" ? input.description : "";
-		const prompt = typeof input.prompt === "string" ? input.prompt : "";
-		summary = `Spawn subagent: ${desc || name}`;
-		body = `**Prompt**:\n${prompt}\n\n**Result**:\n${isError ? `Error: ${output}` : output}`;
-	} else {
-		summary = `Call tool: ${name}`;
-		body = `**Input**:\n${codeFence(JSON.stringify(input, null, 2), "json")}\n\n**Output**:\n${isError ? `Error: ${output}` : output}`;
-	}
-
-	const editStatus =
-		toolType === "write"
-			? ` data-edit-status="${aborted ? "aborted" : isError ? "rejected" : "accepted"}"`
-			: "";
-	return `<tool-use data-tool-type="${toolType}" data-tool-name="${toolName}"${editStatus}>\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 }
 
 // Collect every file path mentioned in the patch. apply_patch can touch
@@ -456,7 +345,7 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 				const isError =
 					typeof payload.is_error === "boolean" ? payload.is_error : false;
 				if (toolUse) {
-					const formatted = formatCodexToolUse(
+					const formatted = renderToolUse(
 						toolUse.name,
 						toolUse.arguments,
 						output,
@@ -506,7 +395,7 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 	}
 
 	for (const toolUse of pendingToolUses.values()) {
-		const formatted = formatCodexToolUse(
+		const formatted = renderToolUse(
 			toolUse.name,
 			toolUse.arguments,
 			"Tool execution aborted (no result recorded)",
