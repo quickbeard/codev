@@ -78,10 +78,14 @@ export function ToolSelect({ onConfirm, readOnly = false }: ToolSelectProps) {
 	);
 }
 
-export function toolSelectTitle(readOnly = false) {
+export function toolSelectTitle(
+	readOnly = false,
+	mode: "install" | "config" = "install",
+) {
+	const verb = mode === "install" ? "install" : "configure";
 	return (
 		<Text bold>
-			{"Select the AI agent(s) to install "}
+			{`Select the AI agent(s) to ${verb} `}
 			{!readOnly && (
 				<Text dimColor>(↑/↓ to move, Space to select, Enter to confirm)</Text>
 			)}

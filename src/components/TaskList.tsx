@@ -3,14 +3,16 @@ import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
 
 // Three terminal outcomes for a task:
-//   - `null` → succeeded silently (green ✓ "Installed pkg-x")
-//   - `string` → hard failure (red ✗ "Failed to install pkg-x: <err>"), flips
-//     onDone(success=false). Use for failures that must block the flow.
-//   - `{ warning }` → soft warning (yellow ⚠ "Installed pkg-x (warning: …)"),
-//     onDone(success=true). The task did *something* useful or the failure
-//     is recoverable downstream — used by the Continue extension/plugin
-//     installs so a transient marketplace/network issue doesn't abort the
-//     `codev install` flow before the YAML config gets written.
+//   - `null` → succeeded silently (green ✓ "Installed pkg-x"). Key is
+//     included in onDone's succeededKeys.
+//   - `string` → hard failure (red ✗ "Failed to install pkg-x: <err>"). Key
+//     is omitted from succeededKeys. Use for failures that must block this
+//     row's downstream consumers.
+//   - `{ warning }` → soft warning (yellow ▲ "Warning: …"). Key is still
+//     included in succeededKeys — the task did *something* useful or the
+//     failure is recoverable downstream. Used by the Continue extension/
+//     plugin installs so a transient marketplace/network issue doesn't drop
+//     the row from the survivor set.
 export type TaskRunResult = string | null | { warning: string };
 
 export interface TaskItem {
@@ -39,7 +41,11 @@ interface Row {
 interface TaskListProps {
 	tasks: TaskItem[];
 	verb: TaskVerb;
-	onDone: (success: boolean) => void;
+	// Receives the keys of every row that settled as `done` or `warned` —
+	// i.e. did NOT hard-fail. An empty array means every task hard-failed.
+	// The parent decides what to do with the survivor set (e.g. InstallApp
+	// advances to Configure only with these tools; total failure parks).
+	onDone: (succeededKeys: string[]) => void;
 }
 
 export function TaskList({ tasks, verb, onDone }: TaskListProps) {
@@ -84,8 +90,9 @@ export function TaskList({ tasks, verb, onDone }: TaskListProps) {
 		hasReported.current = true;
 		// `warned` rows count as success — they didn't accomplish the install
 		// but they didn't fatally fail either; the parent (e.g. InstallApp)
-		// still wants to advance to Configure.
-		onDone(rows.every((r) => r.status !== "failed"));
+		// still wants their keys in the survivor set so Configure runs for
+		// them.
+		onDone(rows.filter((r) => r.status !== "failed").map((r) => r.key));
 	}, [rows, onDone]);
 
 	return (

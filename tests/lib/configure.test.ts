@@ -26,61 +26,109 @@ afterEach(() => {
 	rmSync(tempDir, { recursive: true, force: true });
 });
 
-describe("bypassClaudeLogin", () => {
+describe("resetClaudeAuth", () => {
 	test("creates .claude.json with hasCompletedOnboarding when file does not exist", async () => {
-		const { bypassClaudeLogin } = await import("@/lib/configure.js");
-		bypassClaudeLogin();
+		const { resetClaudeAuth } = await import("@/lib/configure.js");
+		const results = resetClaudeAuth();
 
 		const filePath = join(tempDir, ".claude.json");
 		expect(existsSync(filePath)).toBe(true);
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
-		expect(config.hasCompletedOnboarding).toBe(true);
+		expect(config).toEqual({ hasCompletedOnboarding: true });
+
+		const jsonResult = results.find((r) => r.kind === "claude-json");
+		expect(jsonResult?.backupPath).toBeNull();
+		expect(jsonResult?.created).toBe(false);
 	});
 
-	test("adds hasCompletedOnboarding to existing file without it", async () => {
+	test("backs up an existing .claude.json then overwrites it with the bypass blob", async () => {
 		const filePath = join(tempDir, ".claude.json");
-		writeFileSync(filePath, JSON.stringify({ someKey: "someValue" }, null, 2));
-
-		const { bypassClaudeLogin } = await import("@/lib/configure.js");
-		bypassClaudeLogin();
-
-		const config = JSON.parse(readFileSync(filePath, "utf-8"));
-		expect(config.hasCompletedOnboarding).toBe(true);
-		expect(config.someKey).toBe("someValue");
-	});
-
-	test("does not overwrite file when hasCompletedOnboarding already set", async () => {
-		const filePath = join(tempDir, ".claude.json");
-		const original = { hasCompletedOnboarding: true, other: "data" };
+		const backupPath = `${filePath}.backup`;
+		const original = { someKey: "someValue", nested: { x: 1 } };
 		writeFileSync(filePath, JSON.stringify(original, null, 2));
 
-		const { bypassClaudeLogin } = await import("@/lib/configure.js");
-		bypassClaudeLogin();
+		const { resetClaudeAuth } = await import("@/lib/configure.js");
+		const results = resetClaudeAuth();
 
+		// Backup carries the user's original contents verbatim.
+		expect(existsSync(backupPath)).toBe(true);
+		expect(JSON.parse(readFileSync(backupPath, "utf-8"))).toEqual(original);
+
+		// Live file is replaced — pre-existing fields are NOT preserved.
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
-		expect(config).toEqual(original);
+		expect(config).toEqual({ hasCompletedOnboarding: true });
+
+		const jsonResult = results.find((r) => r.kind === "claude-json");
+		expect(jsonResult?.backupPath).toBe(backupPath);
+		expect(jsonResult?.created).toBe(true);
 	});
 
-	test("handles invalid JSON in existing file", async () => {
+	test("preserves a pre-existing .claude.json.backup across repeated runs", async () => {
 		const filePath = join(tempDir, ".claude.json");
-		writeFileSync(filePath, "not valid json{{{");
+		const backupPath = `${filePath}.backup`;
+		writeFileSync(backupPath, JSON.stringify({ marker: "original" }));
+		writeFileSync(filePath, JSON.stringify({ marker: "prev-codev-run" }));
 
-		const { bypassClaudeLogin } = await import("@/lib/configure.js");
-		bypassClaudeLogin();
+		const { resetClaudeAuth } = await import("@/lib/configure.js");
+		resetClaudeAuth();
 
-		const config = JSON.parse(readFileSync(filePath, "utf-8"));
-		expect(config.hasCompletedOnboarding).toBe(true);
+		expect(JSON.parse(readFileSync(backupPath, "utf-8"))).toEqual({
+			marker: "original",
+		});
 	});
 
-	test("does not create a .claude.json.backup", async () => {
-		const filePath = join(tempDir, ".claude.json");
-		writeFileSync(filePath, JSON.stringify({ someKey: "someValue" }));
+	test("backs up and removes ~/.claude/.credentials.json", async () => {
+		const dir = join(tempDir, ".claude");
+		const credPath = join(dir, ".credentials.json");
+		const credBackup = `${credPath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(credPath, JSON.stringify({ session: "user-session" }));
 
-		const { bypassClaudeLogin } = await import("@/lib/configure.js");
-		bypassClaudeLogin();
+		const { resetClaudeAuth } = await import("@/lib/configure.js");
+		const results = resetClaudeAuth();
 
-		expect(existsSync(`${filePath}.backup`)).toBe(false);
+		expect(existsSync(credPath)).toBe(false);
+		expect(existsSync(credBackup)).toBe(true);
+		expect(JSON.parse(readFileSync(credBackup, "utf-8"))).toEqual({
+			session: "user-session",
+		});
+
+		const credResult = results.find((r) => r.kind === "claude-credentials");
+		expect(credResult?.backupPath).toBe(credBackup);
+		expect(credResult?.created).toBe(true);
+	});
+
+	test("noop on .credentials.json when neither live nor backup exists", async () => {
+		const credPath = join(tempDir, ".claude", ".credentials.json");
+
+		const { resetClaudeAuth } = await import("@/lib/configure.js");
+		const results = resetClaudeAuth();
+
+		expect(existsSync(credPath)).toBe(false);
+		expect(existsSync(`${credPath}.backup`)).toBe(false);
+
+		const credResult = results.find((r) => r.kind === "claude-credentials");
+		expect(credResult?.backupPath).toBeNull();
+		expect(credResult?.created).toBe(false);
+	});
+
+	test("preserves a pre-existing .credentials.json.backup", async () => {
+		const dir = join(tempDir, ".claude");
+		const credPath = join(dir, ".credentials.json");
+		const credBackup = `${credPath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(credBackup, JSON.stringify({ session: "original" }));
+		writeFileSync(credPath, JSON.stringify({ session: "newer-session" }));
+
+		const { resetClaudeAuth } = await import("@/lib/configure.js");
+		resetClaudeAuth();
+
+		// Original backup not clobbered; live file still removed.
+		expect(JSON.parse(readFileSync(credBackup, "utf-8"))).toEqual({
+			session: "original",
+		});
+		expect(existsSync(credPath)).toBe(false);
 	});
 });
 
@@ -104,17 +152,21 @@ describe("configureClaudeCode", () => {
 			ANTHROPIC_DEFAULT_SONNET_MODEL: "chosen-model",
 			ANTHROPIC_DEFAULT_HAIKU_MODEL: "chosen-model",
 			CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1",
+			CLAUDE_CODE_AUTO_COMPACT_WINDOW: "196608",
+			CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "85",
 		});
 	});
 
-	test("also runs bypassClaudeLogin (creates .claude.json)", async () => {
+	test("does not touch ~/.claude.json on its own (handled by resetClaudeAuth earlier in the install flow)", async () => {
 		const { configureClaudeCode } = await import("@/lib/configure.js");
 		configureClaudeCode({ apiKey: "sk-abc", model: "m" });
 
-		const claudeJson = join(tempDir, ".claude.json");
-		expect(existsSync(claudeJson)).toBe(true);
-		const config = JSON.parse(readFileSync(claudeJson, "utf-8"));
-		expect(config.hasCompletedOnboarding).toBe(true);
+		// configureClaudeCode only owns ~/.claude/settings.json. The onboarding
+		// bypass and credentials wipe happen during install via resetClaudeAuth.
+		expect(existsSync(join(tempDir, ".claude.json"))).toBe(false);
+		expect(existsSync(join(tempDir, ".claude", ".credentials.json"))).toBe(
+			false,
+		);
 	});
 
 	test("replaces existing settings.json and backs up the file", async () => {
@@ -646,9 +698,12 @@ describe("restoreTool", () => {
 		writeFileSync(backupPath, '{"marker":"backup"}');
 
 		const { restoreTool } = await import("@/lib/configure.js");
-		const result = restoreTool("claude-code");
+		const results = restoreTool("claude-code");
+		const settingsResult = results.find(
+			(r) => r.sourcePath === join(dir, "settings.json"),
+		);
 
-		expect(result.status).toBe("restored");
+		expect(settingsResult?.status).toBe("restored");
 		expect(existsSync(backupPath)).toBe(false);
 		expect(existsSync(livePath)).toBe(true);
 		const restored = JSON.parse(readFileSync(livePath, "utf-8"));
@@ -678,20 +733,25 @@ describe("restoreTool", () => {
 		writeFileSync(backupPath, '{"marker":"backup"}');
 
 		const { restoreTool } = await import("@/lib/configure.js");
-		const result = restoreTool("opencode");
+		const [result] = restoreTool("opencode");
 
-		expect(result.status).toBe("restored");
+		expect(result?.status).toBe("restored");
 		expect(existsSync(backupPath)).toBe(false);
 		expect(existsSync(livePath)).toBe(true);
 	});
 
 	test("returns noop status when neither backup nor live file exists", async () => {
 		const { restoreTool } = await import("@/lib/configure.js");
-		const result = restoreTool("claude-code");
+		const results = restoreTool("claude-code");
 
-		expect(result.status).toBe("noop");
-		expect(result.backupPath).toBe(
-			join(tempDir, ".claude", "settings.json.backup"),
+		// All three Claude files end in noop when nothing exists on disk.
+		expect(results.every((r) => r.status === "noop")).toBe(true);
+		expect(results.map((r) => r.backupPath).sort()).toEqual(
+			[
+				join(tempDir, ".claude", "settings.json.backup"),
+				join(tempDir, ".claude", ".credentials.json.backup"),
+				join(tempDir, ".claude.json.backup"),
+			].sort(),
 		);
 	});
 
@@ -703,9 +763,10 @@ describe("restoreTool", () => {
 		writeFileSync(livePath, '{"marker":"codev-live"}');
 
 		const { restoreTool } = await import("@/lib/configure.js");
-		const result = restoreTool("claude-code");
+		const results = restoreTool("claude-code");
+		const settingsResult = results.find((r) => r.sourcePath === livePath);
 
-		expect(result.status).toBe("deleted-live");
+		expect(settingsResult?.status).toBe("deleted-live");
 		expect(existsSync(livePath)).toBe(false);
 		expect(existsSync(backupPath)).toBe(false);
 	});
@@ -719,9 +780,9 @@ describe("restoreTool", () => {
 		writeFileSync(backupPath, 'name: "backup"\n');
 
 		const { restoreTool } = await import("@/lib/configure.js");
-		const result = restoreTool("vscode-continue");
+		const [result] = restoreTool("vscode-continue");
 
-		expect(result.status).toBe("restored");
+		expect(result?.status).toBe("restored");
 		expect(existsSync(backupPath)).toBe(false);
 		expect(readFileSync(livePath, "utf-8")).toContain('name: "backup"');
 	});
@@ -735,11 +796,84 @@ describe("restoreTool", () => {
 		writeFileSync(backupPath, 'marker = "backup"\n');
 
 		const { restoreTool } = await import("@/lib/configure.js");
-		const result = restoreTool("codex");
+		const [result] = restoreTool("codex");
 
-		expect(result.status).toBe("restored");
+		expect(result?.status).toBe("restored");
 		expect(existsSync(backupPath)).toBe(false);
 		expect(readFileSync(livePath, "utf-8")).toContain('marker = "backup"');
+	});
+
+	test("Claude bundle: restores all three files when all backups exist", async () => {
+		const claudeDir = join(tempDir, ".claude");
+		mkdirSync(claudeDir, { recursive: true });
+
+		const settingsLive = join(claudeDir, "settings.json");
+		const settingsBackup = `${settingsLive}.backup`;
+		writeFileSync(settingsLive, '{"env":{"ANTHROPIC_API_KEY":"codev"}}');
+		writeFileSync(settingsBackup, '{"marker":"settings-original"}');
+
+		const jsonLive = join(tempDir, ".claude.json");
+		const jsonBackup = `${jsonLive}.backup`;
+		writeFileSync(jsonLive, '{"hasCompletedOnboarding":true}');
+		writeFileSync(jsonBackup, '{"marker":"json-original"}');
+
+		const credLive = join(claudeDir, ".credentials.json");
+		const credBackup = `${credLive}.backup`;
+		// .credentials.json is wiped on install — the live file here represents
+		// a fresh one the CLI created post-install. The backup is what existed
+		// before CoDev touched the system.
+		writeFileSync(credLive, '{"session":"post-install"}');
+		writeFileSync(credBackup, '{"marker":"cred-original"}');
+
+		const { restoreTool } = await import("@/lib/configure.js");
+		const results = restoreTool("claude-code");
+
+		expect(results.every((r) => r.status === "restored")).toBe(true);
+		expect(JSON.parse(readFileSync(settingsLive, "utf-8"))).toEqual({
+			marker: "settings-original",
+		});
+		expect(JSON.parse(readFileSync(jsonLive, "utf-8"))).toEqual({
+			marker: "json-original",
+		});
+		expect(JSON.parse(readFileSync(credLive, "utf-8"))).toEqual({
+			marker: "cred-original",
+		});
+		// All backups consumed.
+		expect(existsSync(settingsBackup)).toBe(false);
+		expect(existsSync(jsonBackup)).toBe(false);
+		expect(existsSync(credBackup)).toBe(false);
+	});
+
+	test("Claude bundle: deletes live files that have no backup", async () => {
+		const claudeDir = join(tempDir, ".claude");
+		mkdirSync(claudeDir, { recursive: true });
+
+		// Settings has a backup → restored. Others have only live files → deleted.
+		const settingsLive = join(claudeDir, "settings.json");
+		writeFileSync(settingsLive, '{"env":{}}');
+		writeFileSync(`${settingsLive}.backup`, '{"marker":"orig"}');
+
+		const jsonLive = join(tempDir, ".claude.json");
+		writeFileSync(jsonLive, '{"hasCompletedOnboarding":true}');
+
+		const credLive = join(claudeDir, ".credentials.json");
+		writeFileSync(credLive, '{"session":"post-install"}');
+
+		const { restoreTool } = await import("@/lib/configure.js");
+		const results = restoreTool("claude-code");
+
+		const byKind = new Map(results.map((r) => [r.sourcePath, r.status]));
+		expect(byKind.get(settingsLive)).toBe("restored");
+		expect(byKind.get(jsonLive)).toBe("deleted-live");
+		expect(byKind.get(credLive)).toBe("deleted-live");
+
+		// All live files are now gone (no backup left to restore from for the two
+		// deleted-live cases, and the restored one's backup was consumed).
+		expect(existsSync(jsonLive)).toBe(false);
+		expect(existsSync(credLive)).toBe(false);
+		expect(JSON.parse(readFileSync(settingsLive, "utf-8"))).toEqual({
+			marker: "orig",
+		});
 	});
 });
 
@@ -813,7 +947,7 @@ describe("backupOnly", () => {
 		).toBe(false);
 	});
 
-	test("does not create .claude.json (skips bypassClaudeLogin)", async () => {
+	test("does not touch .claude.json or .credentials.json", async () => {
 		const dir = join(tempDir, ".claude");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, "settings.json"), "{}");
@@ -821,9 +955,11 @@ describe("backupOnly", () => {
 		const { backupOnly } = await import("@/lib/configure.js");
 		backupOnly("claude-code");
 
-		// Skip path must not write the agent's onboarding bypass — the user
-		// explicitly asked CoDev not to touch their config.
+		// backupOnly only snapshots settings.json. The .claude.json /
+		// .credentials.json handling lives in resetClaudeAuth, which the
+		// install flow calls separately right after the install step.
 		expect(existsSync(join(tempDir, ".claude.json"))).toBe(false);
+		expect(existsSync(join(dir, ".credentials.json"))).toBe(false);
 	});
 });
 

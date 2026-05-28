@@ -11,6 +11,7 @@ Usage: codev <command> [options]
 
 Commands:
   install             Install and configure AI coding agents
+  config              Configure existing AI coding agents
   update              Update installed AI coding agents
   upload              Export and upload logs to the monitor module
   model               Switch the default model

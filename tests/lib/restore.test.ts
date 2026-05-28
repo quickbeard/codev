@@ -241,7 +241,9 @@ describe("runRestoreAll", () => {
 		const claude = seedBackup(".claude/settings.json", "c");
 		const opencode = seedBackup(".config/opencode/opencode.json", "o");
 		// Codex and Continue intentionally have neither backup nor live file
-		// — each should report a "Nothing to restore for …" line.
+		// — each should report a "Nothing to restore for …" line. The Claude
+		// sweep additionally noops on ~/.claude.json and ~/.claude/.credentials.json
+		// since only settings.json was seeded.
 
 		const code = runRestoreAll();
 
@@ -252,9 +254,10 @@ describe("runRestoreAll", () => {
 		expect(logs.filter((l: string) => l.startsWith("Restored "))).toHaveLength(
 			2,
 		);
+		// 4 noops: 2 from the unsequenced Claude files + Codex + Continue.
 		expect(
 			logs.filter((l: string) => l.startsWith("Nothing to restore for ")),
-		).toHaveLength(2);
+		).toHaveLength(4);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
@@ -264,12 +267,12 @@ describe("runRestoreAll", () => {
 		expect(code).toBe(1);
 		const errors = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
 		expect(errors).toContain("No backups found. Nothing to restore.");
-		// Four per-tool noop lines still appear — the overall "Nothing to
-		// restore." error sits on top of them.
+		// Six per-file noop lines: Claude contributes 3 (settings.json,
+		// .claude.json, .credentials.json) + Codex + OpenCode + Continue.
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
 		expect(
 			logs.filter((l: string) => l.startsWith("Nothing to restore for ")),
-		).toHaveLength(4);
+		).toHaveLength(6);
 	});
 
 	test("deletes live CoDev configs for tools without a backup", () => {

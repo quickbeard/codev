@@ -173,7 +173,11 @@ export function Update({ onDone }: UpdateProps) {
 		<TaskList
 			tasks={tasks}
 			verb={{ infinitive: "update", present: "Updating", past: "Updated" }}
-			onDone={onDone}
+			// Update keeps its all-or-nothing contract: UpdateApp aborts on
+			// any failure, no partial-success advance. Adapt TaskList's
+			// survivor-key list to a boolean here so UpdateApp's onDone shape
+			// stays unchanged.
+			onDone={(keys) => onDone(keys.length === tasks.length)}
 		/>
 	);
 }

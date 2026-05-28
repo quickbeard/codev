@@ -26,8 +26,13 @@ interface ConfigureProps {
 
 type Phase = "running" | "done" | "error";
 
+// `claude-json` and `claude-credentials` never flow through Configure (the
+// install-time `resetClaudeAuth` returns them silently). The entries exist
+// for Record<BackupKind, string> type completeness only.
 const LABEL: Record<BackupKind, string> = {
 	"claude-settings": "Claude Code",
+	"claude-json": "Claude Code (onboarding)",
+	"claude-credentials": "Claude Code (credentials)",
 	"codex-config": "Codex",
 	"opencode-config": "OpenCode",
 	"continue-config": "Continue",

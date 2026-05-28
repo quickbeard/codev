@@ -11,7 +11,12 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import TOML from "@iarna/toml";
-import { AI_GATEWAY_OPENAI_URL, AI_GATEWAY_URL } from "@/lib/const.js";
+import {
+	AI_GATEWAY_OPENAI_URL,
+	AI_GATEWAY_URL,
+	CLAUDE_AUTO_COMPACT_WINDOW,
+	CLAUDE_AUTOCOMPACT_PCT,
+} from "@/lib/const.js";
 
 export type Tool =
 	| "claude-code"
@@ -23,6 +28,8 @@ export type Tool =
 	| "jetbrains-continue";
 export type BackupKind =
 	| "claude-settings"
+	| "claude-json"
+	| "claude-credentials"
 	| "codex-config"
 	| "opencode-config"
 	| "continue-config";
@@ -91,6 +98,8 @@ const CLAUDE_K = {
 	sonnet: atob("QU5USFJPUElDX0RFRkFVTFRfU09OTkVUX01PREVM"),
 	haiku: atob("QU5USFJPUElDX0RFRkFVTFRfSEFJS1VfTU9ERUw="),
 	agentTeams: atob("Q0xBVURFX0NPREVfRVhQRVJJTUVOVEFMX0FHRU5UX1RFQU1T"),
+	autoCompactWindow: atob("Q0xBVURFX0NPREVfQVVUT19DT01QQUNUX1dJTkRPVw=="),
+	autoCompactPct: atob("Q0xBVURFX0FVVE9DT01QQUNUX1BDVF9PVkVSUklERQ=="),
 };
 
 const CODEX_K = {
@@ -149,6 +158,10 @@ function sourcePathOf(kind: BackupKind): string {
 	switch (kind) {
 		case "claude-settings":
 			return join(homedir(), ".claude", "settings.json");
+		case "claude-json":
+			return join(homedir(), ".claude.json");
+		case "claude-credentials":
+			return join(homedir(), ".claude", ".credentials.json");
 		case "codex-config":
 			return join(homedir(), ".codex", "config.toml");
 		case "opencode-config":
@@ -299,15 +312,6 @@ function ensureBackup(kind: BackupKind): BackupOutcome {
 	return { path: backupPath, created: true };
 }
 
-function readJson(path: string): Record<string, unknown> {
-	if (!existsSync(path)) return {};
-	try {
-		return JSON.parse(readFileSync(path, "utf-8"));
-	} catch {
-		return {};
-	}
-}
-
 function writeJson(path: string, data: unknown) {
 	writeFileSync(path, JSON.stringify(data, null, 2), { mode: 0o600 });
 	chmodSync(path, 0o600);
@@ -331,18 +335,54 @@ function writeText(path: string, contents: string) {
 	chmodSync(path, 0o600);
 }
 
-export function bypassClaudeLogin(): void {
-	const claudeJsonPath = join(homedir(), ".claude.json");
-	const config = readJson(claudeJsonPath);
-	if (!config.hasCompletedOnboarding) {
-		config.hasCompletedOnboarding = true;
-		writeJson(claudeJsonPath, config);
+// Reset Claude Code's auth state so a fresh install starts cleanly under
+// CoDev's gateway credentials. Two files are handled in addition to the
+// settings.json snapshot taken by `configureClaudeCode`:
+//
+//   - `~/.claude.json` — onboarding/state file. Backed up if present, then
+//     replaced with `{hasCompletedOnboarding: true}` so the CLI skips its
+//     first-run wizard. (Pre-existing fields are *not* preserved; the user's
+//     original is reachable via `*.backup`.)
+//   - `~/.claude/.credentials.json` — CLI-managed session credentials. Backed
+//     up if present, then removed so the CLI cannot reuse stale auth that
+//     would conflict with the gateway API key in settings.json.
+//
+// Called once from `InstallApp.handleInstallDone` when any Claude tool
+// (CLI or either extension) survives the install step. Returns the two
+// `ConfigureResult`s so callers may log/report; the install flow currently
+// ignores the return (silent operation per design).
+export function resetClaudeAuth(): ConfigureResult[] {
+	const results: ConfigureResult[] = [];
+
+	const jsonSource = sourcePathOf("claude-json");
+	const { path: jsonBackup, created: jsonCreated } =
+		ensureBackup("claude-json");
+	mkdirSync(dirname(jsonSource), { recursive: true });
+	writeJson(jsonSource, { hasCompletedOnboarding: true });
+	results.push({
+		kind: "claude-json",
+		sourcePath: jsonSource,
+		backupPath: jsonBackup,
+		created: jsonCreated,
+	});
+
+	const credSource = sourcePathOf("claude-credentials");
+	const { path: credBackup, created: credCreated } =
+		ensureBackup("claude-credentials");
+	if (existsSync(credSource)) {
+		rmSync(credSource, { force: true });
 	}
+	results.push({
+		kind: "claude-credentials",
+		sourcePath: credSource,
+		backupPath: credBackup,
+		created: credCreated,
+	});
+
+	return results;
 }
 
 export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
-	bypassClaudeLogin();
-
 	const { path: backupPath, created } = ensureBackup("claude-settings");
 	const sourcePath = sourcePathOf("claude-settings");
 	mkdirSync(dirname(sourcePath), { recursive: true });
@@ -362,6 +402,8 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 			[CLAUDE_K.sonnet]: model,
 			[CLAUDE_K.haiku]: model,
 			[CLAUDE_K.agentTeams]: "1",
+			[CLAUDE_K.autoCompactWindow]: CLAUDE_AUTO_COMPACT_WINDOW,
+			[CLAUDE_K.autoCompactPct]: CLAUDE_AUTOCOMPACT_PCT,
 		},
 	});
 
@@ -376,16 +418,16 @@ export interface RestoreResult {
 	backupPath: string;
 }
 
-// "Make this tool look pre-CoDev." Three terminal states:
+// "Make this file look pre-CoDev." Three terminal states:
 //   - backup present → swap it over the live file (the user's pre-CoDev
-//     config is reinstated).
+//     state is reinstated).
 //   - no backup, but a live file exists → delete the live file. CoDev only
 //     skips the backup step when there was nothing to back up in the first
-//     place, so any live file here is CoDev-authored; removing it lands the
-//     user at "no config", which IS the pre-CoDev state.
+//     place, so any live file here is post-CoDev (CoDev-authored, or created
+//     by the tool after CoDev wiped it); removing it lands the user at
+//     "no file", which IS the pre-CoDev state.
 //   - neither file exists → noop; already at pre-CoDev state.
-export function restoreTool(tool: Tool): RestoreResult {
-	const kind = kindForTool(tool);
+function restoreKind(kind: BackupKind): RestoreResult {
 	const sourcePath = sourcePathOf(kind);
 	const backupPath = `${sourcePath}.backup`;
 
@@ -401,6 +443,26 @@ export function restoreTool(tool: Tool): RestoreResult {
 	}
 
 	return { status: "noop", sourcePath, backupPath };
+}
+
+// Claude tools own three files (settings.json, .claude.json,
+// .credentials.json), so `restoreTool` returns an array. Single-file tools
+// return a length-1 array. Callers iterate and aggregate per-tool status.
+const CLAUDE_RESTORE_KINDS: BackupKind[] = [
+	"claude-settings",
+	"claude-json",
+	"claude-credentials",
+];
+
+export function restoreTool(tool: Tool): RestoreResult[] {
+	if (
+		tool === "claude-code" ||
+		tool === "vscode-claude-code" ||
+		tool === "jetbrains-claude-code"
+	) {
+		return CLAUDE_RESTORE_KINDS.map(restoreKind);
+	}
+	return [restoreKind(kindForTool(tool))];
 }
 
 export function configureCodex(creds: Credentials): ConfigureResult[] {

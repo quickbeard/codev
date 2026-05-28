@@ -20,13 +20,13 @@ After install, type `claude`, `codex`, or `opencode` to launch.
 
 ## Restoring a previous configuration
 
-CoDev will replace `~/.claude/settings.json`, `~/.codex/config.toml`, and `~/.config/opencode/opencode.json` with new configs. Before writing its own config, CoDev backs up the specific file it would replace. If a backup already exists from a prior CoDev run (`*.backup`), CoDev leaves it untouched and proceeds to replace the live config. The existing backup is assumed to be your pre-CoDev original and is never clobbered by later runs.
+CoDev will replace `~/.claude/settings.json`, `~/.codex/config.toml`, and `~/.config/opencode/opencode.json` with new configs. For Claude Code, CoDev also resets the CLI's auth state so the new gateway credentials aren't shadowed: it rewrites `~/.claude.json` to skip the onboarding wizard, and removes `~/.claude/.credentials.json` so stale session auth can't take precedence. Before writing or removing any file, CoDev backs it up. If a backup already exists from a prior CoDev run (`*.backup`), CoDev leaves it untouched and proceeds. The existing backup is assumed to be your pre-CoDev original and is never clobbered by later runs.
 
-| Selection   | Backed up                                 |
-| ----------- | ----------------------------------------- |
-| Claude Code | `~/.claude/settings.json.backup`          |
-| Codex       | `~/.codex/config.toml.backup`             |
-| OpenCode    | `~/.config/opencode/opencode.json.backup` |
+| Selection   | Backed up                                                                                           |
+| ----------- | --------------------------------------------------------------------------------------------------- |
+| Claude Code | `~/.claude/settings.json.backup`<br>`~/.claude.json.backup`<br>`~/.claude/.credentials.json.backup` |
+| Codex       | `~/.codex/config.toml.backup`                                                                       |
+| OpenCode    | `~/.config/opencode/opencode.json.backup`                                                           |
 
 `settings.json`, `config.toml`, and `opencode.json` are **replaced** (not merged), so any keys you had before live only in the file backup.
 
@@ -40,26 +40,7 @@ codev restore codex
 codev restore opencode
 ```
 
-Each command removes the active config file and renames the corresponding `*.backup` back into place. Run it with no agent to restore every agent that has a backup at once:
-
-```bash
-codev restore
-```
-
 If you have a session running, you might need to restart it with `claude -c`, `codex resume`, or `opencode -c` to resume your progress.
-
-You can also do it manually:
-
-```bash
-# Claude Code
-mv ~/.claude/settings.json.backup ~/.claude/settings.json
-
-# Codex
-mv ~/.codex/config.toml.backup ~/.codex/config.toml
-
-# OpenCode
-mv ~/.config/opencode/opencode.json.backup ~/.config/opencode/opencode.json
-```
 
 ## Removing CoDev entirely
 

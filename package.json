@@ -1,6 +1,6 @@
 {
   "name": "codev-ai",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "CoDev — AI Coding Agent Hub. Install, configure, and manage multiple AI coding agents.",
   "keywords": [
     "ai",
@@ -15,11 +15,6 @@
     "dist"
   ],
   "packageManager": "pnpm@10.26.0",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
   "scripts": {
     "dev": "tsx src/index.tsx",
     "build": "tsx build.ts",
@@ -42,22 +37,22 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "ink": "^7.0.3",
+    "ink": "^7.0.4",
     "ink-spinner": "^5.0.0",
     "open": "^11.0.0",
     "react": "^19.2.6"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.15",
+    "@biomejs/biome": "^2.4.16",
     "@types/iarna__toml": "^2.0.5",
-    "@types/node": "^25.7.0",
-    "@types/react": "^19.2.14",
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.2.15",
     "esbuild": "^0.28.0",
     "husky": "^9.1.7",
     "ink-testing-library": "^4.0.0",
-    "lint-staged": "^17.0.4",
-    "tsx": "^4.21.0",
+    "lint-staged": "^17.0.5",
+    "tsx": "^4.22.3",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.7"
   }
 }

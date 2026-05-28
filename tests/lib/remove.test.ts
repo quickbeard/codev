@@ -111,7 +111,10 @@ describe("runRemove", () => {
 		expect(existsSync(join(tempDir, ".claude/settings.json"))).toBe(false);
 		const claudeStep = result.steps.find((s) => s.label.startsWith("Claude"));
 		expect(claudeStep?.status).toBe("ok");
-		expect(claudeStep?.detail).toMatch(/no backup; deleted/);
+		// Claude restore aggregates three files: settings.json is deleted-live
+		// (no backup), the other two are noop (neither live nor backup).
+		expect(claudeStep?.detail).toMatch(/deleted 1 file \(no backup\)/);
+		expect(claudeStep?.detail).toMatch(/2 already clean/);
 	});
 
 	test("no backup and no live config: reports nothing-to-restore as noop", async () => {
@@ -154,11 +157,13 @@ describe("runRemove", () => {
 		// best-effort behavior.
 		vi.spyOn(configure, "restoreTool").mockImplementation((tool) => {
 			if (tool === "codex") throw new Error("boom");
-			return {
-				status: "noop",
-				sourcePath: `/tmp/${tool}-fake`,
-				backupPath: `/tmp/${tool}-fake.backup`,
-			};
+			return [
+				{
+					status: "noop",
+					sourcePath: `/tmp/${tool}-fake`,
+					backupPath: `/tmp/${tool}-fake.backup`,
+				},
+			];
 		});
 
 		const result = await runRemove();
