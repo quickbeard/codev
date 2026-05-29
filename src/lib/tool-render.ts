@@ -4,7 +4,11 @@
 // across schemas. Provider-specific quirks (Codex `apply_patch`, OpenCode's
 // `state.metadata` diffs) stay in the provider files.
 
-import { diffFromEditInput, textValue } from "@/lib/diff.js";
+import {
+	diffFromEditInput,
+	diffFromWriteContent,
+	textValue,
+} from "@/lib/diff.js";
 import { codeFence } from "@/lib/markdown.js";
 
 const SHELL_NAMES = new Set(["bash", "shell", "run_command", "exec_command"]);
@@ -75,7 +79,16 @@ export function renderToolUse(
 		toolType = "write";
 		summary = `Edit file: ${filePathFromInput(input)}`;
 		const content = textValue(input.content);
-		body = isError ? `Error: ${output}` : content ? codeFence(content) : output;
+		// Render the new file as an all-additions diff so the LOC enricher counts
+		// every line (the file content is preserved even on rejection/abort, where
+		// `output` is just the error). Falls back to the raw output when there's
+		// no content to show.
+		const diff = diffFromWriteContent(content);
+		body = diff
+			? `${codeFence(diff, "diff")}\n\n${isError ? `Error: ${output}` : output}`
+			: isError
+				? `Error: ${output}`
+				: output;
 	} else if (EDIT_NAMES.has(toolName)) {
 		toolType = "write";
 		summary = `Edit file: ${filePathFromInput(input)}`;

@@ -62,3 +62,17 @@ export function diffFromEditInput(input: Record<string, unknown>): string {
 	if (!oldText && !newText) return "";
 	return buildLineDiff(oldText, newText);
 }
+
+// File-creation/overwrite tools (`write`/`write_file`/`save_file`, OpenCode
+// `write`) supply whole-file `content` with no old/new pair, so they have no
+// natural diff. Render every line as an addition so the LOC enricher — which
+// only counts `+`/`-` lines inside ```diff fences — attributes the full file
+// to proposed (and accepted/rejected) lines. Without this, writes render as a
+// plain code fence and count as zero LOC, unlike edits.
+export function diffFromWriteContent(content: string): string {
+	if (!content) return "";
+	return content
+		.split("\n")
+		.map((line) => `+${line}`)
+		.join("\n");
+}

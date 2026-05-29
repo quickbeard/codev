@@ -389,6 +389,73 @@ describe("openCodeProvider.listSessions", () => {
 		expect(assistantContent).not.toContain("Edit applied successfully.");
 	});
 
+	test("renders write (file creation) content as an all-additions diff", async () => {
+		seedProjectAndSession();
+		const db = new Database(dbPath);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-write",
+				"msg-2",
+				"ses-1",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 33, 5) / 1000),
+				JSON.stringify({
+					type: "tool",
+					tool: "write",
+					callID: "write-1",
+					state: {
+						status: "completed",
+						input: {
+							filePath: "/tmp/new.ts",
+							content: "const a = 1;\nconst b = 2;",
+						},
+					},
+				}),
+			],
+		);
+		// A rejected write must keep its content so proposed/rejected LOC count.
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-write-rej",
+				"msg-2",
+				"ses-1",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 33, 6) / 1000),
+				JSON.stringify({
+					type: "tool",
+					tool: "write",
+					callID: "write-2",
+					state: {
+						status: "error",
+						input: {
+							filePath: "/tmp/rejected.ts",
+							content: "line one\nline two\nline three",
+						},
+						error: "Tool execution aborted",
+					},
+				}),
+			],
+		);
+		db.close();
+
+		const sessions = await openCodeProvider.listSessions(projectCwd);
+		const assistantContent = sessions[0]?.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="write" data-edit-status="accepted">',
+		);
+		expect(assistantContent).toContain(
+			"```diff\n+const a = 1;\n+const b = 2;\n```",
+		);
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="write" data-edit-status="rejected">',
+		);
+		expect(assistantContent).toContain("+line one");
+		expect(assistantContent).toContain("+line three");
+		expect(assistantContent).toContain("Error: Tool execution aborted");
+	});
+
 	test("honors XDG_DATA_HOME for the database location", async () => {
 		const xdg = realpathSync(
 			mkdtempSync(join(tmpdir(), "codev-opencode-xdg-")),

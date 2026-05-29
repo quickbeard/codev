@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { buildLineDiff, diffFromEditInput, textValue } from "@/lib/diff.js";
+import {
+	buildLineDiff,
+	diffFromEditInput,
+	diffFromWriteContent,
+	textValue,
+} from "@/lib/diff.js";
 
 describe("buildLineDiff", () => {
 	test("returns LCS-style diff: unchanged lines get a leading space, changes get -/+", () => {
@@ -59,6 +64,29 @@ describe("diffFromEditInput", () => {
 
 	test("ignores non-string values", () => {
 		expect(diffFromEditInput({ old_string: 5, new_string: false })).toBe("");
+	});
+});
+
+describe("diffFromWriteContent", () => {
+	test("prefixes every line with + so the LOC enricher counts the whole file", () => {
+		const diff = diffFromWriteContent("line one\nline two\nline three");
+		expect(diff).toBe("+line one\n+line two\n+line three");
+	});
+
+	test("counts every line as an addition (no - or unchanged lines)", () => {
+		const diff = diffFromWriteContent("a\nb\nc\nd");
+		const added = diff.split("\n").filter((l) => l.startsWith("+")).length;
+		expect(added).toBe(4);
+		expect(diff).not.toContain("\n-");
+		expect(diff.split("\n").some((l) => l.startsWith(" "))).toBe(false);
+	});
+
+	test("preserves blank lines as additions", () => {
+		expect(diffFromWriteContent("a\n\nb")).toBe("+a\n+\n+b");
+	});
+
+	test("returns empty string for empty content", () => {
+		expect(diffFromWriteContent("")).toBe("");
 	});
 });
 
