@@ -173,6 +173,26 @@ describe("npm.ts", () => {
 			expect(err).toBeNull();
 		});
 
+		test("claude-code: installs the @stable dist-tag", async () => {
+			const calls = stubExecFile({ handler: () => ({ stdout: "1.0.0" }) });
+			const err = await installAndVerify("claude-code");
+			expect(err).toBeNull();
+			const installCall = calls.find(
+				(c) => c.file === "npm" && c.args[0] === "install",
+			);
+			expect(installCall?.args).toContain("@anthropic-ai/claude-code@stable");
+		});
+
+		test("opencode: installs the bare package with no dist-tag", async () => {
+			const calls = stubExecFile({ handler: () => ({ stdout: "1.0.0" }) });
+			await installAndVerify("opencode");
+			const installCall = calls.find(
+				(c) => c.file === "npm" && c.args[0] === "install",
+			);
+			expect(installCall?.args).toContain("opencode-ai");
+			expect(installCall?.args.some((a) => a.includes("@stable"))).toBe(false);
+		});
+
 		test("returns install error when npm install fails", async () => {
 			stubExecFile({
 				handler: (file, args) => {
