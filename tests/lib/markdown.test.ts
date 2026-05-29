@@ -39,12 +39,12 @@ describe("titleFromFirstMessage", () => {
 			"Please implement the new dashboard analytics feature with proper error handling and retry logic";
 		// 94 chars — should truncate at word boundary ≤ 80 chars
 		const result = titleFromFirstMessage(long);
-		expect(result).toBeDefined();
-		expect(result!.endsWith("…")).toBe(true);
-		expect(result!.length).toBeLessThanOrEqual(81); // 80 + "…"
+		if (!result) throw new Error("expected a title");
+		expect(result.endsWith("…")).toBe(true);
+		expect(result.length).toBeLessThanOrEqual(81); // 80 + "…"
 		// Must break at a word boundary (no partial word before ellipsis)
-		expect(result!.replace(/…$/, "").endsWith(" ")).toBe(false);
-		expect(result!.replace(/…$/, "").match(/\s$/)).toBeNull();
+		expect(result.replace(/…$/, "").endsWith(" ")).toBe(false);
+		expect(result.replace(/…$/, "").match(/\s$/)).toBeNull();
 	});
 
 	test("falls back to hard-cut with ellipsis when no word boundary after 20 chars", () => {
