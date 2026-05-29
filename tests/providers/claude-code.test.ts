@@ -303,6 +303,127 @@ describe("claudeCodeProvider.listSessions", () => {
 		expect(assistantContent).toContain("Error: The user rejected this edit.");
 	});
 
+	test("renders Write (file creation) content as an all-additions diff", async () => {
+		const lines = [
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:05Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: { role: "user", content: "Create random.ts" },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				timestamp: "2026-04-27T18:32:10Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "t-write",
+							name: "Write",
+							input: {
+								file_path: "/tmp/random.ts",
+								content:
+									"// Test file\nexport function generateRandomId(): string {\n  return Math.random().toString(36);\n}",
+							},
+						},
+					],
+				},
+			}),
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:15Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t-write",
+							content: "File created successfully at: /tmp/random.ts",
+						},
+					],
+				},
+			}),
+		];
+		writeFileSync(join(claudeProjectDir, "session.jsonl"), lines.join("\n"));
+
+		const sessions = await claudeCodeProvider.listSessions(projectCwd);
+		const assistantContent = sessions[0]?.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="write" data-edit-status="accepted">',
+		);
+		// Whole-file content rendered inside a ```diff fence with every line as a
+		// `+` addition — this is what lets the LOC enricher count file creations.
+		expect(assistantContent).toContain("```diff");
+		expect(assistantContent).toContain("+// Test file");
+		expect(assistantContent).toContain(
+			"+export function generateRandomId(): string {",
+		);
+		expect(assistantContent).toContain("File created successfully");
+	});
+
+	test("keeps rejected Write (file creation) content as a rejected diff", async () => {
+		const lines = [
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:05Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: { role: "user", content: "Create random.ts" },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				timestamp: "2026-04-27T18:32:10Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "t-write-reject",
+							name: "Write",
+							input: {
+								file_path: "/tmp/random.ts",
+								content: "const a = 1;\nconst b = 2;\nconst c = 3;",
+							},
+						},
+					],
+				},
+			}),
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:15Z",
+				sessionId: "abcdefab-1234-5678-9abc-def012345678",
+				message: {
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t-write-reject",
+							is_error: true,
+							content: "The user doesn't want to proceed with this tool use.",
+						},
+					],
+				},
+			}),
+		];
+		writeFileSync(join(claudeProjectDir, "session.jsonl"), lines.join("\n"));
+
+		const sessions = await claudeCodeProvider.listSessions(projectCwd);
+		const assistantContent = sessions[0]?.messages[1]?.content || "";
+		expect(assistantContent).toContain(
+			'<tool-use data-tool-type="write" data-tool-name="write" data-edit-status="rejected">',
+		);
+		// Content must survive rejection so proposed/rejected LOC are still counted.
+		expect(assistantContent).toContain("```diff");
+		expect(assistantContent).toContain("+const a = 1;");
+		expect(assistantContent).toContain("+const c = 3;");
+		expect(assistantContent).toContain(
+			"Error: The user doesn't want to proceed",
+		);
+	});
+
 	test("returns empty list when the project dir contains no jsonl files", async () => {
 		const sessions = await claudeCodeProvider.listSessions(projectCwd);
 		expect(sessions).toEqual([]);

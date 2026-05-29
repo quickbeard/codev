@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { diffFromEditInput } from "@/lib/diff.js";
+import { diffFromEditInput, diffFromWriteContent } from "@/lib/diff.js";
 import { codeFence } from "@/lib/markdown.js";
 import type { Message, Provider, Session } from "@/providers/types.js";
 
@@ -271,9 +271,19 @@ function parsePart(part: PartRow): string | null {
 			const path = typeof input.filePath === "string" ? input.filePath : "";
 			const content = typeof input.content === "string" ? input.content : "";
 			const summary = `Edit file: ${path}`;
-			const body = isCompleted
-				? codeFence(content)
-				: `Error: ${error || "Tool execution aborted"}`;
+			// Render the new file as an all-additions diff so the LOC enricher
+			// counts every line — a plain code fence counts as zero, the same bug
+			// edits used to have. Keep the content on rejection so proposed/rejected
+			// LOC are still attributed.
+			const diff = diffFromWriteContent(content);
+			let body: string;
+			if (diff) {
+				body = `${codeFence(diff, "diff")}${isCompleted ? "" : `\n\nError: ${error || "Tool execution aborted"}`}`;
+			} else if (isCompleted) {
+				body = codeFence(content);
+			} else {
+				body = `Error: ${error || "Tool execution aborted"}`;
+			}
 			return `<tool-use data-tool-type="write" data-tool-name="write" data-edit-status="${isCompleted ? "accepted" : "rejected"}">\n<details>\n<summary>${summary}</summary>\n\n${body}\n</details>\n</tool-use>\n`;
 		}
 
