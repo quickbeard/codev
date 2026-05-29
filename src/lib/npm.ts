@@ -38,6 +38,23 @@ export const CLI: Record<NpmTool, string> = {
 	codex: "codex",
 };
 
+// Dist-tags appended to the install spec at `npm install -g` time. Kept
+// separate from PKG because the bare name is reused elsewhere where an `@tag`
+// would be wrong: detectInstalledViaNpm builds the npm-root directory path from
+// PKG, and the install row label renders PKG verbatim. Claude Code pins
+// `stable` (a more conservative channel than npm's default `latest`); a tool
+// with no entry installs `latest`.
+export const DIST_TAG: Partial<Record<NpmTool, string>> = {
+	"claude-code": "stable",
+};
+
+// The `npm install -g` target for a tool: `<pkg>@<tag>` when a dist-tag is
+// pinned, otherwise the bare package name (npm defaults to `latest`).
+export function installSpec(tool: NpmTool): string {
+	const tag = DIST_TAG[tool];
+	return tag ? `${PKG[tool]}@${tag}` : PKG[tool];
+}
+
 // On Windows, `npm` is a `.cmd` shim that `execFile` can't resolve without a
 // shell. Enabling the shell on win32 lets the OS find `npm.cmd`/`npx.cmd`.
 export const USE_SHELL = process.platform === "win32";
@@ -152,7 +169,7 @@ export async function runCodexWindowsRecovery(): Promise<string | null> {
 }
 
 export async function installAndVerify(tool: NpmTool): Promise<string | null> {
-	const installErr = await installPackage(PKG[tool]);
+	const installErr = await installPackage(installSpec(tool));
 	if (installErr) return installErr;
 
 	const firstVerify = await verifyInstall(tool);
