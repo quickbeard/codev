@@ -1,5 +1,12 @@
 import * as child_process from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
@@ -1283,5 +1290,110 @@ describe("InstallApp existing-key path", () => {
 		expect(history).toContain("Could not verify saved API key");
 		expect(history).toContain("ECONNREFUSED");
 		expect(history).not.toContain("Reuse existing API Key");
+	});
+});
+
+// Regression: the finalize Phase picks backupClaudeAuth vs resetClaudeAuth off
+// `creds === null`. Skip-configuration sets creds=null, so the originals must
+// survive; any non-Skip path lands with creds≠null and the destructive reset
+// fires. These tests touch the real (stubbed-HOME) ~/.claude.json and
+// ~/.claude/.credentials.json — no spies on configure — to catch wiring
+// regressions that mocked tests would miss.
+describe("InstallApp finalize: Claude file fate by auth choice", () => {
+	function seedClaudeFiles(): {
+		jsonPath: string;
+		credPath: string;
+		jsonOriginal: { marker: string };
+		credOriginal: { session: string };
+	} {
+		const jsonPath = join(installAppTempHome, ".claude.json");
+		const credDir = join(installAppTempHome, ".claude");
+		const credPath = join(credDir, ".credentials.json");
+		const jsonOriginal = { marker: "user-pre-codev-state" };
+		const credOriginal = { session: "user-prior-session" };
+		mkdirSync(credDir, { recursive: true });
+		writeFileSync(jsonPath, JSON.stringify(jsonOriginal));
+		writeFileSync(credPath, JSON.stringify(credOriginal));
+		return { jsonPath, credPath, jsonOriginal, credOriginal };
+	}
+
+	test("Skip configuration preserves ~/.claude.json and ~/.claude/.credentials.json originals", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+
+		const { jsonPath, credPath, jsonOriginal, credOriginal } =
+			seedClaudeFiles();
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickSkip(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		// Source files untouched — neither replaced with the
+		// hasCompletedOnboarding stub nor deleted.
+		expect(JSON.parse(readFileSync(jsonPath, "utf-8"))).toEqual(jsonOriginal);
+		expect(existsSync(credPath)).toBe(true);
+		expect(JSON.parse(readFileSync(credPath, "utf-8"))).toEqual(credOriginal);
+		// Backups still created (the finalize Phase runs backupClaudeAuth on
+		// Skip), so the user can `codev restore claude` later.
+		expect(JSON.parse(readFileSync(`${jsonPath}.backup`, "utf-8"))).toEqual(
+			jsonOriginal,
+		);
+		expect(JSON.parse(readFileSync(`${credPath}.backup`, "utf-8"))).toEqual(
+			credOriginal,
+		);
+	});
+
+	test("manual-credentials path triggers the destructive reset (replaces .claude.json, removes .credentials.json)", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+		vi.spyOn(proxy, "validateApiKey").mockResolvedValue(true);
+		// Stub the actual settings.json writer to prevent the real configure
+		// from racing the assertions below; we only care about the .claude.json
+		// + .credentials.json transitions here, which are owned by finalize.
+		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.backup",
+				created: true,
+			},
+		]);
+
+		const { jsonPath, credPath, jsonOriginal, credOriginal } =
+			seedClaudeFiles();
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickManual(stdin, frames);
+		await typeManualCreds(
+			stdin,
+			frames,
+			"https://gateway.example.com/v1",
+			"sk-manual-claude-123",
+		);
+		await pickFirstModel(stdin, frames, "m-alpha");
+		await waitForFrame(frames, "Happy coding");
+
+		// Backups carry the original contents.
+		expect(JSON.parse(readFileSync(`${jsonPath}.backup`, "utf-8"))).toEqual(
+			jsonOriginal,
+		);
+		expect(JSON.parse(readFileSync(`${credPath}.backup`, "utf-8"))).toEqual(
+			credOriginal,
+		);
+		// Live ~/.claude.json was overwritten with the bypass stub.
+		expect(JSON.parse(readFileSync(jsonPath, "utf-8"))).toEqual({
+			hasCompletedOnboarding: true,
+		});
+		// Live ~/.claude/.credentials.json was removed.
+		expect(existsSync(credPath)).toBe(false);
 	});
 });

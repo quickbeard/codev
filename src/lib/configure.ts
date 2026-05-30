@@ -351,14 +351,18 @@ function writeText(path: string, contents: string) {
 // (CLI or either extension) survives the install step. Returns the two
 // `ConfigureResult`s so callers may log/report; the install flow currently
 // ignores the return (silent operation per design).
-export function resetClaudeAuth(): ConfigureResult[] {
+// Back up ~/.claude.json and ~/.claude/.credentials.json without modifying
+// either. Used by the install flow's finalize Phase on the "Skip
+// configuration" path; resetClaudeAuth() calls this internally before its
+// destructive work, so a caller that runs backupClaudeAuth() first and
+// later calls resetClaudeAuth() will see the second ensureBackup() preserve
+// the backup created on the first pass.
+export function backupClaudeAuth(): ConfigureResult[] {
 	const results: ConfigureResult[] = [];
 
 	const jsonSource = sourcePathOf("claude-json");
 	const { path: jsonBackup, created: jsonCreated } =
 		ensureBackup("claude-json");
-	mkdirSync(dirname(jsonSource), { recursive: true });
-	writeJson(jsonSource, { hasCompletedOnboarding: true });
 	results.push({
 		kind: "claude-json",
 		sourcePath: jsonSource,
@@ -369,15 +373,27 @@ export function resetClaudeAuth(): ConfigureResult[] {
 	const credSource = sourcePathOf("claude-credentials");
 	const { path: credBackup, created: credCreated } =
 		ensureBackup("claude-credentials");
-	if (existsSync(credSource)) {
-		rmSync(credSource, { force: true });
-	}
 	results.push({
 		kind: "claude-credentials",
 		sourcePath: credSource,
 		backupPath: credBackup,
 		created: credCreated,
 	});
+
+	return results;
+}
+
+export function resetClaudeAuth(): ConfigureResult[] {
+	const results = backupClaudeAuth();
+
+	const jsonSource = sourcePathOf("claude-json");
+	mkdirSync(dirname(jsonSource), { recursive: true });
+	writeJson(jsonSource, { hasCompletedOnboarding: true });
+
+	const credSource = sourcePathOf("claude-credentials");
+	if (existsSync(credSource)) {
+		rmSync(credSource, { force: true });
+	}
 
 	return results;
 }
