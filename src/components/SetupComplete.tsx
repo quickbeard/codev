@@ -15,7 +15,7 @@ interface SetupCompleteProps {
 // when the finalize Phase has actually populated it.
 export function SetupComplete({ tools, shimsInstalled }: SetupCompleteProps) {
 	return (
-		<Box marginBottom={1} flexDirection="column">
+		<Box marginTop={1} marginBottom={1} flexDirection="column">
 			{resumeMessage(tools, shimsInstalled)}
 			<Box marginTop={1}>
 				<Text dimColor>{HELP_HINT}</Text>
