@@ -155,12 +155,27 @@ async function advanceThroughConfirmCodex(
 	stdin.write("y\r");
 }
 
-// After install completes, refreshing-config + validation run immediately
+// After install completes, the proxy-url Step is the first prompt. Walk past
+// it by picking the default option, then refreshing-config + validation run
 // (refreshCodevConfig is mocked in beforeEach) and the flow lands on the
 // key-choice step. Wait for the choose-configuration screen (no-saved-key
 // path) or the existing-key option (saved-key path) to actually appear.
-async function settleAfterInstall(frames: string[]) {
+async function settleAfterInstall(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
+	await advanceThroughProxyUrl(stdin, frames);
 	await waitForFrame(frames, "Choose configuration method");
+}
+
+// Picks "Use the default proxy URL" — the first option, so just Enter.
+async function advanceThroughProxyUrl(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
+	await waitForFrame(frames, "Choose proxy URL");
+	stdin.write("\r");
+	await new Promise((r) => setTimeout(r, 30));
 }
 
 async function pickNewKey(
@@ -170,7 +185,7 @@ async function pickNewKey(
 	// Wait for login + install + refresh + validation to settle and the
 	// key-choice screen to appear, then press Enter on the default first
 	// option ("Get a new API Key" when no saved key exists).
-	await settleAfterInstall(frames);
+	await settleAfterInstall(stdin, frames);
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
@@ -181,7 +196,7 @@ async function pickManual(
 ) {
 	// Wait for the upstream phases to settle, move cursor to "I have my
 	// own API Key", Enter.
-	await settleAfterInstall(frames);
+	await settleAfterInstall(stdin, frames);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
@@ -195,7 +210,7 @@ async function pickSkip(
 	// Wait for the upstream phases to settle, move cursor past
 	// "Get a new API Key" and "I have my own API Key" to land on
 	// "Skip configuration", Enter.
-	await settleAfterInstall(frames);
+	await settleAfterInstall(stdin, frames);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\x1B[B");
@@ -1184,6 +1199,7 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin, frames);
+		await advanceThroughProxyUrl(stdin, frames);
 		// Wait for refresh + validation to settle and the saved-key option to
 		// appear in the key-choice list.
 		await waitForFrame(frames, "Reuse existing API Key");
@@ -1238,6 +1254,7 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin, frames);
+		await advanceThroughProxyUrl(stdin, frames);
 		await waitForFrame(frames, "Saved API key is no longer valid");
 
 		const history = allFrames(frames);
@@ -1259,6 +1276,7 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin, frames);
+		await advanceThroughProxyUrl(stdin, frames);
 		await waitForFrame(frames, "Could not verify saved API key");
 
 		const history = allFrames(frames);

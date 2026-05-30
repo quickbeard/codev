@@ -112,8 +112,14 @@ async function advanceThroughConfirm(
 	stdin.write("y\r");
 }
 
-async function settleAfterLogin(frames: string[]) {
-	// Config mode jumps login → refreshing-config → key-choice directly.
+async function settleAfterLogin(
+	stdin: { write: (s: string) => void },
+	frames: string[],
+) {
+	// Config mode jumps login → proxy-url → refreshing-config → key-choice.
+	await waitForFrame(frames, "Choose proxy URL");
+	stdin.write("\r");
+	await new Promise((r) => setTimeout(r, 30));
 	await waitForFrame(frames, "Choose configuration method");
 }
 
@@ -121,7 +127,7 @@ async function pickManual(
 	stdin: { write: (s: string) => void },
 	frames: string[],
 ) {
-	await settleAfterLogin(frames);
+	await settleAfterLogin(stdin, frames);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
@@ -132,7 +138,7 @@ async function pickSkip(
 	stdin: { write: (s: string) => void },
 	frames: string[],
 ) {
-	await settleAfterLogin(frames);
+	await settleAfterLogin(stdin, frames);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\x1B[B");
