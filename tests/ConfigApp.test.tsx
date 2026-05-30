@@ -280,10 +280,13 @@ describe("ConfigApp", () => {
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
 		expect(history).not.toContain("Installing packages");
-		expect(history).toContain("Backed up Claude Code");
 		expect(backupOnlySpy).toHaveBeenCalledTimes(1);
 		expect(backupOnlySpy).toHaveBeenCalledWith("claude-code");
 		expect(configureSpy).not.toHaveBeenCalled();
+		// Skip renders no backup Step; the configure-path rows (non-skip branch
+		// of the same render) must not appear.
+		expect(history).not.toContain("Configure tools");
+		expect(history).not.toContain("Configured Claude Code");
 	});
 });
 

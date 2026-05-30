@@ -591,7 +591,7 @@ describe("InstallApp fail-stop invariant", () => {
 		});
 	});
 
-	test("skip-configuration flow backs up but does not write configs", async () => {
+	test("skip-configuration flow backs up silently and writes no configs", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = vi
@@ -617,68 +617,17 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const history = allFrames(frames);
 		expect(history).toContain("Skip configuration");
-		expect(history).toContain("Back up existing configs");
-		expect(history).toContain("Backed up Claude Code");
 		expect(history).toContain("Happy coding");
+		// The backup still runs for its side-effect…
 		expect(backupOnlySpy).toHaveBeenCalledTimes(1);
 		expect(backupOnlySpy).toHaveBeenCalledWith("claude-code");
 		expect(configureSpy).not.toHaveBeenCalled();
 		expect(fetchApiKeySpy).not.toHaveBeenCalled();
-	});
-
-	test("skip-configuration with pre-existing backup reports it as preserved, not re-backed-up", async () => {
-		stubExecFile(() => ({ stdout: "ok" }));
-		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
-			() => new Promise(() => {}),
-		);
-		vi.spyOn(configure, "backupOnly").mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: "/tmp/x.backup",
-				created: false,
-			},
-		]);
-
-		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin, frames);
-		await pickSkip(stdin, frames);
-		await waitForFrame(
-			frames,
-			"Claude Code backup already exists — left untouched",
-		);
-
-		const history = allFrames(frames);
-		expect(history).toContain(
-			"Claude Code backup already exists — left untouched",
-		);
-		expect(history).not.toContain("Backed up Claude Code");
-	});
-
-	test("skip-configuration with no live config reports nothing to back up", async () => {
-		stubExecFile(() => ({ stdout: "ok" }));
-		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
-			() => new Promise(() => {}),
-		);
-		vi.spyOn(configure, "backupOnly").mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: null,
-				created: false,
-			},
-		]);
-
-		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin, frames);
-		await pickSkip(stdin, frames);
-		await waitForFrame(frames, "Nothing to back up for Claude Code");
-
-		const history = allFrames(frames);
-		expect(history).toContain("Nothing to back up for Claude Code");
-		expect(history).not.toContain("Backed up Claude Code");
+		// …but the Skip path renders no backup Step. The configure-path title
+		// and rows (emitted on the non-skip branch of the same render) must not
+		// appear here.
+		expect(history).not.toContain("Configure tools");
+		expect(history).not.toContain("Configured Claude Code");
 	});
 
 	test("login retry after failure reaches the done screen", async () => {

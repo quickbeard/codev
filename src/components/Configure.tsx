@@ -34,15 +34,6 @@ const LABEL: Record<BackupKind, string> = {
 	"continue-config": "Continue",
 };
 
-function describeResult(r: ConfigureResult, skipped: boolean): string[] {
-	if (skipped) {
-		if (!r.backupPath) return [`Nothing to back up for ${LABEL[r.kind]}`];
-		if (r.created) return [`Backed up ${LABEL[r.kind]}`];
-		return [`${LABEL[r.kind]} backup already exists — left untouched`];
-	}
-	return [`Configured ${LABEL[r.kind]}`];
-}
-
 export function Configure({ tools, creds, onDone }: ConfigureProps) {
 	const [phase, setPhase] = useState<Phase>("running");
 	const [logs, setLogs] = useState<string[]>([]);
@@ -82,11 +73,12 @@ export function Configure({ tools, creds, onDone }: ConfigureProps) {
 					results.push(...configureContinue(creds));
 				}
 			}
-			const next: string[] = [];
-			for (const r of results) {
-				next.push(...describeResult(r, creds === null));
+			// Skip-configuration (creds === null) still runs backupOnly above for
+			// its side-effects, but renders no rows — SetupApp hides the whole
+			// Step on that path. Only the configure path emits visible output.
+			if (creds !== null) {
+				setLogs(results.map((r) => `Configured ${LABEL[r.kind]}`));
 			}
-			setLogs(next);
 			setPhase("done");
 			// Hand off immediately. SetupApp's finalize Phase owns the visible
 			// pause before exit so the "Configured X" + "Happy coding!" rows
@@ -109,8 +101,6 @@ export function Configure({ tools, creds, onDone }: ConfigureProps) {
 	);
 }
 
-export function configureTitle(skip = false) {
-	return (
-		<Text bold>{skip ? "Back up existing configs" : "Configure tools"}</Text>
-	);
+export function configureTitle() {
+	return <Text bold>Configure tools</Text>;
 }

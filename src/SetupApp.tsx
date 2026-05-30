@@ -624,18 +624,26 @@ export function SetupApp({ mode }: SetupAppProps) {
 						</Step>
 					)}
 				{POST_MODEL_CHOICE.includes(step) &&
-					(creds || authMethod === "skip") && (
-						<Step
-							active={step === "configuring"}
-							title={configureTitle(authMethod === "skip")}
-						>
+					(creds || authMethod === "skip") &&
+					(authMethod === "skip" ? (
+						// Skip configuration runs Configure for its backup
+						// side-effects only — rendered bare (no Step, no title) so
+						// nothing appears in the TUI. Configure itself emits no rows
+						// on the creds === null path.
+						<Configure
+							tools={installedTools}
+							creds={creds}
+							onDone={handleConfigureDone}
+						/>
+					) : (
+						<Step active={step === "configuring"} title={configureTitle()}>
 							<Configure
 								tools={installedTools}
 								creds={creds}
 								onDone={handleConfigureDone}
 							/>
 						</Step>
-					)}
+					))}
 				{step === "done" && (
 					<SetupComplete
 						tools={installedTools}
