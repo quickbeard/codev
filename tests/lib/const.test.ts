@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/const.js";
+import {
+	DEFAULT_PROXY_URL,
+	PROXY_URL,
+	SUPABASE_ANON_KEY,
+	SUPABASE_URL,
+} from "@/lib/const.js";
 
 let tempDir: string;
 beforeEach(() => {
@@ -78,5 +83,42 @@ describe("Supabase const accessors", () => {
 			supabase_anon_key: "a2",
 		});
 		expect(SUPABASE_URL()).toBe("https://second.supabase.co");
+	});
+});
+
+describe("PROXY_URL", () => {
+	test("returns the baked-in default when auth.json does not exist", () => {
+		expect(PROXY_URL()).toBe(DEFAULT_PROXY_URL);
+	});
+
+	test("returns the baked-in default when proxy_url is unset", () => {
+		writeAuthJson({ supabase_url: "u", supabase_anon_key: "a" });
+		expect(PROXY_URL()).toBe(DEFAULT_PROXY_URL);
+	});
+
+	test("returns the baked-in default when proxy_url is an empty string", () => {
+		writeAuthJson({ proxy_url: "" });
+		expect(PROXY_URL()).toBe(DEFAULT_PROXY_URL);
+	});
+
+	test("returns the override when proxy_url is set", () => {
+		writeAuthJson({ proxy_url: "https://my-proxy.example.com" });
+		expect(PROXY_URL()).toBe("https://my-proxy.example.com");
+	});
+
+	test("reads the live file (no module-load caching)", () => {
+		writeAuthJson({ proxy_url: "https://first.example.com" });
+		expect(PROXY_URL()).toBe("https://first.example.com");
+
+		writeAuthJson({ proxy_url: "https://second.example.com" });
+		expect(PROXY_URL()).toBe("https://second.example.com");
+	});
+
+	test("ignores other fields when reading proxy_url", () => {
+		writeAuthJson({
+			proxy_url: "https://only-this.example.com",
+			supabase_url: "should-not-matter",
+		});
+		expect(PROXY_URL()).toBe("https://only-this.example.com");
 	});
 });

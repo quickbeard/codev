@@ -84,6 +84,7 @@ interface AuthFileContents {
 	model?: string;
 	supabase_url?: string;
 	supabase_anon_key?: string;
+	proxy_url?: string;
 }
 
 export interface CodevConfig {
@@ -187,6 +188,17 @@ export function saveCodevConfig(config: CodevConfig): void {
 	});
 }
 
+// Persists a user-chosen proxy URL into ~/.codev/auth.json, replacing the
+// baked-in default that PROXY_URL() in const.ts otherwise returns. Pass an
+// empty string to clear the override and revert to the default.
+export function saveProxyUrl(url: string): void {
+	const existing = readAuthFile() ?? {};
+	writeAuthFile({
+		...existing,
+		proxy_url: url.length > 0 ? url : undefined,
+	});
+}
+
 export function loadApiKey(): ApiKeyCreds | null {
 	const raw = readAuthFile();
 	if (!raw?.api_key) return null;
@@ -209,6 +221,7 @@ export async function logout(): Promise<boolean> {
 			model: raw.model,
 			supabase_url: raw.supabase_url,
 			supabase_anon_key: raw.supabase_anon_key,
+			proxy_url: raw.proxy_url,
 		};
 		const hasAnything = Object.values(preserved).some((v) => v !== undefined);
 		if (hasAnything) {

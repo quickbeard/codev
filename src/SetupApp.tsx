@@ -24,6 +24,11 @@ import {
 	manualCredentialsTitle,
 } from "@/components/ManualCredentials.js";
 import { ModelSelect, modelSelectTitle } from "@/components/ModelSelect.js";
+import {
+	ProxyUrl,
+	type ProxyUrlChoice,
+	proxyUrlTitle,
+} from "@/components/ProxyUrl.js";
 import { Step } from "@/components/Step.js";
 import {
 	CLAUDE_CODE_EXT_SENTINEL,
@@ -38,6 +43,7 @@ import {
 	loadApiKey,
 	refreshCodevConfig,
 	saveApiKey,
+	saveProxyUrl,
 } from "@/lib/auth.js";
 import {
 	type Credentials,
@@ -54,6 +60,7 @@ type Phase =
 	| "login"
 	| "installing"
 	| "install-failed"
+	| "proxy-url"
 	| "refreshing-config"
 	| "validating-existing"
 	| "key-choice"
@@ -67,6 +74,22 @@ type Phase =
 const POST_LOGIN: Phase[] = [
 	"installing",
 	"install-failed",
+	"proxy-url",
+	"refreshing-config",
+	"validating-existing",
+	"key-choice",
+	"fetching-key",
+	"manual-creds",
+	"model-choice",
+	"configuring",
+	"configure-failed",
+	"done",
+];
+// "proxy-url and everything after". Used as the visibility gate for the
+// ProxyUrl Step itself, so it doesn't mount during the install phase but
+// stays rendered (read-only) after the user has picked.
+const POST_INSTALL: Phase[] = [
+	"proxy-url",
 	"refreshing-config",
 	"validating-existing",
 	"key-choice",
@@ -148,6 +171,13 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// (and the row stays unmounted) on the success path, so refresh remains
 	// invisible when it works.
 	const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
+	// Survivors waiting for the proxy-url Step to resolve. Populated by
+	// handleInstallDone (install mode) or handleLoginDone (config mode); read
+	// by handleProxyUrlConfirm to hand off to runPostInstallSideEffects.
+	const [pendingSurvivors, setPendingSurvivors] = useState<Tool[]>([]);
+	// User's proxy-url pick, kept so the read-only history row above later
+	// steps shows which option was chosen and (for custom) the URL entered.
+	const [proxyChoice, setProxyChoice] = useState<ProxyUrlChoice | null>(null);
 
 	const handleToolSelectConfirm = (selected: ToolSelectValue[]) => {
 		const hasClaudeCodeExt = selected.includes(CLAUDE_CODE_EXT_SENTINEL);
@@ -290,11 +320,14 @@ export function SetupApp({ mode }: SetupAppProps) {
 				return;
 			}
 			// Config mode skips the Install step entirely: every selected tool
-			// is treated as already installed (the survivor set equals `tools`)
-			// and we go straight into the post-install side-effects.
-			runPostInstallSideEffects(tools, authData);
+			// is treated as already installed (the survivor set equals `tools`).
+			// Route through the proxy-url Step before the post-install
+			// side-effects so the user's chosen URL is in effect for the
+			// refreshCodevConfig call inside runPostInstallSideEffects.
+			setPendingSurvivors(tools);
+			setStep("proxy-url");
 		},
-		[mode, tools, runPostInstallSideEffects],
+		[mode, tools],
 	);
 
 	// Total-failure-only hang: when every selected tool hard-failed (empty
@@ -308,19 +341,39 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// Soft warnings (Continue extension/plugin install couldn't run cleanly)
 	// are rendered as yellow ▲ rows by TaskList and are included in the
 	// survivor set.
-	const handleInstallDone = useCallback(
-		(succeededKeys: string[]) => {
-			if (succeededKeys.length === 0) {
-				setStep("install-failed");
-				return;
+	const handleInstallDone = useCallback((succeededKeys: string[]) => {
+		if (succeededKeys.length === 0) {
+			setStep("install-failed");
+			return;
+		}
+		// Park survivors and hand off to the proxy-url Step. Post-install
+		// side-effects (resetClaudeAuth, installShims, refreshCodevConfig)
+		// run after handleProxyUrlConfirm so the chosen proxy URL is in
+		// effect for the very first refresh call.
+		setPendingSurvivors(succeededKeys as Tool[]);
+		setStep("proxy-url");
+	}, []);
+
+	const handleProxyUrlConfirm = useCallback(
+		(choice: ProxyUrlChoice) => {
+			setProxyChoice(choice);
+			// Persist BEFORE runPostInstallSideEffects fires — that helper calls
+			// refreshCodevConfig, which reads PROXY_URL() at request time.
+			if (choice.method === "custom") {
+				saveProxyUrl(choice.url);
+			} else {
+				// "default" means: clear any prior override so PROXY_URL() falls
+				// back to the baked-in default. Re-running install/config is the
+				// only place to switch back, so we have to handle the revert.
+				saveProxyUrl("");
 			}
 			if (!auth) {
 				// login() runs before this phase, so this is defensive only.
 				return;
 			}
-			runPostInstallSideEffects(succeededKeys as Tool[], auth);
+			runPostInstallSideEffects(pendingSurvivors, auth);
 		},
-		[auth, runPostInstallSideEffects],
+		[auth, pendingSurvivors, runPostInstallSideEffects],
 	);
 
 	const handleAuthMethod = useCallback(
@@ -446,6 +499,18 @@ export function SetupApp({ mode }: SetupAppProps) {
 						title={<Text bold>Installing packages</Text>}
 					>
 						<Install tools={tools} onDone={handleInstallDone} />
+					</Step>
+				)}
+				{POST_INSTALL.includes(step) && (
+					<Step
+						active={step === "proxy-url"}
+						title={proxyUrlTitle(step !== "proxy-url")}
+					>
+						<ProxyUrl
+							onConfirm={handleProxyUrlConfirm}
+							readOnly={step !== "proxy-url"}
+							selected={proxyChoice}
+						/>
 					</Step>
 				)}
 				{POST_REFRESH.includes(step) && refreshWarning && (

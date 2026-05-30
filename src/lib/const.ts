@@ -4,7 +4,7 @@ import { join } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
 
 const BASE_URL = atob("aHR0cHM6Ly9uZXRtaW5kLnZpZXR0ZWwudm4=");
-export const PROXY_URL = `${BASE_URL}/codev-proxy`;
+export const DEFAULT_PROXY_URL = `${BASE_URL}/codev-proxy`;
 export const SSO_URL = `${BASE_URL}/sso-wrapper`;
 export const AI_GATEWAY_URL = `${BASE_URL}/gateway`;
 export const AI_GATEWAY_OPENAI_URL = `${AI_GATEWAY_URL}/v1`;
@@ -23,6 +23,7 @@ export const HAPPY_CODING = "Happy coding! 🎉";
 interface CodevAuthFile {
 	supabase_url?: string;
 	supabase_anon_key?: string;
+	proxy_url?: string;
 }
 
 function readCodevAuthFile(): CodevAuthFile | null {
@@ -51,4 +52,12 @@ export function SUPABASE_URL(): string {
 
 export function SUPABASE_ANON_KEY(): string {
 	return readField("supabase_anon_key", "supabase_anon_key");
+}
+
+// User-overridable: returns the proxy_url from ~/.codev/auth.json if set,
+// otherwise the baked-in default. Picked during `codev install` / `codev
+// config` via the ProxyUrl Step.
+export function PROXY_URL(): string {
+	const override = readCodevAuthFile()?.proxy_url;
+	return override && override.length > 0 ? override : DEFAULT_PROXY_URL;
 }
