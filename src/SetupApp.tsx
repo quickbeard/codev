@@ -29,6 +29,7 @@ import {
 	type ProxyUrlChoice,
 	proxyUrlTitle,
 } from "@/components/ProxyUrl.js";
+import { SetupComplete } from "@/components/SetupComplete.js";
 import { Step } from "@/components/Step.js";
 import {
 	CLAUDE_CODE_EXT_SENTINEL,
@@ -46,6 +47,7 @@ import {
 	saveProxyUrl,
 } from "@/lib/auth.js";
 import {
+	backupClaudeAuth,
 	type Credentials,
 	resetClaudeAuth,
 	type Tool,
@@ -69,6 +71,7 @@ type Phase =
 	| "model-choice"
 	| "configuring"
 	| "configure-failed"
+	| "finalizing"
 	| "done";
 
 const POST_LOGIN: Phase[] = [
@@ -83,6 +86,7 @@ const POST_LOGIN: Phase[] = [
 	"model-choice",
 	"configuring",
 	"configure-failed",
+	"finalizing",
 	"done",
 ];
 // "proxy-url and everything after". Used as the visibility gate for the
@@ -98,6 +102,7 @@ const POST_INSTALL: Phase[] = [
 	"model-choice",
 	"configuring",
 	"configure-failed",
+	"finalizing",
 	"done",
 ];
 const POST_REFRESH: Phase[] = [
@@ -108,6 +113,7 @@ const POST_REFRESH: Phase[] = [
 	"model-choice",
 	"configuring",
 	"configure-failed",
+	"finalizing",
 	"done",
 ];
 const POST_VALIDATE: Phase[] = [
@@ -117,6 +123,7 @@ const POST_VALIDATE: Phase[] = [
 	"model-choice",
 	"configuring",
 	"configure-failed",
+	"finalizing",
 	"done",
 ];
 const POST_KEY_CHOICE: Phase[] = [
@@ -125,9 +132,15 @@ const POST_KEY_CHOICE: Phase[] = [
 	"model-choice",
 	"configuring",
 	"configure-failed",
+	"finalizing",
 	"done",
 ];
-const POST_MODEL_CHOICE: Phase[] = ["configuring", "configure-failed", "done"];
+const POST_MODEL_CHOICE: Phase[] = [
+	"configuring",
+	"configure-failed",
+	"finalizing",
+	"done",
+];
 
 export type SetupMode = "install" | "config";
 
@@ -256,48 +269,17 @@ export function SetupApp({ mode }: SetupAppProps) {
 			});
 	}, []);
 
-	// Shared "post-install" side-effects: applied after a successful Install
-	// step (install mode) AND immediately after login in config mode (where
-	// there's no Install step). Both paths need the same trio — pin survivors
-	// for Configure, reset stale Claude auth so the new settings.json takes
-	// effect, install PATH shims so `claude`/`codex`/`opencode` route through
-	// codev — then refresh CoDev config and advance into key-choice. The
-	// authData arg is passed explicitly because `setAuth` and this call may
-	// happen in the same React tick (config mode); a state read would still
-	// see the prior value.
+	// Pins survivors for Configure to read, then kicks off the (invisible)
+	// refresh transition. Filesystem-mutating side-effects (resetClaudeAuth,
+	// installShims) are deferred to runFinalizeSideEffects after the user
+	// has finished every choice — that way a mid-flow Ctrl-C leaves their
+	// Claude config files and PATH shims untouched. The authData arg is
+	// passed explicitly because `setAuth` and this call may happen in the
+	// same React tick (config mode); a state read would still see the
+	// prior value.
 	const runPostInstallSideEffects = useCallback(
 		(survivors: Tool[], authData: AuthData) => {
 			setInstalledTools(survivors);
-			// Reset Claude Code's auth state silently when any Claude tool is in
-			// the survivor set (CLI or extension). Backs up `~/.claude.json` +
-			// writes `{hasCompletedOnboarding: true}`, and backs up + removes
-			// `~/.claude/.credentials.json`. Best-effort: an error here doesn't
-			// block the flow. The settings.json snapshot still happens later
-			// inside `configureClaudeCode` / `backupOnly`.
-			const hasClaudeTool = survivors.some(
-				(t) =>
-					t === "claude-code" ||
-					t === "vscode-claude-code" ||
-					t === "jetbrains-claude-code",
-			);
-			if (hasClaudeTool) {
-				try {
-					resetClaudeAuth();
-				} catch {
-					// Swallow — the flow always advances.
-				}
-			}
-			// Install PATH shims silently — the final "Done!" message merges the
-			// activation hint in. Best-effort: a failure doesn't block the flow.
-			try {
-				const shimAgents = survivors
-					.map(toolToShimAgent)
-					.filter((agent) => agent !== null);
-				if (shimAgents.length > 0) installShims(shimAgents);
-				setShimsInstalled(true);
-			} catch {
-				// Leave shimsInstalled=false so the resume message stays simple.
-			}
 			// Refresh runs invisibly between this point and the next visible
 			// step. Errors are swallowed by refreshCodevConfig (and captured
 			// into refreshWarning, which surfaces as a yellow ▲ row); the flow
@@ -441,16 +423,62 @@ export function SetupApp({ mode }: SetupAppProps) {
 		[creds],
 	);
 
+	// Filesystem-mutating finalize work. Runs once Configure succeeds, when
+	// the user has clicked through every choice — so a mid-flow Ctrl-C leaves
+	// disk untouched. Skip-configuration is signaled by `creds === null`,
+	// which routes Claude through backupClaudeAuth() (snapshot only) instead
+	// of resetClaudeAuth() (snapshot + replace .claude.json + remove
+	// .credentials.json). Both halves are best-effort; we always advance to
+	// the terminal "done" Phase.
+	const runFinalizeSideEffects = useCallback(
+		(currentCreds: Credentials | null) => {
+			const hasClaudeTool = installedTools.some(
+				(t) =>
+					t === "claude-code" ||
+					t === "vscode-claude-code" ||
+					t === "jetbrains-claude-code",
+			);
+			if (hasClaudeTool) {
+				try {
+					if (currentCreds === null) {
+						backupClaudeAuth();
+					} else {
+						resetClaudeAuth();
+					}
+				} catch {
+					// Swallow — the flow always advances.
+				}
+			}
+			try {
+				const shimAgents = installedTools
+					.map(toolToShimAgent)
+					.filter((agent) => agent !== null);
+				if (shimAgents.length > 0) installShims(shimAgents);
+				setShimsInstalled(true);
+			} catch {
+				// Leave shimsInstalled=false so the terminal message degrades to
+				// plain "Done!".
+			}
+			setStep("done");
+			// Hold the terminal frame for ~1s so the user can read "Done! Run
+			// exec $SHELL" and "Happy coding!" before Ink tears down. Without
+			// this, React's render of the "done" Phase wouldn't flush to the
+			// terminal before exit() unmounts the app.
+			setTimeout(() => exit(), 1000);
+		},
+		[installedTools, exit],
+	);
+
 	const handleConfigureDone = useCallback(
 		(success: boolean) => {
 			if (!success) {
 				setStep("configure-failed");
 				return;
 			}
-			setStep("done");
-			exit();
+			setStep("finalizing");
+			runFinalizeSideEffects(creds);
 		},
-		[exit],
+		[creds, runFinalizeSideEffects],
 	);
 
 	return (
@@ -596,19 +624,32 @@ export function SetupApp({ mode }: SetupAppProps) {
 						</Step>
 					)}
 				{POST_MODEL_CHOICE.includes(step) &&
-					(creds || authMethod === "skip") && (
-						<Step
-							active={step === "configuring"}
-							title={configureTitle(authMethod === "skip")}
-						>
+					(creds || authMethod === "skip") &&
+					(authMethod === "skip" ? (
+						// Skip configuration runs Configure for its backup
+						// side-effects only — rendered bare (no Step, no title) so
+						// nothing appears in the TUI. Configure itself emits no rows
+						// on the creds === null path.
+						<Configure
+							tools={installedTools}
+							creds={creds}
+							onDone={handleConfigureDone}
+						/>
+					) : (
+						<Step active={step === "configuring"} title={configureTitle()}>
 							<Configure
 								tools={installedTools}
 								creds={creds}
-								shimsInstalled={shimsInstalled}
 								onDone={handleConfigureDone}
 							/>
 						</Step>
-					)}
+					))}
+				{step === "done" && (
+					<SetupComplete
+						tools={installedTools}
+						shimsInstalled={shimsInstalled}
+					/>
+				)}
 			</Frame>
 		</Box>
 	);

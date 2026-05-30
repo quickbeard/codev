@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	type BackupKind,
 	backupOnly,
@@ -12,23 +12,19 @@ import {
 	kindForTool,
 	type Tool,
 } from "@/lib/configure.js";
-import { HAPPY_CODING, HELP_HINT } from "@/lib/const.js";
 
 interface ConfigureProps {
 	tools: Tool[];
 	// `null` means skip writing CoDev's config; only create the backup.
 	creds: Credentials | null;
-	// When true, the final resume message merges in the shim-activation hint
-	// (platform-aware: `exec $SHELL` on Unix, "Restart your terminal" on Win).
-	shimsInstalled?: boolean;
 	onDone: (success: boolean) => void;
 }
 
 type Phase = "running" | "done" | "error";
 
 // `claude-json` and `claude-credentials` never flow through Configure (the
-// install-time `resetClaudeAuth` returns them silently). The entries exist
-// for Record<BackupKind, string> type completeness only.
+// install flow's finalize Phase owns them). The entries exist for
+// Record<BackupKind, string> type completeness only.
 const LABEL: Record<BackupKind, string> = {
 	"claude-settings": "Claude Code",
 	"claude-json": "Claude Code (onboarding)",
@@ -38,38 +34,7 @@ const LABEL: Record<BackupKind, string> = {
 	"continue-config": "Continue",
 };
 
-function resumeMessage(tools: Tool[], shimsInstalled: boolean): ReactNode {
-	if (tools.length === 0) return null;
-	if (!shimsInstalled) {
-		return <Text>Done!</Text>;
-	}
-	if (process.platform === "win32") {
-		return <Text>Done! Restart your terminal.</Text>;
-	}
-	return (
-		<Text>
-			{"Done! Run "}
-			<Text color="cyan">exec $SHELL</Text>
-			{" to reload your shell."}
-		</Text>
-	);
-}
-
-function describeResult(r: ConfigureResult, skipped: boolean): string[] {
-	if (skipped) {
-		if (!r.backupPath) return [`Nothing to back up for ${LABEL[r.kind]}`];
-		if (r.created) return [`Backed up ${LABEL[r.kind]}`];
-		return [`${LABEL[r.kind]} backup already exists — left untouched`];
-	}
-	return [`Configured ${LABEL[r.kind]}`];
-}
-
-export function Configure({
-	tools,
-	creds,
-	shimsInstalled = false,
-	onDone,
-}: ConfigureProps) {
+export function Configure({ tools, creds, onDone }: ConfigureProps) {
 	const [phase, setPhase] = useState<Phase>("running");
 	const [logs, setLogs] = useState<string[]>([]);
 	const [error, setError] = useState<string | null>(null);
@@ -108,13 +73,17 @@ export function Configure({
 					results.push(...configureContinue(creds));
 				}
 			}
-			const next: string[] = [];
-			for (const r of results) {
-				next.push(...describeResult(r, creds === null));
+			// Skip-configuration (creds === null) still runs backupOnly above for
+			// its side-effects, but renders no rows — SetupApp hides the whole
+			// Step on that path. Only the configure path emits visible output.
+			if (creds !== null) {
+				setLogs(results.map((r) => `Configured ${LABEL[r.kind]}`));
 			}
-			setLogs(next);
 			setPhase("done");
-			setTimeout(() => onDone(true), 1000);
+			// Hand off immediately. SetupApp's finalize Phase owns the visible
+			// pause before exit so the "Configured X" + "Happy coding!" rows
+			// render together rather than in two staggered beats.
+			onDone(true);
 		} catch (err) {
 			setError((err as Error).message);
 			setPhase("error");
@@ -127,24 +96,11 @@ export function Configure({
 			{logs.map((log, i) => (
 				<Text key={`cfg-${i.toString()}`}>{log}</Text>
 			))}
-			{phase === "done" && (
-				<Box marginBottom={1} flexDirection="column">
-					{resumeMessage(tools, shimsInstalled)}
-					<Box marginTop={1}>
-						<Text dimColor>{HELP_HINT}</Text>
-					</Box>
-					<Text bold color="magenta">
-						{HAPPY_CODING}
-					</Text>
-				</Box>
-			)}
 			{error && <Text color="red">{`Configure failed: ${error}`}</Text>}
 		</Box>
 	);
 }
 
-export function configureTitle(skip = false) {
-	return (
-		<Text bold>{skip ? "Back up existing configs" : "Configure tools"}</Text>
-	);
+export function configureTitle() {
+	return <Text bold>Configure tools</Text>;
 }

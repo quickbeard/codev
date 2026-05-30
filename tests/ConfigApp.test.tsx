@@ -1,5 +1,12 @@
 import * as child_process from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
@@ -273,9 +280,114 @@ describe("ConfigApp", () => {
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
 		expect(history).not.toContain("Installing packages");
-		expect(history).toContain("Backed up Claude Code");
 		expect(backupOnlySpy).toHaveBeenCalledTimes(1);
 		expect(backupOnlySpy).toHaveBeenCalledWith("claude-code");
 		expect(configureSpy).not.toHaveBeenCalled();
+		// Skip renders no backup Step; the configure-path rows (non-skip branch
+		// of the same render) must not appear.
+		expect(history).not.toContain("Configure tools");
+		expect(history).not.toContain("Configured Claude Code");
+	});
+});
+
+// Symmetric with InstallApp.test.tsx's "finalize: Claude file fate" — verifies
+// that `codev config` honors the same Skip vs non-Skip routing for
+// ~/.claude.json and ~/.claude/.credentials.json. SetupApp drives both modes
+// so the wiring is shared; this is a cheap regression guard against a future
+// mode-specific divergence.
+describe("ConfigApp finalize: Claude file fate by auth choice", () => {
+	function seedClaudeFiles(): {
+		jsonPath: string;
+		credPath: string;
+		jsonOriginal: { marker: string };
+		credOriginal: { session: string };
+	} {
+		const jsonPath = join(configAppTempHome, ".claude.json");
+		const credDir = join(configAppTempHome, ".claude");
+		const credPath = join(credDir, ".credentials.json");
+		const jsonOriginal = { marker: "user-pre-codev-state" };
+		const credOriginal = { session: "user-prior-session" };
+		mkdirSync(credDir, { recursive: true });
+		writeFileSync(jsonPath, JSON.stringify(jsonOriginal));
+		writeFileSync(credPath, JSON.stringify(credOriginal));
+		return { jsonPath, credPath, jsonOriginal, credOriginal };
+	}
+
+	test("Skip configuration preserves ~/.claude.json and ~/.claude/.credentials.json originals", async () => {
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+		vi.spyOn(configure, "backupOnly").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.backup",
+				created: true,
+			},
+		]);
+		stubExecFile(() => ({ stdout: "ok" }));
+
+		const { jsonPath, credPath, jsonOriginal, credOriginal } =
+			seedClaudeFiles();
+
+		const { stdin, frames } = render(<ConfigApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickSkip(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		expect(JSON.parse(readFileSync(jsonPath, "utf-8"))).toEqual(jsonOriginal);
+		expect(existsSync(credPath)).toBe(true);
+		expect(JSON.parse(readFileSync(credPath, "utf-8"))).toEqual(credOriginal);
+		expect(JSON.parse(readFileSync(`${jsonPath}.backup`, "utf-8"))).toEqual(
+			jsonOriginal,
+		);
+		expect(JSON.parse(readFileSync(`${credPath}.backup`, "utf-8"))).toEqual(
+			credOriginal,
+		);
+	});
+
+	test("manual-credentials path triggers the destructive reset", async () => {
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+		vi.spyOn(proxy, "validateApiKey").mockResolvedValue(true);
+		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.backup",
+				created: true,
+			},
+		]);
+		stubExecFile(() => ({ stdout: "ok" }));
+
+		const { jsonPath, credPath, jsonOriginal, credOriginal } =
+			seedClaudeFiles();
+
+		const { stdin, frames } = render(<ConfigApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickManual(stdin, frames);
+		await typeManualCreds(
+			stdin,
+			frames,
+			"https://gateway.example.com/v1",
+			"sk-config-claude-123",
+		);
+		await pickFirstModel(stdin, frames, "m-alpha");
+		await waitForFrame(frames, "Happy coding");
+
+		expect(JSON.parse(readFileSync(`${jsonPath}.backup`, "utf-8"))).toEqual(
+			jsonOriginal,
+		);
+		expect(JSON.parse(readFileSync(`${credPath}.backup`, "utf-8"))).toEqual(
+			credOriginal,
+		);
+		expect(JSON.parse(readFileSync(jsonPath, "utf-8"))).toEqual({
+			hasCompletedOnboarding: true,
+		});
+		expect(existsSync(credPath)).toBe(false);
 	});
 });

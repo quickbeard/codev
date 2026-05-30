@@ -1,5 +1,12 @@
 import * as child_process from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
@@ -584,7 +591,7 @@ describe("InstallApp fail-stop invariant", () => {
 		});
 	});
 
-	test("skip-configuration flow backs up but does not write configs", async () => {
+	test("skip-configuration flow backs up silently and writes no configs", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		const fetchApiKeySpy = vi
@@ -610,68 +617,17 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const history = allFrames(frames);
 		expect(history).toContain("Skip configuration");
-		expect(history).toContain("Back up existing configs");
-		expect(history).toContain("Backed up Claude Code");
 		expect(history).toContain("Happy coding");
+		// The backup still runs for its side-effect…
 		expect(backupOnlySpy).toHaveBeenCalledTimes(1);
 		expect(backupOnlySpy).toHaveBeenCalledWith("claude-code");
 		expect(configureSpy).not.toHaveBeenCalled();
 		expect(fetchApiKeySpy).not.toHaveBeenCalled();
-	});
-
-	test("skip-configuration with pre-existing backup reports it as preserved, not re-backed-up", async () => {
-		stubExecFile(() => ({ stdout: "ok" }));
-		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
-			() => new Promise(() => {}),
-		);
-		vi.spyOn(configure, "backupOnly").mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: "/tmp/x.backup",
-				created: false,
-			},
-		]);
-
-		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin, frames);
-		await pickSkip(stdin, frames);
-		await waitForFrame(
-			frames,
-			"Claude Code backup already exists — left untouched",
-		);
-
-		const history = allFrames(frames);
-		expect(history).toContain(
-			"Claude Code backup already exists — left untouched",
-		);
-		expect(history).not.toContain("Backed up Claude Code");
-	});
-
-	test("skip-configuration with no live config reports nothing to back up", async () => {
-		stubExecFile(() => ({ stdout: "ok" }));
-		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
-			() => new Promise(() => {}),
-		);
-		vi.spyOn(configure, "backupOnly").mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: null,
-				created: false,
-			},
-		]);
-
-		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin, frames);
-		await pickSkip(stdin, frames);
-		await waitForFrame(frames, "Nothing to back up for Claude Code");
-
-		const history = allFrames(frames);
-		expect(history).toContain("Nothing to back up for Claude Code");
-		expect(history).not.toContain("Backed up Claude Code");
+		// …but the Skip path renders no backup Step. The configure-path title
+		// and rows (emitted on the non-skip branch of the same render) must not
+		// appear here.
+		expect(history).not.toContain("Configure tools");
+		expect(history).not.toContain("Configured Claude Code");
 	});
 
 	test("login retry after failure reaches the done screen", async () => {
@@ -1283,5 +1239,110 @@ describe("InstallApp existing-key path", () => {
 		expect(history).toContain("Could not verify saved API key");
 		expect(history).toContain("ECONNREFUSED");
 		expect(history).not.toContain("Reuse existing API Key");
+	});
+});
+
+// Regression: the finalize Phase picks backupClaudeAuth vs resetClaudeAuth off
+// `creds === null`. Skip-configuration sets creds=null, so the originals must
+// survive; any non-Skip path lands with creds≠null and the destructive reset
+// fires. These tests touch the real (stubbed-HOME) ~/.claude.json and
+// ~/.claude/.credentials.json — no spies on configure — to catch wiring
+// regressions that mocked tests would miss.
+describe("InstallApp finalize: Claude file fate by auth choice", () => {
+	function seedClaudeFiles(): {
+		jsonPath: string;
+		credPath: string;
+		jsonOriginal: { marker: string };
+		credOriginal: { session: string };
+	} {
+		const jsonPath = join(installAppTempHome, ".claude.json");
+		const credDir = join(installAppTempHome, ".claude");
+		const credPath = join(credDir, ".credentials.json");
+		const jsonOriginal = { marker: "user-pre-codev-state" };
+		const credOriginal = { session: "user-prior-session" };
+		mkdirSync(credDir, { recursive: true });
+		writeFileSync(jsonPath, JSON.stringify(jsonOriginal));
+		writeFileSync(credPath, JSON.stringify(credOriginal));
+		return { jsonPath, credPath, jsonOriginal, credOriginal };
+	}
+
+	test("Skip configuration preserves ~/.claude.json and ~/.claude/.credentials.json originals", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+
+		const { jsonPath, credPath, jsonOriginal, credOriginal } =
+			seedClaudeFiles();
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickSkip(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		// Source files untouched — neither replaced with the
+		// hasCompletedOnboarding stub nor deleted.
+		expect(JSON.parse(readFileSync(jsonPath, "utf-8"))).toEqual(jsonOriginal);
+		expect(existsSync(credPath)).toBe(true);
+		expect(JSON.parse(readFileSync(credPath, "utf-8"))).toEqual(credOriginal);
+		// Backups still created (the finalize Phase runs backupClaudeAuth on
+		// Skip), so the user can `codev restore claude` later.
+		expect(JSON.parse(readFileSync(`${jsonPath}.backup`, "utf-8"))).toEqual(
+			jsonOriginal,
+		);
+		expect(JSON.parse(readFileSync(`${credPath}.backup`, "utf-8"))).toEqual(
+			credOriginal,
+		);
+	});
+
+	test("manual-credentials path triggers the destructive reset (replaces .claude.json, removes .credentials.json)", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+		vi.spyOn(proxy, "validateApiKey").mockResolvedValue(true);
+		// Stub the actual settings.json writer to prevent the real configure
+		// from racing the assertions below; we only care about the .claude.json
+		// + .credentials.json transitions here, which are owned by finalize.
+		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.backup",
+				created: true,
+			},
+		]);
+
+		const { jsonPath, credPath, jsonOriginal, credOriginal } =
+			seedClaudeFiles();
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickManual(stdin, frames);
+		await typeManualCreds(
+			stdin,
+			frames,
+			"https://gateway.example.com/v1",
+			"sk-manual-claude-123",
+		);
+		await pickFirstModel(stdin, frames, "m-alpha");
+		await waitForFrame(frames, "Happy coding");
+
+		// Backups carry the original contents.
+		expect(JSON.parse(readFileSync(`${jsonPath}.backup`, "utf-8"))).toEqual(
+			jsonOriginal,
+		);
+		expect(JSON.parse(readFileSync(`${credPath}.backup`, "utf-8"))).toEqual(
+			credOriginal,
+		);
+		// Live ~/.claude.json was overwritten with the bypass stub.
+		expect(JSON.parse(readFileSync(jsonPath, "utf-8"))).toEqual({
+			hasCompletedOnboarding: true,
+		});
+		// Live ~/.claude/.credentials.json was removed.
+		expect(existsSync(credPath)).toBe(false);
 	});
 });
