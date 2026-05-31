@@ -61,3 +61,11 @@ export function PROXY_URL(): string {
 	const override = readCodevAuthFile()?.proxy_url;
 	return override && override.length > 0 ? override : DEFAULT_PROXY_URL;
 }
+
+// SkillHub skill registry. Lives under /netmindhub on the same host as the
+// gateway/SSO. Overridable via SKILLHUB_REGISTRY (testing / self-hosted);
+// trailing slashes are trimmed so callers can join paths predictably.
+export function SKILLHUB_REGISTRY(): string {
+	const raw = process.env.SKILLHUB_REGISTRY ?? `${BASE_URL}/netmindhub`;
+	return raw.replace(/\/+$/, "");
+}

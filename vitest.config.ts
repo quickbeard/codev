@@ -10,6 +10,10 @@ export default defineConfig({
 	test: {
 		include: ["tests/**/*.test.{ts,tsx}"],
 		environment: "node",
+		// Global safety net: tests/setup.ts mocks the `open` package to a no-op
+		// so no test can ever launch a real browser, even if it forgets to mock
+		// a component's post-login side-effects.
+		setupFiles: ["./tests/setup.ts"],
 		// Windows CI runners are 2-3× slower and load-variable: a render that
 		// takes 30 ms locally can take a couple of seconds under contention.
 		// Vitest's defaults (5 s test, 10 s hook) leave no slack, so Ink tests

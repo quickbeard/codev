@@ -3,6 +3,13 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { Login } from "@/components/Login.js";
 import * as auth from "@/lib/auth.js";
 
+// The SkillHub capture runs after a successful SSO login. It's exercised in
+// tests/lib/skillhub.test.ts; here we stub it to a no-op so these tests stay
+// focused on the SSO login UI and don't touch the network / a real browser.
+vi.mock("@/lib/skillhub.js", () => ({
+	captureSkillhubSession: vi.fn().mockResolvedValue(undefined),
+}));
+
 afterEach(() => {
 	cleanup();
 });

@@ -66,13 +66,16 @@ export interface ApiKeyCreds {
 	model?: string;
 }
 
-// auth.json holds three independent blocks: SSO tokens (issued by the IdP),
-// the gateway API key (issued by /auth/exchange or entered manually), and the
+// auth.json holds four independent blocks: SSO tokens (issued by the IdP),
+// the gateway API key (issued by /auth/exchange or entered manually), the
 // CoDev runtime config (Supabase coordinates, fetched from codev-proxy's
-// /config endpoint on every successful SSO login). They share a file because
-// they're written together on a fresh install, but each is updated in
-// isolation — saving SSO must not clobber the api_key or codev-config blocks,
-// and `codev logout` strips SSO while preserving the rest for reuse.
+// /config endpoint on every successful SSO login), and the SkillHub registry
+// session (an iron-session cookie captured alongside every SSO login). They
+// share a file because they're written together on a fresh install, but each
+// is updated in isolation — saving SSO must not clobber the api_key, codev-
+// config, or skillhub blocks. `codev logout` strips both the SSO tokens and
+// the SkillHub session (same identity) while preserving the api_key / config /
+// proxy_url blocks for reuse.
 interface AuthFileContents {
 	access_token?: string;
 	id_token?: string;
@@ -85,6 +88,9 @@ interface AuthFileContents {
 	supabase_url?: string;
 	supabase_anon_key?: string;
 	proxy_url?: string;
+	skillhub_cookie?: string;
+	skillhub_registry?: string;
+	skillhub_user?: { username: string; role: string };
 }
 
 export interface CodevConfig {
@@ -209,12 +215,46 @@ export function loadApiKey(): ApiKeyCreds | null {
 	};
 }
 
+export interface SkillhubSession {
+	// The registry origin the cookie belongs to (cookies are origin-scoped, so
+	// we re-capture when the configured registry changes).
+	registry: string;
+	// Normalized `skill-hub-session=<value>` Cookie header fragment.
+	cookie: string;
+	user: { username: string; role: string };
+}
+
+// Persists the SkillHub registry session next to the SSO tokens. Updated in
+// isolation so it never clobbers the SSO / api_key / config blocks.
+export function saveSkillhubSession(session: SkillhubSession): void {
+	const existing = readAuthFile() ?? {};
+	writeAuthFile({
+		...existing,
+		skillhub_cookie: session.cookie,
+		skillhub_registry: session.registry,
+		skillhub_user: session.user,
+	});
+}
+
+export function loadSkillhubSession(): SkillhubSession | null {
+	const raw = readAuthFile();
+	if (!raw?.skillhub_cookie || !raw.skillhub_registry) return null;
+	return {
+		registry: raw.skillhub_registry,
+		cookie: raw.skillhub_cookie,
+		user: raw.skillhub_user ?? { username: "", role: "" },
+	};
+}
+
 export async function logout(): Promise<boolean> {
 	const raw = readAuthFile();
 	if (!raw) return false;
 	const hasSso = !!(raw.access_token || raw.refresh_token);
 	if (!hasSso) return false;
 	try {
+		// Reusable blocks survive logout; SSO tokens AND the SkillHub session
+		// (skillhub_*) are dropped by omission — both are tied to the IdP
+		// identity we're signing out of.
 		const preserved: AuthFileContents = {
 			api_key: raw.api_key,
 			base_url: raw.base_url,

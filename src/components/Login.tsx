@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type AuthData, login } from "@/lib/auth.js";
+import { captureSkillhubSession } from "@/lib/skillhub.js";
 
 interface LoginProps {
 	onDone: (auth: AuthData) => void;
@@ -30,7 +31,13 @@ export function Login({ onDone }: LoginProps) {
 			openBrowserRef.current = openBrowserFn;
 			setWaitingForEnter(true);
 		})
-			.then((auth) => {
+			.then(async (auth) => {
+				// Connect the SkillHub registry on the same login. Best-effort:
+				// captureSkillhubSession never throws — it logs a warning and
+				// returns — so a registry hiccup never blocks the SSO login that
+				// already succeeded. It opens a second browser tab to the consent
+				// page (the fresh SSO session means no re-login is needed).
+				await captureSkillhubSession(addLog);
 				onDone(auth);
 			})
 			.catch((err: Error) => {

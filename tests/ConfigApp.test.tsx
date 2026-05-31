@@ -12,6 +12,14 @@ import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ConfigApp } from "@/ConfigApp.js";
+
+// Stub the SkillHub capture that runs after a successful SSO login so these
+// tests never trigger its loopback/browser flow. Covered directly in
+// tests/lib/skillhub.test.ts.
+vi.mock("@/lib/skillhub.js", () => ({
+	captureSkillhubSession: vi.fn().mockResolvedValue(undefined),
+}));
+
 import * as auth from "@/lib/auth.js";
 import * as configure from "@/lib/configure.js";
 import * as proxy from "@/lib/proxy.js";

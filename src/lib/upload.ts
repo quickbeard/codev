@@ -26,6 +26,7 @@ import {
 import { runExport } from "@/lib/export.js";
 import { projectLogsDir } from "@/lib/paths.js";
 import { fetchSupabaseSession } from "@/lib/proxy.js";
+import { captureSkillhubSession } from "@/lib/skillhub.js";
 import { getSupabaseConfig, type SupabaseConfig } from "@/lib/supabase.js";
 import { AGENTS } from "@/providers/types.js";
 
@@ -198,6 +199,12 @@ async function ensureAuth(onStatus: (message: string) => void) {
 	// login we don't have a cache yet, so populating it here avoids burning
 	// the first Supabase attempt + retry path just to fetch coords.
 	await refreshCodevConfig(fresh.access_token, onStatus);
+	// Connect the SkillHub registry on the same login (best-effort; never
+	// throws). Only reached on an interactive fresh login: the daemon bails in
+	// runUploadDaemon/spawnUploadDaemon when !loadAuth(), and an already-cached
+	// auth returns above before login() runs — so this never pops a browser
+	// from the detached, TTY-less daemon.
+	await captureSkillhubSession(onStatus);
 	return fresh;
 }
 
