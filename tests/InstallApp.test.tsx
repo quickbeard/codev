@@ -299,7 +299,7 @@ describe("InstallApp fail-stop invariant", () => {
 	test("install failure does not advance to key-choice", async () => {
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		stubExecFile((file, args) => {
-			if (file === "npm" && args[0] === "install") {
+			if (file === "npm" && args[0] === "i") {
 				const err = Object.assign(new Error("spawn npm ENOENT"), {
 					code: "ENOENT",
 				});

@@ -82,19 +82,13 @@ afterEach(() => {
 
 describe("npm.ts", () => {
 	describe("installPackage", () => {
-		test("runs npm install -g with expected flags", async () => {
+		test("runs npm i -g", async () => {
 			const calls = stubExecFile({ handler: () => ({ stdout: "ok" }) });
 			const err = await installPackage("some-pkg");
 			expect(err).toBeNull();
 			expect(calls.length).toBe(1);
 			expect(calls[0]?.file).toBe("npm");
-			expect(calls[0]?.args).toEqual([
-				"install",
-				"-g",
-				"some-pkg",
-				"--include=optional",
-				"--foreground-scripts",
-			]);
+			expect(calls[0]?.args).toEqual(["i", "-g", "some-pkg"]);
 		});
 
 		test("returns stderr on failure", async () => {
@@ -178,7 +172,7 @@ describe("npm.ts", () => {
 			const err = await installAndVerify("claude-code");
 			expect(err).toBeNull();
 			const installCall = calls.find(
-				(c) => c.file === "npm" && c.args[0] === "install",
+				(c) => c.file === "npm" && c.args[0] === "i",
 			);
 			expect(installCall?.args).toContain("@anthropic-ai/claude-code@stable");
 		});
@@ -187,7 +181,7 @@ describe("npm.ts", () => {
 			const calls = stubExecFile({ handler: () => ({ stdout: "1.0.0" }) });
 			await installAndVerify("opencode");
 			const installCall = calls.find(
-				(c) => c.file === "npm" && c.args[0] === "install",
+				(c) => c.file === "npm" && c.args[0] === "i",
 			);
 			expect(installCall?.args).toContain("opencode-ai");
 			expect(installCall?.args.some((a) => a.includes("@stable"))).toBe(false);
@@ -196,7 +190,7 @@ describe("npm.ts", () => {
 		test("returns install error when npm install fails", async () => {
 			stubExecFile({
 				handler: (file, args) => {
-					if (file === "npm" && args[0] === "install") {
+					if (file === "npm" && args[0] === "i") {
 						return { error: new Error("x"), stderr: "disk full" };
 					}
 					return { stdout: "1.0.0" };
@@ -224,7 +218,7 @@ describe("npm.ts", () => {
 			const existsSpy = vi.mocked(fs.existsSync).mockImplementation(() => true);
 			stubExecFile({
 				handler: (file, args) => {
-					if (file === "npm" && args[0] === "install") return { stdout: "ok" };
+					if (file === "npm" && args[0] === "i") return { stdout: "ok" };
 					if (file === "npm" && args[0] === "root") {
 						return { stdout: "/fake/root" };
 					}
@@ -250,7 +244,7 @@ describe("npm.ts", () => {
 			const existsSpy = vi.mocked(fs.existsSync).mockImplementation(() => true);
 			stubExecFile({
 				handler: (file, args) => {
-					if (file === "npm" && args[0] === "install") return { stdout: "ok" };
+					if (file === "npm" && args[0] === "i") return { stdout: "ok" };
 					if (file === "npm" && args[0] === "root") {
 						return { stdout: "/fake/root" };
 					}
@@ -315,7 +309,7 @@ describe("npm.ts", () => {
 						handler: (file, args) => {
 							if (
 								file === "npm" &&
-								args[0] === "install" &&
+								args[0] === "i" &&
 								args[2] === "@openai/codex"
 							) {
 								return { stdout: "ok" };
@@ -325,7 +319,7 @@ describe("npm.ts", () => {
 							}
 							if (
 								file === "npm" &&
-								args[0] === "install" &&
+								args[0] === "i" &&
 								args.some((a) => a.startsWith("@openai/codex@"))
 							) {
 								return { stdout: "ok" };
@@ -351,12 +345,12 @@ describe("npm.ts", () => {
 					const recoveryCall = calls.find(
 						(c) =>
 							c.file === "npm" &&
-							c.args[0] === "install" &&
+							c.args[0] === "i" &&
 							c.args.some((a) => a.startsWith("@openai/codex@")),
 					);
 					expect(recoveryCall).toBeDefined();
 					expect(recoveryCall?.args).toEqual([
-						"install",
+						"i",
 						"-g",
 						"@openai/codex@0.125.0",
 						"@openai/codex-win32-x64@npm:@openai/codex@0.125.0-win32-x64",
@@ -389,7 +383,7 @@ describe("npm.ts", () => {
 					const recoveryCall = calls.find(
 						(c) =>
 							c.file === "npm" &&
-							c.args[0] === "install" &&
+							c.args[0] === "i" &&
 							c.args.some((a) => a.includes("win32-arm64")),
 					);
 					expect(recoveryCall?.args).toContain(
@@ -402,7 +396,7 @@ describe("npm.ts", () => {
 				await withWin32("x64", async () => {
 					stubExecFile({
 						handler: (file, args) => {
-							if (file === "npm" && args[0] === "install") {
+							if (file === "npm" && args[0] === "i") {
 								return { stdout: "ok" };
 							}
 							if (file === "npm" && args[0] === "view") {

@@ -101,18 +101,7 @@ export function execAsync(file: string, args: string[]): Promise<ExecResult> {
 }
 
 export async function installPackage(pkg: string): Promise<string | null> {
-	// `--include=optional` defends against a global `--omit=optional` config
-	// that would skip Claude Code's platform-native binary.
-	// `--foreground-scripts` makes the postinstall log visible if it fails.
-	// Both are per-invocation flags; nothing on disk outside the package's
-	// own install location is touched.
-	const r = await execAsync("npm", [
-		"install",
-		"-g",
-		pkg,
-		"--include=optional",
-		"--foreground-scripts",
-	]);
+	const r = await execAsync("npm", ["i", "-g", pkg]);
 	if (!r.error) return null;
 	return r.stderr.trim() || r.error.message;
 }
@@ -159,7 +148,7 @@ export async function runCodexWindowsRecovery(): Promise<string | null> {
 	const platformPkg = `@openai/codex-win32-${arch}@npm:${PKG.codex}@${version}-win32-${arch}`;
 
 	const r = await execAsync("npm", [
-		"install",
+		"i",
 		"-g",
 		`${PKG.codex}@${version}`,
 		platformPkg,

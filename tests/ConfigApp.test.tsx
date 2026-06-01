@@ -244,9 +244,9 @@ describe("ConfigApp", () => {
 			const first = call[0] as string;
 			const second = call[1];
 			if (Array.isArray(second)) {
-				return first === "npm" && (second as string[])[0] === "install";
+				return first === "npm" && (second as string[])[0] === "i";
 			}
-			return first.startsWith("npm install");
+			return first.startsWith("npm i");
 		});
 		expect(npmInstallCalls).toHaveLength(0);
 		// Configure still ran for the selected tool.
