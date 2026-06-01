@@ -48,13 +48,6 @@ export const DIST_TAG: Partial<Record<NpmTool, string>> = {
 	"claude-code": "stable",
 };
 
-// The `npm install -g` target for a tool: `<pkg>@<tag>` when a dist-tag is
-// pinned, otherwise the bare package name (npm defaults to `latest`).
-export function installSpec(tool: NpmTool): string {
-	const tag = DIST_TAG[tool];
-	return tag ? `${PKG[tool]}@${tag}` : PKG[tool];
-}
-
 // On Windows, `npm` is a `.cmd` shim that `execFile` can't resolve without a
 // shell. Enabling the shell on win32 lets the OS find `npm.cmd`/`npx.cmd`.
 export const USE_SHELL = process.platform === "win32";
@@ -98,6 +91,13 @@ export function execAsync(file: string, args: string[]): Promise<ExecResult> {
 			);
 		}
 	});
+}
+
+// The `npm install -g` target for a tool: `<pkg>@<tag>` when a dist-tag is
+// pinned, otherwise the bare package name (npm defaults to `latest`).
+function installSpec(tool: NpmTool): string {
+	const tag = DIST_TAG[tool];
+	return tag ? `${PKG[tool]}@${tag}` : PKG[tool];
 }
 
 export async function installPackage(pkg: string): Promise<string | null> {
