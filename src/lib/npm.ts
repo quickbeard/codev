@@ -48,13 +48,6 @@ export const DIST_TAG: Partial<Record<NpmTool, string>> = {
 	"claude-code": "stable",
 };
 
-// The `npm install -g` target for a tool: `<pkg>@<tag>` when a dist-tag is
-// pinned, otherwise the bare package name (npm defaults to `latest`).
-export function installSpec(tool: NpmTool): string {
-	const tag = DIST_TAG[tool];
-	return tag ? `${PKG[tool]}@${tag}` : PKG[tool];
-}
-
 // On Windows, `npm` is a `.cmd` shim that `execFile` can't resolve without a
 // shell. Enabling the shell on win32 lets the OS find `npm.cmd`/`npx.cmd`.
 export const USE_SHELL = process.platform === "win32";
@@ -100,19 +93,15 @@ export function execAsync(file: string, args: string[]): Promise<ExecResult> {
 	});
 }
 
+// The `npm install -g` target for a tool: `<pkg>@<tag>` when a dist-tag is
+// pinned, otherwise the bare package name (npm defaults to `latest`).
+function installSpec(tool: NpmTool): string {
+	const tag = DIST_TAG[tool];
+	return tag ? `${PKG[tool]}@${tag}` : PKG[tool];
+}
+
 export async function installPackage(pkg: string): Promise<string | null> {
-	// `--include=optional` defends against a global `--omit=optional` config
-	// that would skip Claude Code's platform-native binary.
-	// `--foreground-scripts` makes the postinstall log visible if it fails.
-	// Both are per-invocation flags; nothing on disk outside the package's
-	// own install location is touched.
-	const r = await execAsync("npm", [
-		"install",
-		"-g",
-		pkg,
-		"--include=optional",
-		"--foreground-scripts",
-	]);
+	const r = await execAsync("npm", ["i", "-g", pkg]);
 	if (!r.error) return null;
 	return r.stderr.trim() || r.error.message;
 }
@@ -159,7 +148,7 @@ export async function runCodexWindowsRecovery(): Promise<string | null> {
 	const platformPkg = `@openai/codex-win32-${arch}@npm:${PKG.codex}@${version}-win32-${arch}`;
 
 	const r = await execAsync("npm", [
-		"install",
+		"i",
 		"-g",
 		`${PKG.codex}@${version}`,
 		platformPkg,
