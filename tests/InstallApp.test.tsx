@@ -162,27 +162,16 @@ async function advanceThroughConfirmCodex(
 	stdin.write("y\r");
 }
 
-// After install completes, the proxy-url Step is the first prompt. Walk past
-// it by picking the default option, then refreshing-config + validation run
+// After install completes, refreshing-config + validation run
 // (refreshCodevConfig is mocked in beforeEach) and the flow lands on the
-// key-choice step. Wait for the choose-configuration screen (no-saved-key
-// path) or the existing-key option (saved-key path) to actually appear.
+// key-choice step with no proxy prompt in between. Wait for the
+// choose-configuration screen (no-saved-key path) or the existing-key option
+// (saved-key path) to actually appear.
 async function settleAfterInstall(
-	stdin: { write: (s: string) => void },
+	_stdin: { write: (s: string) => void },
 	frames: string[],
 ) {
-	await advanceThroughProxyUrl(stdin, frames);
 	await waitForFrame(frames, "Choose configuration method");
-}
-
-// Picks "Use the default proxy URL" — the first option, so just Enter.
-async function advanceThroughProxyUrl(
-	stdin: { write: (s: string) => void },
-	frames: string[],
-) {
-	await waitForFrame(frames, "Choose proxy URL");
-	stdin.write("\r");
-	await new Promise((r) => setTimeout(r, 30));
 }
 
 async function pickNewKey(
@@ -1155,7 +1144,6 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin, frames);
-		await advanceThroughProxyUrl(stdin, frames);
 		// Wait for refresh + validation to settle and the saved-key option to
 		// appear in the key-choice list.
 		await waitForFrame(frames, "Reuse existing API Key");
@@ -1210,7 +1198,6 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin, frames);
-		await advanceThroughProxyUrl(stdin, frames);
 		await waitForFrame(frames, "Saved API key is no longer valid");
 
 		const history = allFrames(frames);
@@ -1232,7 +1219,6 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin, frames);
-		await advanceThroughProxyUrl(stdin, frames);
 		await waitForFrame(frames, "Could not verify saved API key");
 
 		const history = allFrames(frames);
