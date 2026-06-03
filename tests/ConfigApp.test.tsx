@@ -43,6 +43,11 @@ beforeEach(() => {
 	configAppTempHome = mkdtempSync(join(tmpdir(), "codev-configapp-test-"));
 	vi.stubEnv("HOME", configAppTempHome);
 	vi.stubEnv("USERPROFILE", configAppTempHome);
+	// Keep VS Code user-data dir resolution (vscode-settings.ts, invoked by the
+	// finalize Phase on the configure path) inside the temp home on every
+	// platform, so tests never touch the runner's real VS Code config.
+	vi.stubEnv("APPDATA", join(configAppTempHome, "AppData", "Roaming"));
+	vi.stubEnv("XDG_CONFIG_HOME", join(configAppTempHome, ".config"));
 	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
 	// inline post-login refresh doesn't block tests on a real fetch.
 	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);

@@ -1,8 +1,24 @@
+import { createRequire } from "node:module";
 import { chmodSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { build, type Plugin } from "esbuild";
 
 const ROOT = import.meta.dirname;
+const require = createRequire(import.meta.url);
+
+// jsonc-parser's default `main` is a UMD bundle whose internal
+// `require("./impl/format")` calls hide behind the UMD factory's `require`
+// parameter, so esbuild can't statically follow them — they survive into the
+// ESM output as runtime requires that crash under Node ("Cannot find module
+// './impl/format'"). Resolve its ESM entry (the `module` field) instead, whose
+// static `import`s esbuild bundles inline. Read from package.json rather than
+// hardcoding lib/esm/main.js so a version bump that moves the file is caught
+// by resolution, not a silent stale path.
+const jsoncParserPkgPath = require.resolve("jsonc-parser/package.json");
+const jsoncParserEsm = resolve(
+	dirname(jsoncParserPkgPath),
+	JSON.parse(readFileSync(jsoncParserPkgPath, "utf-8")).module as string,
+);
 
 const shimDevtools: Plugin = {
 	name: "shim-react-devtools",
@@ -32,6 +48,7 @@ const result = await build({
 	plugins: [shimDevtools],
 	alias: {
 		"@": resolve(ROOT, "src"),
+		"jsonc-parser": jsoncParserEsm,
 	},
 	resolveExtensions: [".tsx", ".ts", ".jsx", ".js", ".json"],
 	// `open` ships platform-specific shell scripts that the bundler can't

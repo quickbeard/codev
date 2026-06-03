@@ -54,6 +54,7 @@ import {
 } from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
+import { disableClaudeCodeLoginPrompt } from "@/lib/vscode-settings.js";
 
 type Phase =
 	| "select"
@@ -444,6 +445,12 @@ export function SetupApp({ mode }: SetupAppProps) {
 						backupClaudeAuth();
 					} else {
 						resetClaudeAuth();
+						// codev now owns Claude's gateway auth via settings.json, so
+						// suppress the Claude Code VS Code extension's redundant login
+						// prompt. Gated internally on VS Code being installed. The
+						// Skip-configuration path (creds === null) deliberately leaves
+						// it alone — the extension still needs its normal login there.
+						disableClaudeCodeLoginPrompt();
 					}
 				} catch {
 					// Swallow — the flow always advances.
