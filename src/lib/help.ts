@@ -83,9 +83,11 @@ Options:
 
 Examples:
   codev skill install minimax-pdf
+  codev skill install minimax/minimax-pdf          Install from a specific author
+  codev skill install minimax-pdf@1.0.0            Install a specific version
+  codev skill install minimax/minimax-pdf@1.0.0    Author + version
   codev skill install minimax-pdf --agent opencode
-  codev skill install taste-skill --force
-  codev skill install taste-skill --agent opencode --force
+  codev skill install minimax-pdf --force
 `);
 }
 

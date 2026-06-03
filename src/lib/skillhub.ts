@@ -91,6 +91,21 @@ export async function downloadSkill(id: string): Promise<Buffer> {
 	return Buffer.from(await res.arrayBuffer());
 }
 
+export async function downloadSkillVersion(
+	slug: string,
+	version: string,
+): Promise<Buffer> {
+	const res = await fetch(
+		`${SKILLHUB_REGISTRY}/api/v1/download/${encodeURIComponent(slug)}/${encodeURIComponent(version)}`,
+		{ signal: AbortSignal.timeout(30_000) },
+	);
+	if (!res.ok)
+		throw new Error(
+			`Version "${version}" not found for skill "${slug}" (${res.status})`,
+		);
+	return Buffer.from(await res.arrayBuffer());
+}
+
 export async function getMySkills(): Promise<MySkill[]> {
 	const token = requireToken();
 	const res = await fetch(`${SKILLHUB_REGISTRY}/api/v1/me/skills`, {
