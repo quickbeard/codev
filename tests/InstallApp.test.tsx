@@ -16,6 +16,10 @@ import * as auth from "@/lib/auth.js";
 import * as configure from "@/lib/configure.js";
 import * as npm from "@/lib/npm.js";
 import * as proxy from "@/lib/proxy.js";
+import {
+	vscodeSettingsPath,
+	vscodeUserDataDir,
+} from "@/lib/vscode-settings.js";
 
 function stubModels() {
 	return vi
@@ -56,6 +60,12 @@ beforeEach(() => {
 	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
 	// hit the temp home on every platform.
 	vi.stubEnv("USERPROFILE", installAppTempHome);
+	// Keep the VS Code user-data dir resolution (vscode-settings.ts, invoked by
+	// the finalize Phase on the configure path) inside the temp home on every
+	// platform — otherwise a Linux/Windows runner could resolve to its real VS
+	// Code config. Unseeded here, so disableClaudeCodeLoginPrompt() just skips.
+	vi.stubEnv("APPDATA", join(installAppTempHome, "AppData", "Roaming"));
+	vi.stubEnv("XDG_CONFIG_HOME", join(installAppTempHome, ".config"));
 	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
 	// inline post-install refresh doesn't block tests on a real fetch.
 	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);
@@ -1344,5 +1354,80 @@ describe("InstallApp finalize: Claude file fate by auth choice", () => {
 		});
 		// Live ~/.claude/.credentials.json was removed.
 		expect(existsSync(credPath)).toBe(false);
+	});
+});
+
+// The finalize Phase also disables the Claude Code VS Code extension's login
+// prompt — but only on the configure path (creds≠null) and only when VS Code
+// is installed. These touch the real (stubbed-HOME) settings.json to catch
+// wiring regressions a mocked test would miss. APPDATA / XDG_CONFIG_HOME are
+// stubbed under the temp home in beforeEach, so the seeded dir is the only one
+// in play on every platform.
+describe("InstallApp finalize: VS Code login prompt", () => {
+	// Create the user-data dir (and User/) so the install-gate passes and we can
+	// write settings.json into it.
+	function seedVscodeInstalled() {
+		mkdirSync(join(vscodeUserDataDir(), "User"), { recursive: true });
+	}
+
+	test("configure path adds claudeCode.disableLoginPrompt, preserving other settings", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+		// Stub the ~/.claude/settings.json writer so the real configure doesn't
+		// race the assertions; finalize (which owns the VS Code edit) still runs.
+		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.backup",
+				created: true,
+			},
+		]);
+
+		seedVscodeInstalled();
+		const settingsPath = vscodeSettingsPath();
+		writeFileSync(settingsPath, '{\n  "editor.fontSize": 14\n}\n');
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickManual(stdin, frames);
+		await typeManualCreds(
+			stdin,
+			frames,
+			"https://gateway.example.com/v1",
+			"sk-vscode-123",
+		);
+		await pickFirstModel(stdin, frames, "m-alpha");
+		await waitForFrame(frames, "Happy coding");
+
+		const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+		expect(settings["claudeCode.disableLoginPrompt"]).toBe(true);
+		// The user's pre-existing setting survived the surgical edit.
+		expect(settings["editor.fontSize"]).toBe(14);
+	});
+
+	test("Skip configuration leaves VS Code settings untouched", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+
+		seedVscodeInstalled();
+		const settingsPath = vscodeSettingsPath();
+		const original = '{\n  "editor.fontSize": 14\n}\n';
+		writeFileSync(settingsPath, original);
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickSkip(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		// Skip runs backupClaudeAuth, not the VS Code edit — file is unchanged.
+		expect(readFileSync(settingsPath, "utf-8")).toBe(original);
 	});
 });

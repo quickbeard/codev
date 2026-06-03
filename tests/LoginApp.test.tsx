@@ -78,9 +78,10 @@ describe("LoginApp", () => {
 		});
 
 		render(<LoginApp force={true} />);
-		await new Promise((r) => setTimeout(r, 100));
-
-		expect(order).toEqual(["logout", "login"]);
+		// Windows CI runners are slow enough that a fixed 100ms wait can land
+		// after logout() resolved but before React re-rendered and Login's
+		// effect fired login(). Poll until both have happened instead.
+		await vi.waitFor(() => expect(order).toEqual(["logout", "login"]));
 	});
 
 	test("force=true shows the signing-out step before mounting Login", async () => {
