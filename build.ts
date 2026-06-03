@@ -34,9 +34,6 @@ const result = await build({
 		"@": resolve(ROOT, "src"),
 	},
 	resolveExtensions: [".tsx", ".ts", ".jsx", ".js", ".json"],
-	// `open` ships platform-specific shell scripts that the bundler can't
-	// pull in as assets; keep it external so npm resolves it at install time.
-	external: ["open"],
 	// Bundled-CJS deps (e.g. `signal-exit`) call `require()` at runtime, which
 	// doesn't exist in ESM output. Shim it via `createRequire`. We also emit the
 	// shebang here so esbuild doesn't double it against the one in src/index.tsx.

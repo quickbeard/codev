@@ -37,13 +37,14 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
+    "adm-zip": "^0.5.17",
     "ink": "^7.0.4",
     "ink-spinner": "^5.0.0",
-    "open": "^11.0.0",
     "react": "^19.2.6"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
+    "@types/adm-zip": "^0.5.8",
     "@types/iarna__toml": "^2.0.5",
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",

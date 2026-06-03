@@ -7,6 +7,14 @@ export function codevLogsDir(): string {
 	return join(homedir(), ".codev", "logs");
 }
 
+export function skillsDir(): string {
+	return join(homedir(), ".claude", "skills");
+}
+
+export function openCodeSkillsDir(): string {
+	return join(homedir(), ".config", "opencode", "skills");
+}
+
 // Maps a working directory to a per-project subfolder name. Strips the user's
 // home prefix so the folder is shorter, replaces non-alphanumeric chars with
 // dashes, then collapses runs of dashes and trims them. Falls back to "home"

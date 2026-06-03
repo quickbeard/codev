@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
 	chmodSync,
@@ -12,7 +13,6 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import open from "open";
 import { SSO_URL } from "@/lib/const.js";
 import { fetchCodevConfig } from "@/lib/proxy.js";
 
@@ -622,12 +622,22 @@ async function fetchUserInfo(accessToken: string) {
 }
 
 // Indirection layer so tests can spy on the browser launch without mocking
-// node:child_process. The `open` npm package handles every platform quirk
-// (cmd.exe quoting on Windows, xdg-open on Linux, WSL detection) that we
-// previously tried to get right by hand.
+// node:child_process directly.
 export const browserOpener = {
 	open(url: string): Promise<unknown> {
-		return open(url);
+		const cmd =
+			process.platform === "win32"
+				? ["cmd", ["/c", "start", "", url]]
+				: process.platform === "darwin"
+					? ["open", [url]]
+					: ["xdg-open", [url]];
+		return new Promise((resolve) => {
+			spawn(cmd[0] as string, cmd[1] as string[], {
+				detached: true,
+				stdio: "ignore",
+			}).unref();
+			resolve(undefined);
+		});
 	},
 };
 

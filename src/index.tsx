@@ -1,9 +1,19 @@
 import { render } from "ink";
 import { ConfigApp } from "@/ConfigApp.js";
 import { InstallApp } from "@/InstallApp.js";
+import { LeaderboardApp } from "@/LeaderboardApp.js";
 import { LoginApp } from "@/LoginApp.js";
-import { logout } from "@/lib/auth.js";
-import { printHelp, printVersion } from "@/lib/help.js";
+import { browserOpener, logout } from "@/lib/auth.js";
+import { SKILLHUB_REGISTRY } from "@/lib/const.js";
+import {
+	printHelp,
+	printSkillHelp,
+	printSkillInstallHelp,
+	printSkillPublishHelp,
+	printSkillSearchHelp,
+	printSkillUploadHelp,
+	printVersion,
+} from "@/lib/help.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
 import {
 	RESTORE_AGENTS,
@@ -23,7 +33,15 @@ import {
 } from "@/lib/shims.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
 import { ModelApp } from "@/ModelApp.js";
+import { MySkillsApp } from "@/MySkillsApp.js";
+import { NamespaceSkillsApp } from "@/NamespaceSkillsApp.js";
+import { NamespacesApp } from "@/NamespacesApp.js";
 import { RemoveApp } from "@/RemoveApp.js";
+import { type SkillAgent, SkillInstallApp } from "@/SkillInstallApp.js";
+import { SkillPublishApp } from "@/SkillPublishApp.js";
+import { SkillSearchApp } from "@/SkillSearchApp.js";
+import { SkillUploadApp } from "@/SkillUploadApp.js";
+import { SkillUserApp } from "@/SkillUserApp.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
 
@@ -209,6 +227,198 @@ switch (command) {
 			process.exit(1);
 		}
 		process.exit(runRestore(toolForRestoreAgent(agent as RestoreAgent)));
+		break;
+	}
+	case "skill": {
+		const [sub, ...subArgs] = args;
+		const wantsHelp = subArgs.includes("--help") || subArgs.includes("-h");
+
+		if (!sub || sub === "--help" || sub === "-h") {
+			printSkillHelp();
+			process.exit(0);
+		}
+
+		if (sub === "search") {
+			if (wantsHelp) {
+				printSkillSearchHelp();
+				process.exit(0);
+			}
+			const query = subArgs.find((a) => !a.startsWith("-"));
+			const { waitUntilExit } = render(<SkillSearchApp query={query} />);
+			try {
+				await waitUntilExit();
+				process.exit(0);
+			} catch {
+				process.exit(1);
+			}
+		} else if (sub === "install") {
+			if (wantsHelp) {
+				printSkillInstallHelp();
+				process.exit(0);
+			}
+			const skillName = subArgs.find((a) => !a.startsWith("-"));
+			if (!skillName) {
+				console.error(
+					"Missing skill name.\n\n" +
+						"  Usage:   codev skill install <name>\n" +
+						"  Find skills: codev skill search\n",
+				);
+				process.exit(1);
+			}
+			const force = subArgs.includes("--force") || subArgs.includes("-f");
+			const agentIdx = subArgs.indexOf("--agent");
+			const agentRaw = agentIdx !== -1 ? subArgs[agentIdx + 1] : undefined;
+			if (agentRaw && agentRaw !== "claude" && agentRaw !== "opencode") {
+				console.error(
+					`Unknown agent: "${agentRaw}"\n\n` +
+						"  Valid:   --agent claude\n" +
+						"           --agent opencode\n",
+				);
+				process.exit(1);
+			}
+			const agent = (agentRaw as SkillAgent | undefined) ?? "claude";
+			const { waitUntilExit } = render(
+				<SkillInstallApp name={skillName} agent={agent} force={force} />,
+			);
+			try {
+				await waitUntilExit();
+				process.exit(0);
+			} catch {
+				process.exit(1);
+			}
+		} else if (sub === "open") {
+			// Open via OIDC login so the user is automatically signed in.
+			// SkillHub shares Viettel SSO with CoDev — the existing browser
+			// SSO session silently authenticates without showing a login form.
+			const url = `${SKILLHUB_REGISTRY}/api/auth/oidc/login?redirect=/profile`;
+			console.log(`Opening SkillHub (signing in via SSO)...`);
+			await browserOpener.open(url);
+			process.exit(0);
+		} else if (sub === "my") {
+			const { waitUntilExit } = render(<MySkillsApp />);
+			try {
+				await waitUntilExit();
+				process.exit(0);
+			} catch {
+				process.exit(1);
+			}
+		} else if (sub === "upload") {
+			if (wantsHelp) {
+				printSkillUploadHelp();
+				process.exit(0);
+			}
+			const inputPath = subArgs.find((a) => !a.startsWith("-"));
+			if (!inputPath) {
+				console.error(
+					"Missing path.\n\n" +
+						"  Usage:   codev skill upload <path>\n" +
+						"  Help:    codev skill upload --help\n",
+				);
+				process.exit(1);
+			}
+			const nsIdx = subArgs.indexOf("--namespace");
+			const namespaceVal = nsIdx !== -1 ? subArgs[nsIdx + 1] : undefined;
+			if (nsIdx !== -1 && (!namespaceVal || namespaceVal.startsWith("-"))) {
+				console.error(
+					"--namespace requires a slug value.\n\n" +
+						"  Usage: codev skill upload <path> --namespace <slug>\n",
+				);
+				process.exit(1);
+			}
+			const namespace = namespaceVal;
+			const submitFlag = subArgs.includes("--submit") || subArgs.includes("-s");
+			const { waitUntilExit } = render(
+				<SkillUploadApp
+					inputPath={inputPath}
+					namespace={namespace}
+					submit={submitFlag}
+				/>,
+			);
+			try {
+				await waitUntilExit();
+				process.exit(0);
+			} catch {
+				process.exit(1);
+			}
+		} else if (sub === "publish") {
+			if (wantsHelp) {
+				printSkillPublishHelp();
+				process.exit(0);
+			}
+			const skillName = subArgs.find((a) => !a.startsWith("-"));
+			if (!skillName) {
+				console.error(
+					"Missing skill name.\n\n" +
+						"  Usage:   codev skill publish <name>\n" +
+						"  Help:    codev skill publish --help\n",
+				);
+				process.exit(1);
+			}
+			const { waitUntilExit } = render(<SkillPublishApp name={skillName} />);
+			try {
+				await waitUntilExit();
+				process.exit(0);
+			} catch {
+				process.exit(1);
+			}
+		} else if (sub === "namespaces") {
+			const { waitUntilExit } = render(<NamespacesApp />);
+			try {
+				await waitUntilExit();
+				process.exit(0);
+			} catch {
+				process.exit(1);
+			}
+		} else if (sub === "leaderboard") {
+			const { waitUntilExit } = render(<LeaderboardApp />);
+			try {
+				await waitUntilExit();
+				process.exit(0);
+			} catch {
+				process.exit(1);
+			}
+		} else if (sub === "user") {
+			const username = subArgs.find((a) => !a.startsWith("-"));
+			if (!username) {
+				console.error(
+					"Missing username.\n\n" +
+						"  Usage:   codev skill user <username>\n" +
+						"  Example: codev skill user tieuanh\n",
+				);
+				process.exit(1);
+			}
+			const { waitUntilExit } = render(<SkillUserApp username={username} />);
+			try {
+				await waitUntilExit();
+				process.exit(0);
+			} catch {
+				process.exit(1);
+			}
+		} else if (sub === "ns") {
+			const slug = subArgs.find((a) => !a.startsWith("-"));
+			if (!slug) {
+				console.error(
+					"Missing namespace slug.\n\n" +
+						"  Usage:       codev skill ns <slug>\n" +
+						"  List yours:  codev skill namespaces\n",
+				);
+				process.exit(1);
+			}
+			const { waitUntilExit } = render(<NamespaceSkillsApp slug={slug} />);
+			try {
+				await waitUntilExit();
+				process.exit(0);
+			} catch {
+				process.exit(1);
+			}
+		} else {
+			console.error(
+				`Unknown subcommand: "${sub}"\n\n` +
+					"  Available: search, install, open, leaderboard, user, my, upload, publish, namespaces, ns\n" +
+					"  Run codev skill --help for usage.\n",
+			);
+			process.exit(1);
+		}
 		break;
 	}
 	case "claude":
