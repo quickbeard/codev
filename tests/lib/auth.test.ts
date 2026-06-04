@@ -7,6 +7,7 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
+import { get as httpGet } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MockInstance } from "vitest";
@@ -23,7 +24,7 @@ import {
 	saveCodevConfig,
 	saveProxyUrl,
 } from "@/lib/auth.js";
-import { SSO_URL } from "@/lib/const.js";
+import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
 
 const REVOCATION_ENDPOINT = `${SSO_URL}/revoke`;
 
@@ -628,6 +629,23 @@ function getCallbackNonce(spy: MockInstance): string {
 	return getAuthorizeUrl(spy)?.searchParams.get("nonce") ?? "";
 }
 
+type RedirectResult = { status: number; location: string };
+
+// GET a URL without following redirects so a test can assert the 302 + Location
+// the loopback callback now returns. (fetch's redirect:"manual" yields an
+// opaque response whose Location header isn't readable, so use node:http.)
+function getNoRedirect(url: string): Promise<RedirectResult> {
+	return new Promise((resolve, reject) => {
+		httpGet(url, (res) => {
+			res.resume();
+			resolve({
+				status: res.statusCode ?? 0,
+				location: res.headers.location ?? "",
+			});
+		}).on("error", reject);
+	});
+}
+
 describe("login full OAuth flow", () => {
 	let fetchSpy: MockInstance;
 	let openBrowserSpy: MockInstance;
@@ -856,9 +874,9 @@ describe("login full OAuth flow", () => {
 		loginPromise.catch(() => {});
 	});
 
-	test("callback server returns success HTML on valid code", async () => {
+	test("redirects to the success page on a valid code", async () => {
 		mockSsoFetch();
-		let callbackResPromise: Promise<Response> | null = null;
+		let callbackResPromise: Promise<RedirectResult> | null = null;
 
 		const loginPromise = login(
 			() => {},
@@ -867,11 +885,12 @@ describe("login full OAuth flow", () => {
 				const port = getCallbackPort(openBrowserSpy);
 				const state = getCallbackState(openBrowserSpy);
 				callbackResPromise = new Promise((resolve) => {
-					setTimeout(async () => {
-						const res = await originalFetch(
-							`http://localhost:${port}/callback?code=c&state=${state}`,
+					setTimeout(() => {
+						resolve(
+							getNoRedirect(
+								`http://localhost:${port}/callback?code=c&state=${state}`,
+							),
 						);
-						resolve(res);
 					}, 50);
 				});
 			},
@@ -880,14 +899,14 @@ describe("login full OAuth flow", () => {
 		await loginPromise;
 		expect(callbackResPromise).not.toBeNull();
 		const callbackRes =
-			await (callbackResPromise as unknown as Promise<Response>);
-		const html = await callbackRes.text();
-		expect(html).toContain("Login Successful");
+			await (callbackResPromise as unknown as Promise<RedirectResult>);
+		expect(callbackRes.status).toBe(302);
+		expect(callbackRes.location).toBe(LOGIN_SUCCESS_URL);
 	});
 
-	test("callback server returns error HTML on error", async () => {
+	test("redirects to the success page's error view on error", async () => {
 		mockSsoFetch();
-		let callbackRes: Response | null = null;
+		let callbackRes: RedirectResult | null = null;
 
 		const loginPromise = login(
 			() => {},
@@ -895,7 +914,7 @@ describe("login full OAuth flow", () => {
 				openBrowserFn();
 				const port = getCallbackPort(openBrowserSpy);
 				setTimeout(async () => {
-					callbackRes = await originalFetch(
+					callbackRes = await getNoRedirect(
 						`http://localhost:${port}/callback?error=denied`,
 					);
 				}, 50);
@@ -905,8 +924,10 @@ describe("login full OAuth flow", () => {
 		await loginPromise.catch(() => {});
 		await new Promise((r) => setTimeout(r, 100));
 		expect(callbackRes).not.toBeNull();
-		const html = await (callbackRes as unknown as Response).text();
-		expect(html).toContain("Login Failed");
+		const res = callbackRes as unknown as RedirectResult;
+		expect(res.status).toBe(302);
+		expect(res.location).toContain(`${LOGIN_SUCCESS_URL}?error=login_failed`);
+		expect(res.location).toContain("error_description=denied");
 	});
 
 	test("regression: stray request alongside /callback does not throw inside the handler", async () => {
