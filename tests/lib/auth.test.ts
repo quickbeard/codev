@@ -701,6 +701,33 @@ describe("login full OAuth flow", () => {
 		expect(logs.some((l) => l.includes("Logged in as"))).toBe(true);
 	});
 
+	test("hands onReady the same authorize URL the browser is opened with", async () => {
+		mockSsoFetch();
+		let capturedUrl = "";
+
+		const result = await login(
+			() => {},
+			(openBrowserFn, url) => {
+				capturedUrl = url;
+				openBrowserFn();
+				const port = getCallbackPort(openBrowserSpy);
+				const state = getCallbackState(openBrowserSpy);
+				setTimeout(() => {
+					originalFetch(
+						`http://localhost:${port}/callback?code=test-auth-code&state=${state}`,
+					);
+				}, 50);
+			},
+		);
+
+		expect(result.access_token).toBe("flow-access-token");
+		// The URL handed to onReady is exactly the URL the browser is opened
+		// with — the SSO authorize endpoint on the normal (non-force) path.
+		const openedUrl = openBrowserSpy.mock.calls[0]?.[0] as string;
+		expect(capturedUrl).toBe(openedUrl);
+		expect(capturedUrl).toContain("/authorize");
+	});
+
 	test("does not call codev-proxy /config during login", async () => {
 		mockSsoFetch();
 

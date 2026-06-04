@@ -11,6 +11,8 @@ export function Login({ onDone }: LoginProps) {
 	const [error, setError] = useState<string | null>(null);
 	const [waitingForEnter, setWaitingForEnter] = useState(false);
 	const [attempt, setAttempt] = useState(0);
+	const [authUrl, setAuthUrl] = useState<string | null>(null);
+	const [browserOpened, setBrowserOpened] = useState(false);
 	const openBrowserRef = useRef<(() => void) | null>(null);
 
 	const addLog = useCallback((msg: string) => {
@@ -24,10 +26,13 @@ export function Login({ onDone }: LoginProps) {
 		setLogs([]);
 		setError(null);
 		setWaitingForEnter(false);
+		setAuthUrl(null);
+		setBrowserOpened(false);
 		openBrowserRef.current = null;
 
-		login(addLog, (openBrowserFn) => {
+		login(addLog, (openBrowserFn, url) => {
 			openBrowserRef.current = openBrowserFn;
+			setAuthUrl(url);
 			setWaitingForEnter(true);
 		})
 			.then((auth) => {
@@ -52,6 +57,7 @@ export function Login({ onDone }: LoginProps) {
 	useInput((_input, key) => {
 		if (waitingForEnter && key.return && openBrowserRef.current) {
 			setWaitingForEnter(false);
+			setBrowserOpened(true);
 			openBrowserRef.current();
 			openBrowserRef.current = null;
 			return;
@@ -70,6 +76,14 @@ export function Login({ onDone }: LoginProps) {
 				<Text color="cyan">
 					{"Press Enter to open the browser and login..."}
 				</Text>
+			)}
+			{browserOpened && authUrl && !error && (
+				<Box flexDirection="column" marginTop={1}>
+					<Text dimColor>
+						{"If the browser didn't open, visit this URL manually:"}
+					</Text>
+					<Text>{authUrl}</Text>
+				</Box>
 			)}
 			{error && (
 				<>

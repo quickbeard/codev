@@ -19,7 +19,7 @@ function fakeAuth(): auth.AuthData {
 describe("Login", () => {
 	test("shows 'Press Enter' when onReady is called", async () => {
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(() => {});
+			onReady(() => {}, "https://sso.test/authorize?x=1");
 			return new Promise(() => {});
 		});
 
@@ -88,7 +88,7 @@ describe("Login", () => {
 	test("opens browser when Enter is pressed", async () => {
 		const openBrowserFn = vi.fn();
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(openBrowserFn);
+			onReady(openBrowserFn, "https://sso.test/authorize?x=1");
 			return new Promise(() => {});
 		});
 
@@ -106,7 +106,7 @@ describe("Login", () => {
 	test("does not open browser before Enter is pressed", async () => {
 		const openBrowserFn = vi.fn();
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(openBrowserFn);
+			onReady(openBrowserFn, "https://sso.test/authorize?x=1");
 			return new Promise(() => {});
 		});
 
@@ -116,6 +116,44 @@ describe("Login", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		expect(openBrowserFn).not.toHaveBeenCalled();
+	});
+
+	test("does not show the fallback URL before Enter is pressed", async () => {
+		const url = "https://sso.test/authorize?x=1";
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			onReady(() => {}, url);
+			return new Promise(() => {});
+		});
+
+		const onDone = vi.fn();
+		const { lastFrame } = render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 50));
+
+		// The URL is only revealed after the user presses Enter to open the
+		// browser, so it must not be on screen while we're still waiting.
+		expect(lastFrame() ?? "").not.toContain(url);
+	});
+
+	test("shows the authorize URL as a manual fallback after Enter is pressed", async () => {
+		const url = "https://sso.test/authorize?x=1";
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			onReady(() => {}, url);
+			return new Promise(() => {});
+		});
+
+		const onDone = vi.fn();
+		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 50));
+
+		const output = lastFrame() ?? "";
+		expect(output).toContain(
+			"If the browser didn't open, visit this URL manually",
+		);
+		expect(output).toContain(url);
 	});
 
 	test("calls onDone with the auth data after a successful login", async () => {
@@ -182,7 +220,7 @@ describe("Login", () => {
 				return Promise.reject(new Error("boom"));
 			})
 			.mockImplementationOnce((_onLog, onReady) => {
-				onReady(() => {});
+				onReady(() => {}, "https://sso.test/authorize?x=1");
 				return new Promise(() => {});
 			});
 
