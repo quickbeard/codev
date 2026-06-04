@@ -371,6 +371,16 @@ export async function login(
 	//      app on the same SSO realm.
 	//   2. The force-login sentinel is set — `codev logout` writes it because
 	//      revoking tokens does not terminate the IdP's session cookie.
+	//
+	// KNOWN LIMITATION: condition #1 is unreliable when login is preceded by
+	// code that incidentally creates ~/.codev/. The clearest case is
+	// `codev upload`: runUpload() calls runExport() before ensureAuth(), and
+	// runExport mkdirs ~/.codev/logs/ (recursive: true → side-effect-creates
+	// ~/.codev/). So a fresh-install `codev upload` sees forceLogin === false
+	// and goes straight to /authorize, defeating the stale-cookie protection
+	// the dir check is meant to provide. Hardening this would mean keying off
+	// ~/.codev/auth.json instead of the dir, or running the dir probe in a
+	// dedicated init step before any other code touches the home dir.
 	const forceLogin =
 		!existsSync(join(homedir(), ".codev")) || existsSync(forceLoginPath());
 

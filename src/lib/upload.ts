@@ -32,6 +32,13 @@ import { AGENTS } from "@/providers/types.js";
 export interface UploadOptions {
 	cwd?: string;
 	onStatus?: (message: string) => void;
+	// Surfaces the SSO authorize URL when ensureAuth has to open a browser.
+	// Lets the caller render the URL on its own line (e.g. UploadApp keeps it
+	// pinned below the spinner) instead of routing it through onStatus, where
+	// the next status update would overwrite it. The daemon doesn't pass this
+	// — there's no human watching the log, and it basically never reaches the
+	// login path anyway since it's gated on loadAuth().
+	onLoginUrl?: (url: string) => void;
 }
 
 export interface UploadSummary {
@@ -67,6 +74,7 @@ const UPLOAD_TIMEOUT_MS = 60_000;
 export async function runUpload({
 	cwd = process.cwd(),
 	onStatus = () => {},
+	onLoginUrl,
 }: UploadOptions = {}): Promise<UploadSummary> {
 	onStatus("Exporting local conversations...");
 	await runExport(onStatus);
@@ -84,7 +92,7 @@ export async function runUpload({
 		};
 	}
 
-	const auth = await ensureAuth(onStatus);
+	const auth = await ensureAuth(onStatus, onLoginUrl);
 
 	// Try the Supabase block once. If it trips a refreshable failure (cache
 	// missing, or Supabase rejected our credentials), refresh the cached
@@ -189,10 +197,22 @@ export function filterNewFiles(
 	return out;
 }
 
-async function ensureAuth(onStatus: (message: string) => void) {
+async function ensureAuth(
+	onStatus: (message: string) => void,
+	onLoginUrl?: (url: string) => void,
+) {
 	const auth = loadAuth();
 	if (auth) return auth;
-	const fresh = await login(onStatus, (openBrowser) => openBrowser());
+	const fresh = await login(onStatus, (openBrowser, url) => {
+		// Hand the URL to the dedicated channel when the caller provides one
+		// (UploadApp pins it under the spinner). Fall back to onStatus so the
+		// daemon log — or any future caller that doesn't wire onLoginUrl —
+		// still has a paste fallback.
+		if (onLoginUrl) onLoginUrl(url);
+		else
+			onStatus(`If your browser didn't open, visit this URL manually: ${url}`);
+		openBrowser();
+	});
 	// login() no longer refreshes CoDev config on its own — every caller does
 	// it explicitly so the call uses the user's chosen proxy URL. On a fresh
 	// login we don't have a cache yet, so populating it here avoids burning
