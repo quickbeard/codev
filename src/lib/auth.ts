@@ -659,7 +659,3 @@ function openBrowser(url: string) {
 	// paste it manually if the browser never opened.
 	browserOpener.open(url).catch(() => {});
 }
-
-// Note: the loopback callback no longer serves inline HTML — it 302-redirects
-// the browser to LOGIN_SUCCESS_URL (the hosted codev-landing-page app), so the
-// previous loginResultHtml / escapeHtml helpers were removed.
