@@ -19,7 +19,11 @@ function fakeAuth(): auth.AuthData {
 describe("Login", () => {
 	test("shows 'Press Enter' when onReady is called", async () => {
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(() => {}, "https://sso.test/authorize?x=1", () => null);
+			onReady(
+				() => {},
+				"https://sso.test/authorize?x=1",
+				() => null,
+			);
 			return new Promise(() => {});
 		});
 
@@ -121,7 +125,11 @@ describe("Login", () => {
 	test("does not show the fallback URL before Enter is pressed", async () => {
 		const url = "https://sso.test/authorize?x=1";
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(() => {}, url, () => null);
+			onReady(
+				() => {},
+				url,
+				() => null,
+			);
 			return new Promise(() => {});
 		});
 
@@ -138,7 +146,11 @@ describe("Login", () => {
 	test("shows the authorize URL as a manual fallback after Enter is pressed", async () => {
 		const url = "https://sso.test/authorize?x=1";
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(() => {}, url, () => null);
+			onReady(
+				() => {},
+				url,
+				() => null,
+			);
 			return new Promise(() => {});
 		});
 
@@ -220,7 +232,11 @@ describe("Login", () => {
 				return Promise.reject(new Error("boom"));
 			})
 			.mockImplementationOnce((_onLog, onReady) => {
-				onReady(() => {}, "https://sso.test/authorize?x=1", () => null);
+				onReady(
+					() => {},
+					"https://sso.test/authorize?x=1",
+					() => null,
+				);
 				return new Promise(() => {});
 			});
 
@@ -238,5 +254,100 @@ describe("Login", () => {
 		expect(after).not.toContain("first attempt log");
 		expect(after).not.toContain("Login failed: boom");
 		expect(after).not.toContain("Press Enter to retry");
+	});
+
+	test("reveals the paste-back prompt only after Enter is pressed", async () => {
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			onReady(
+				() => {},
+				"https://sso.test/authorize?x=1",
+				() => null,
+			);
+			return new Promise(() => {});
+		});
+
+		const onDone = vi.fn();
+		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 50));
+		expect(lastFrame() ?? "").not.toContain("remote or headless");
+
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 50));
+
+		const output = lastFrame() ?? "";
+		expect(output).toContain("remote or headless");
+		expect(output).toContain("Press Enter to submit");
+	});
+
+	test("completes via manual paste-back of the callback URL", async () => {
+		const authData = fakeAuth();
+		const submit = vi.fn((_pasted: string) => null);
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			return new Promise<auth.AuthData>((resolve) => {
+				onReady(
+					() => {},
+					"https://sso.test/authorize?x=1",
+					(pasted) => {
+						const err = submit(pasted);
+						if (!err) resolve(authData);
+						return err;
+					},
+				);
+			});
+		});
+
+		const onDone = vi.fn();
+		const { stdin } = render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\r"); // open browser → reveals the paste field
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("http://127.0.0.1:5000/callback?code=abc&state=xyz");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\r"); // submit the pasted URL
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(submit).toHaveBeenCalledWith(
+			expect.stringContaining("code=abc&state=xyz"),
+		);
+		expect(onDone).toHaveBeenCalledWith(authData);
+	});
+
+	test("shows an inline paste error and recovers on re-submit", async () => {
+		const authData = fakeAuth();
+		let calls = 0;
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			return new Promise<auth.AuthData>((resolve) => {
+				onReady(
+					() => {},
+					"https://sso.test/authorize?x=1",
+					() => {
+						calls += 1;
+						if (calls === 1) return "State mismatch — use the latest URL.";
+						resolve(authData);
+						return null;
+					},
+				);
+			});
+		});
+
+		const onDone = vi.fn();
+		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\r"); // open browser → paste field
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("oops");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\r"); // first submit → inline error
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(lastFrame() ?? "").toContain("State mismatch");
+		expect(onDone).not.toHaveBeenCalled();
+
+		stdin.write("\r"); // re-submit → resolves
+		await new Promise((r) => setTimeout(r, 50));
+		expect(onDone).toHaveBeenCalledWith(authData);
 	});
 });
