@@ -9,6 +9,7 @@ export function UploadApp() {
 	const { exit } = useApp();
 	const [phase, setPhase] = useState<Phase>("running");
 	const [status, setStatus] = useState("Uploading logs...");
+	const [loginUrl, setLoginUrl] = useState<string | null>(null);
 	const [summary, setSummary] = useState<UploadSummary | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const hasRun = useRef(false);
@@ -16,7 +17,7 @@ export function UploadApp() {
 	useEffect(() => {
 		if (hasRun.current) return;
 		hasRun.current = true;
-		runUpload({ onStatus: setStatus })
+		runUpload({ onStatus: setStatus, onLoginUrl: setLoginUrl })
 			.then((result) => {
 				setSummary(result);
 				setPhase("done");
@@ -35,11 +36,21 @@ export function UploadApp() {
 
 	if (phase === "running") {
 		return (
-			<Box>
-				<Text color="cyan">
-					<Spinner />
-				</Text>
-				<Text> {status}</Text>
+			<Box flexDirection="column">
+				<Box>
+					<Text color="cyan">
+						<Spinner />
+					</Text>
+					<Text> {status}</Text>
+				</Box>
+				{loginUrl && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text dimColor>
+							{"If the browser didn't open, visit this URL manually:"}
+						</Text>
+						<Text>{loginUrl}</Text>
+					</Box>
+				)}
 			</Box>
 		);
 	}
