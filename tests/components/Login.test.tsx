@@ -19,7 +19,7 @@ function fakeAuth(): auth.AuthData {
 describe("Login", () => {
 	test("shows 'Press Enter' when onReady is called", async () => {
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(() => {}, "https://sso.test/authorize?x=1");
+			onReady(() => {}, "https://sso.test/authorize?x=1", () => null);
 			return new Promise(() => {});
 		});
 
@@ -88,7 +88,7 @@ describe("Login", () => {
 	test("opens browser when Enter is pressed", async () => {
 		const openBrowserFn = vi.fn();
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(openBrowserFn, "https://sso.test/authorize?x=1");
+			onReady(openBrowserFn, "https://sso.test/authorize?x=1", () => null);
 			return new Promise(() => {});
 		});
 
@@ -106,7 +106,7 @@ describe("Login", () => {
 	test("does not open browser before Enter is pressed", async () => {
 		const openBrowserFn = vi.fn();
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(openBrowserFn, "https://sso.test/authorize?x=1");
+			onReady(openBrowserFn, "https://sso.test/authorize?x=1", () => null);
 			return new Promise(() => {});
 		});
 
@@ -121,7 +121,7 @@ describe("Login", () => {
 	test("does not show the fallback URL before Enter is pressed", async () => {
 		const url = "https://sso.test/authorize?x=1";
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(() => {}, url);
+			onReady(() => {}, url, () => null);
 			return new Promise(() => {});
 		});
 
@@ -138,7 +138,7 @@ describe("Login", () => {
 	test("shows the authorize URL as a manual fallback after Enter is pressed", async () => {
 		const url = "https://sso.test/authorize?x=1";
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(() => {}, url);
+			onReady(() => {}, url, () => null);
 			return new Promise(() => {});
 		});
 
@@ -220,7 +220,7 @@ describe("Login", () => {
 				return Promise.reject(new Error("boom"));
 			})
 			.mockImplementationOnce((_onLog, onReady) => {
-				onReady(() => {}, "https://sso.test/authorize?x=1");
+				onReady(() => {}, "https://sso.test/authorize?x=1", () => null);
 				return new Promise(() => {});
 			});
 

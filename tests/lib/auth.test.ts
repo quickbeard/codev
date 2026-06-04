@@ -1214,3 +1214,124 @@ describe("login with force-login marker", () => {
 		expect((openedUrl as unknown as URL).pathname).toBe("/sso-wrapper/logout");
 	});
 });
+
+describe("login manual paste-back (no-browser)", () => {
+	let fetchSpy: MockInstance;
+	let openBrowserSpy: MockInstance;
+
+	beforeEach(() => {
+		openBrowserSpy = vi
+			.spyOn(browserOpener, "open")
+			.mockImplementation(() => Promise.resolve(undefined));
+		// Silent /authorize path requires ~/.codev/ to exist (an absent dir
+		// signals "wipe happened, force re-auth via the wrapper /logout flow").
+		mkdirSync(join(tempDir, ".codev"), { recursive: true });
+		fetchSpy = mockAuthFetch({
+			"/token": async () =>
+				new Response(
+					JSON.stringify({
+						access_token: "flow-access-token",
+						id_token: "flow-id-token",
+						expires_in: 3600,
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				),
+			"/userinfo": async () =>
+				new Response(
+					JSON.stringify({
+						sub: "flowuser",
+						email: "flow@example.com",
+						displayName: "Flow User",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				),
+		});
+	});
+
+	afterEach(() => {
+		fetchSpy?.mockRestore();
+		openBrowserSpy?.mockRestore();
+	});
+
+	// Reconstruct the callback URL the IdP would redirect a remote user's
+	// browser to (and which they copy from the address bar) out of the authorize
+	// URL handed to onReady — same state, same loopback port.
+	function callbackUrlFor(
+		authUrl: string,
+		code: string,
+		stateOverride?: string,
+	): string {
+		const u = new URL(authUrl);
+		const state = stateOverride ?? u.searchParams.get("state") ?? "";
+		const port = new URL(u.searchParams.get("redirect_uri") ?? "").port;
+		return `http://127.0.0.1:${port}/callback?code=${code}&state=${state}`;
+	}
+
+	test("completes when the user pastes the full callback URL", async () => {
+		const result = await login(
+			() => {},
+			(_open, url, submit) => {
+				expect(submit(callbackUrlFor(url, "pasted-code"))).toBeNull();
+			},
+		);
+
+		expect(result.access_token).toBe("flow-access-token");
+		expect(result.user.email).toBe("flow@example.com");
+		expect(existsSync(join(tempDir, ".codev", "auth.json"))).toBe(true);
+		// No browser was opened — the remote user pasted the URL back by hand.
+		expect(openBrowserSpy).not.toHaveBeenCalled();
+	});
+
+	test("accepts a bare authorization code (no state to cross-check)", async () => {
+		const result = await login(
+			() => {},
+			(_open, _url, submit) => {
+				expect(submit("bare-code-123")).toBeNull();
+			},
+		);
+		expect(result.access_token).toBe("flow-access-token");
+	});
+
+	test("rejects a state mismatch inline, then recovers on re-paste", async () => {
+		const result = await login(
+			() => {},
+			(_open, url, submit) => {
+				expect(submit(callbackUrlFor(url, "x", "wrong-state"))).toContain(
+					"state mismatch",
+				);
+				// The flow is still live — a correct paste finishes it.
+				expect(submit(callbackUrlFor(url, "good-code"))).toBeNull();
+			},
+		);
+		expect(result.access_token).toBe("flow-access-token");
+	});
+
+	test("surfaces an SSO error param inline, then recovers", async () => {
+		const result = await login(
+			() => {},
+			(_open, url, submit) => {
+				const port = new URL(
+					new URL(url).searchParams.get("redirect_uri") ?? "",
+				).port;
+				expect(
+					submit(
+						`http://127.0.0.1:${port}/callback?error=access_denied&error_description=denied`,
+					),
+				).toContain("denied");
+				expect(submit(callbackUrlFor(url, "good-code"))).toBeNull();
+			},
+		);
+		expect(result.access_token).toBe("flow-access-token");
+	});
+
+	test("reports an empty paste without settling the flow", async () => {
+		const result = await login(
+			() => {},
+			(_open, url, submit) => {
+				expect(submit("   ")).toContain("Paste the callback URL");
+				expect(submit(callbackUrlFor(url, "good-code"))).toBeNull();
+			},
+		);
+		expect(result.access_token).toBe("flow-access-token");
+	});
+});

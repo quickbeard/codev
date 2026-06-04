@@ -21,6 +21,10 @@ const REVOKE_TIMEOUT_MS = 3_000;
 // Token/userinfo endpoints are quick handshakes — cap them so a hung IdP
 // surfaces as an error instead of wedging the install flow indefinitely.
 const SSO_FETCH_TIMEOUT_MS = 10_000;
+// How long we wait for the authorization code to arrive — via the loopback
+// callback or a manual paste-back. Generous because a no-browser user may be
+// hopping to another device to authenticate and copy the URL back by hand.
+const AUTH_CALLBACK_TIMEOUT_MS = 300_000;
 
 function authFilePath() {
 	return join(homedir(), ".codev", "auth.json");
@@ -98,6 +102,18 @@ interface TokenResponse {
 	refresh_token?: string;
 	expires_in: number;
 }
+
+// How login() hands the interactive step back to its caller. Beyond opening
+// the browser and exposing the authorize URL, `submitManualCode` lets a
+// no-browser caller complete the flow by pasting the redirected callback URL
+// (or a bare authorization code) back in. It returns an inline error string to
+// re-prompt without restarting, or null once the code is accepted — after
+// which the login() promise resolves on its own.
+export type OnLoginReady = (
+	openBrowserFn: () => void,
+	authUrl: string,
+	submitManualCode: (pasted: string) => string | null,
+) => void;
 
 function readAuthFile(): AuthFileContents | null {
 	try {
@@ -303,7 +319,7 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
  */
 export async function login(
 	onLog: (msg: string) => void,
-	onReady: (openBrowserFn: () => void, authUrl: string) => void,
+	onReady: OnLoginReady,
 ): Promise<AuthData> {
 	onLog("Starting SSO login...");
 
@@ -445,9 +461,27 @@ export async function refreshCodevConfig(
 	}
 }
 
+// Extracts OAuth callback params from text the user pasted back during a
+// no-browser login. Handles a full callback URL (the unreachable
+// http://127.0.0.1:<port>/callback?... their browser landed on), a bare query
+// string copied without the scheme, or a leading "?". Returns null when the
+// paste carries no recognizable params — the caller then treats it as a bare
+// authorization code.
+function parseCallbackParams(pasted: string): URLSearchParams | null {
+	try {
+		return new URL(pasted).searchParams;
+	} catch {
+		// Not a full URL — fall through.
+	}
+	if (/(?:^|[?&])(?:code|state|error)=/.test(pasted)) {
+		return new URLSearchParams(pasted.replace(/^\?/, ""));
+	}
+	return null;
+}
+
 async function getAuthCode(
 	onLog: (msg: string) => void,
-	onReady: (openBrowserFn: () => void, authUrl: string) => void,
+	onReady: OnLoginReady,
 	expectedState: string,
 	codeChallenge: string,
 	nonce: string,
@@ -455,6 +489,9 @@ async function getAuthCode(
 ): Promise<{ code: string; redirectUri: string }> {
 	return new Promise((resolve, reject) => {
 		let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+		// Set once the flow resolves or rejects — by the loopback callback or by
+		// a manual paste — so the two paths can't both fire.
+		let settled = false;
 		const finish = () => {
 			if (timeoutHandle) {
 				clearTimeout(timeoutHandle);
@@ -479,6 +516,60 @@ async function getAuthCode(
 			`&nonce=${nonce}` +
 			`&code_challenge=${codeChallenge}` +
 			`&code_challenge_method=S256`;
+
+		// Resolve exactly once. The loopback callback and the manual paste-back
+		// path both funnel through here, so whichever lands first wins and the
+		// other is a no-op (e.g. a slow paste arriving just after the browser
+		// completed the round trip).
+		const succeed = (code: string) => {
+			if (settled) return;
+			settled = true;
+			finish();
+			server.close();
+			resolve({
+				code,
+				redirectUri: `http://127.0.0.1:${boundPort}/callback`,
+			});
+		};
+
+		const failWith = (err: Error) => {
+			if (settled) return;
+			settled = true;
+			finish();
+			server.close();
+			reject(err);
+		};
+
+		// Manual paste-back for no-browser environments (remote SSH, headless):
+		// the user finishes login on another device, then copies the callback
+		// URL their browser couldn't load (it points at this machine's loopback)
+		// and pastes it here. Accepts a full URL, a bare query string, or a bare
+		// code. Returns an inline error string to re-prompt without restarting,
+		// or null once the code is accepted (login() then resolves on its own).
+		const submitManualCode = (pasted: string): string | null => {
+			if (settled) return null;
+			const trimmed = pasted.trim();
+			if (!trimmed) return "Paste the callback URL (or code) first.";
+
+			const params = parseCallbackParams(trimmed);
+			const errParam = params?.get("error");
+			if (errParam) {
+				const desc = params?.get("error_description") || errParam;
+				return `SSO returned an error: ${desc}`;
+			}
+			// No params → treat the whole paste as a bare authorization code.
+			// There's no state to cross-check, but PKCE still binds it to our
+			// verifier at the token exchange.
+			const code = params ? params.get("code") : trimmed;
+			if (!code) return "No authorization code found in the pasted URL.";
+			const returnedState = params?.get("state") ?? null;
+			if (returnedState !== null && returnedState !== expectedState) {
+				return "That URL is from a different login attempt (state mismatch). Use the most recent URL.";
+			}
+
+			succeed(code);
+			return null;
+		};
 
 		const server = createServer((req, res) => {
 			const host = req.headers.host ?? "127.0.0.1";
@@ -512,35 +603,24 @@ async function getAuthCode(
 			if (error) {
 				const desc = url.searchParams.get("error_description") || error;
 				respond(false, desc);
-				finish();
-				server.close();
-				reject(new Error(`SSO login failed: ${desc}`));
+				failWith(new Error(`SSO login failed: ${desc}`));
 				return;
 			}
 
 			if (!code) {
 				respond(false, "No authorization code received");
-				finish();
-				server.close();
-				reject(new Error("No authorization code received"));
+				failWith(new Error("No authorization code received"));
 				return;
 			}
 
 			if (returnedState !== expectedState) {
 				respond(false, "State mismatch");
-				finish();
-				server.close();
-				reject(new Error("State mismatch (possible CSRF attack)"));
+				failWith(new Error("State mismatch (possible CSRF attack)"));
 				return;
 			}
 
 			respond(true);
-			finish();
-			server.close();
-			resolve({
-				code,
-				redirectUri: `http://127.0.0.1:${boundPort}/callback`,
-			});
+			succeed(code);
 		});
 
 		server.listen(0, "127.0.0.1", () => {
@@ -549,20 +629,27 @@ async function getAuthCode(
 				? `${SSO_URL}/logout?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${boundPort}/logout-done`)}`
 				: buildAuthorizeUrl(boundPort);
 
-			onReady(() => {
-				onLog(
-					forceLogin
-						? "Opening browser to end existing SSO session and re-login..."
-						: "Opening browser for SSO login...",
-				);
-				openBrowser(initialUrl);
-			}, initialUrl);
-
+			// Arm the timeout before handing control to the caller, so a caller
+			// that settles synchronously (an immediate manual paste, or a very
+			// fast UI) clears a real timer instead of leaking one armed a tick
+			// later.
 			timeoutHandle = setTimeout(() => {
 				timeoutHandle = null;
-				server.close();
-				reject(new Error("Login timed out after 120 seconds"));
-			}, 120_000);
+				failWith(new Error("Login timed out after 5 minutes"));
+			}, AUTH_CALLBACK_TIMEOUT_MS);
+
+			onReady(
+				() => {
+					onLog(
+						forceLogin
+							? "Opening browser to end existing SSO session and re-login..."
+							: "Opening browser for SSO login...",
+					);
+					openBrowser(initialUrl);
+				},
+				initialUrl,
+				submitManualCode,
+			);
 		});
 	});
 }
