@@ -122,9 +122,18 @@ export function Login({ onDone }: LoginProps) {
 			{browserOpened && !error && (
 				<Box flexDirection="column" marginTop={1}>
 					{authUrl && (
-						<Box flexDirection="column">
+						// Break the URL out to column 0. Negative margin cancels the
+						// root padding(1) + the Step's borderLeft(1) + paddingLeft(2) = 4
+						// columns. Left inside the Step's bordered box, a wrapped URL gets
+						// a "│  " gutter redrawn on every continuation line, which is then
+						// copied into the middle of the URL and corrupts it. Flush-left,
+						// wrapped lines carry only a newline — which `new URL()` and browser
+						// address bars both strip — so the copied URL stays intact.
+						<Box flexDirection="column" marginLeft={-4}>
 							<Text dimColor>
-								{"If the browser didn't open, visit this URL manually:"}
+								{
+									"If the browser didn't open, copy this URL to sign in (here or on another device):"
+								}
 							</Text>
 							<Text>{authUrl}</Text>
 						</Box>

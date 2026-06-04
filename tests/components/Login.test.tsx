@@ -1,7 +1,29 @@
+import { Box } from "ink";
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { Login } from "@/components/Login.js";
+import { Frame } from "@/components/Frame.js";
+import { Login, loginTitle } from "@/components/Login.js";
+import { Step } from "@/components/Step.js";
 import * as auth from "@/lib/auth.js";
+
+const ESC = String.fromCharCode(27);
+const stripAnsi = (s: string) =>
+	s.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
+
+// Mirrors how LoginApp/SetupApp/ModelApp mount <Login> — inside a Step's
+// bordered, padded box. The manual URL relies on that geometry to break itself
+// back out to column 0, so URL-rendering assertions must use this wrapper.
+function renderInFrame(onDone: () => void) {
+	return render(
+		<Box padding={1}>
+			<Frame tag="CoDev">
+				<Step active title={loginTitle()}>
+					<Login onDone={onDone} />
+				</Step>
+			</Frame>
+		</Box>,
+	);
+}
 
 afterEach(() => {
 	cleanup();
@@ -155,16 +177,14 @@ describe("Login", () => {
 		});
 
 		const onDone = vi.fn();
-		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
+		const { stdin, lastFrame } = renderInFrame(onDone);
 
 		await new Promise((r) => setTimeout(r, 50));
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 50));
 
 		const output = lastFrame() ?? "";
-		expect(output).toContain(
-			"If the browser didn't open, visit this URL manually",
-		);
+		expect(output).toContain("copy this URL to sign in");
 		expect(output).toContain(url);
 	});
 
@@ -349,5 +369,33 @@ describe("Login", () => {
 		stdin.write("\r"); // re-submit → resolves
 		await new Promise((r) => setTimeout(r, 50));
 		expect(onDone).toHaveBeenCalledWith(authData);
+	});
+
+	test("renders the manual URL copy-clean when it wraps (no frame border injected)", async () => {
+		const url =
+			"https://netmind.viettel.vn/sso-wrapper/authorize?response_type=code&client_id=litellm-test&redirect_uri=http%3A%2F%2F127.0.0.1%3A55806%2Fcallback&scope=openid%20profile%20email%20offline_access&state=279322a5-453f-45ca-ab8a-491acb3c30ea&nonce=23604863-5332-47a6-bc4d-ebd0aba04f55&code_challenge=u8h6Fpso4_e7__Hk7gu_MMF3ymKt--014a02UHxXq30&code_challenge_method=S256";
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			onReady(
+				() => {},
+				url,
+				() => null,
+			);
+			return new Promise(() => {});
+		});
+
+		const onDone = vi.fn();
+		const { stdin, lastFrame } = renderInFrame(onDone);
+
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\r"); // reveal the URL
+		await new Promise((r) => setTimeout(r, 50));
+
+		// The long URL wraps across several lines. Dropping ANSI codes and the
+		// wrap newlines must leave it intact — i.e. no "│  " gutter (or padding)
+		// was injected mid-URL, which is what corrupts a copy-paste. A bare
+		// newline at wrap points is fine: new URL() and browser address bars
+		// both strip it.
+		const joined = stripAnsi(lastFrame() ?? "").replace(/\n/g, "");
+		expect(joined).toContain(url);
 	});
 });
