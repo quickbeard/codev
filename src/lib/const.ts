@@ -9,6 +9,10 @@ export const SSO_URL = `${BASE_URL}/sso-wrapper`;
 export const AI_GATEWAY_URL = `${BASE_URL}/gateway`;
 export const AI_GATEWAY_OPENAI_URL = `${AI_GATEWAY_URL}/v1`;
 
+export const LOGIN_SUCCESS_URL = atob(
+	"aHR0cHM6Ly9jb2Rldi1sYW5kaW5nLXBhZ2UudmVyY2VsLmFwcC8=",
+);
+
 // Self-hosted gateway model has a 196608-token window. Telling Claude Code
 // to treat that as its effective window and to fire auto-compaction at 85%
 // of it (≈167K) keeps compaction well below the hard limit.
