@@ -303,7 +303,7 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
  */
 export async function login(
 	onLog: (msg: string) => void,
-	onReady: (openBrowserFn: () => void) => void,
+	onReady: (openBrowserFn: () => void, authUrl: string) => void,
 ): Promise<AuthData> {
 	onLog("Starting SSO login...");
 
@@ -437,7 +437,7 @@ export async function refreshCodevConfig(
 
 async function getAuthCode(
 	onLog: (msg: string) => void,
-	onReady: (openBrowserFn: () => void) => void,
+	onReady: (openBrowserFn: () => void, authUrl: string) => void,
 	expectedState: string,
 	codeChallenge: string,
 	nonce: string,
@@ -546,7 +546,7 @@ async function getAuthCode(
 						: "Opening browser for SSO login...",
 				);
 				openBrowser(initialUrl);
-			});
+			}, initialUrl);
 
 			timeoutHandle = setTimeout(() => {
 				timeoutHandle = null;
@@ -633,8 +633,9 @@ export const browserOpener = {
 
 function openBrowser(url: string) {
 	// Fire-and-forget: the loopback callback server resolves the login flow
-	// regardless of whether the browser actually launched, and the URL is
-	// already printed so the user can paste it as a fallback.
+	// regardless of whether the browser actually launched. The interactive
+	// <Login> flow also surfaces this URL (handed to onReady) so the user can
+	// paste it manually if the browser never opened.
 	browserOpener.open(url).catch(() => {});
 }
 
