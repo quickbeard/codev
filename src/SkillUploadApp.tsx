@@ -29,6 +29,7 @@ export function SkillUploadApp({
 	const { exit } = useApp();
 	const [phase, setPhase] = useState<Phase>("preparing");
 	const [skillName, setSkillName] = useState("");
+	const [zipSize, setZipSize] = useState("");
 	const [finalStatus, setFinalStatus] = useState("");
 	const [error, setError] = useState("");
 	const didRun = useRef(false);
@@ -42,6 +43,12 @@ export function SkillUploadApp({
 			const { buffer, filename } = createZipFromPath(inputPath);
 			const name = filename.replace(/\.zip$/i, "");
 			setSkillName(name);
+			const kb = (buffer.byteLength / 1024).toFixed(1);
+			setZipSize(
+				buffer.byteLength > 1024 * 1024
+					? `${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB`
+					: `${kb} KB`,
+			);
 			setPhase("uploading");
 
 			// Phase: uploading
@@ -85,7 +92,7 @@ export function SkillUploadApp({
 						<Text dimColor>Preparing skill package...</Text>
 					)}
 					{phase === "uploading" && (
-						<Text dimColor>Uploading to SkillHub...</Text>
+						<Text dimColor>Uploading to SkillHub... ({zipSize})</Text>
 					)}
 					{phase === "saving" && <Text dimColor>Saving metadata...</Text>}
 					{phase === "submitting" && (
@@ -119,7 +126,21 @@ export function SkillUploadApp({
 							</Text>
 						</Box>
 					)}
-					{phase === "error" && <Text color="red">✗ {error}</Text>}
+					{phase === "error" &&
+						(() => {
+							const lines = error.split("\n");
+							return (
+								<Box flexDirection="column">
+									<Text color="red">✗ {lines[0]}</Text>
+									{lines.slice(1).map((line) => (
+										<Text key={line} dimColor>
+											{"  "}
+											{line}
+										</Text>
+									))}
+								</Box>
+							);
+						})()}
 				</Step>
 			</Frame>
 		</Box>

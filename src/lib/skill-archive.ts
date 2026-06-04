@@ -3,6 +3,31 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import AdmZip from "adm-zip";
 
+// Directories to exclude when zipping a skill folder
+const EXCLUDE_DIRS = new Set([
+	".git",
+	"node_modules",
+	".venv",
+	"venv",
+	"__pycache__",
+	".pytest_cache",
+	".mypy_cache",
+	".ruff_cache",
+	"dist",
+	"build",
+	".next",
+	".nuxt",
+	".turbo",
+	"coverage",
+	".DS_Store",
+]);
+
+function skipEntry(entryPath: string): boolean {
+	// entryPath is relative to the zipped folder, e.g. "node_modules/foo/bar.js"
+	const parts = entryPath.split(/[\\/]/);
+	return parts.some((part) => EXCLUDE_DIRS.has(part));
+}
+
 /**
  * Given a path to a directory or a .zip file, return a ZIP buffer ready for
  * upload. Directories are zipped with AdmZip; ZIP files are read directly.
@@ -17,8 +42,12 @@ export function createZipFromPath(inputPath: string): {
 	const stat = statSync(inputPath);
 	if (stat.isDirectory()) {
 		const zip = new AdmZip();
-		zip.addLocalFolder(inputPath);
-		const dirName = basename(inputPath.replace(/[\\/]+$/, ""));
+		const absRoot = resolve(inputPath);
+		zip.addLocalFolder(inputPath, "", (entryPath: string) => {
+			// entryPath is relative to absRoot
+			return !skipEntry(entryPath);
+		});
+		const dirName = basename(absRoot.replace(/[\\/]+$/, ""));
 		return { buffer: zip.toBuffer(), filename: `${dirName}.zip` };
 	}
 	return { buffer: readFileSync(inputPath), filename: basename(inputPath) };

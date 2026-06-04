@@ -167,10 +167,31 @@ export async function uploadSkill(
 		const body = await res.text();
 		let msg = `Upload failed (${res.status})`;
 		try {
-			const parsed = JSON.parse(body) as { error?: string; message?: string };
-			msg = parsed.error ?? parsed.message ?? msg;
+			const parsed = JSON.parse(body) as {
+				error?: string;
+				message?: string;
+				details?: unknown;
+				errors?: unknown;
+				validationErrors?: unknown;
+			};
+			const base = parsed.error ?? parsed.message ?? msg;
+			const extra =
+				parsed.details ?? parsed.errors ?? parsed.validationErrors ?? null;
+			if (extra !== null && extra !== undefined) {
+				const extraStr = Array.isArray(extra)
+					? extra
+							.map((e) =>
+								typeof e === "object" ? JSON.stringify(e) : String(e),
+							)
+							.join("; ")
+					: typeof extra === "object"
+						? JSON.stringify(extra)
+						: String(extra);
+				msg = `${base}\n${extraStr}`;
+			} else {
+				msg = base;
+			}
 		} catch {
-			// Use raw body if not JSON
 			if (body) msg = body;
 		}
 		throw new Error(msg);
