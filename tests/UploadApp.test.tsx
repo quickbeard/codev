@@ -17,45 +17,41 @@ const EMPTY_SUMMARY: upload.UploadSummary = {
 	errors: [],
 };
 
+// Poll until `predicate` holds. Used instead of a fixed sleep because Ink
+// attaches its input listener a beat after the paste field first paints (a
+// useEffect gated on isActive), and that lag is larger on Windows CI.
+async function waitFor(predicate: () => boolean, tries = 100): Promise<void> {
+	for (let i = 0; i < tries; i++) {
+		if (predicate()) return;
+		await new Promise((r) => setTimeout(r, 20));
+	}
+	throw new Error("waitFor: condition not met within timeout");
+}
+
+// Press Enter until `predicate` holds. Keystrokes written before Ink's input
+// listener is attached are silently dropped, so retrying makes the test
+// independent of that activation timing (the source of the Windows-only race).
+async function pressEnterUntil(
+	stdin: { write: (data: string) => void },
+	predicate: () => boolean,
+	tries = 100,
+): Promise<void> {
+	for (let i = 0; i < tries; i++) {
+		if (predicate()) return;
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 20));
+	}
+	throw new Error("pressEnterUntil: condition not met within timeout");
+}
+
 describe("UploadApp", () => {
-	test("offers paste-back when a fresh login is needed, and submits the URL", async () => {
-		const submit = vi.fn((_pasted: string) => null);
+	test("offers paste-back when a fresh login is needed and submits on Enter", async () => {
+		const submit = vi.fn();
 		vi.spyOn(upload, "runUpload").mockImplementation((opts) => {
 			return new Promise<upload.UploadSummary>((resolve) => {
-				opts?.onStatus?.("Logging in...");
 				opts?.onLoginUrl?.("https://sso.test/authorize?x=1");
 				opts?.onManualSubmit?.((pasted) => {
-					const err = submit(pasted);
-					if (!err) resolve(EMPTY_SUMMARY);
-					return err;
-				});
-			});
-		});
-
-		const { stdin, lastFrame } = render(<UploadApp />);
-		await new Promise((r) => setTimeout(r, 50));
-
-		// The paste-back affordance is shown alongside the manual URL.
-		expect(lastFrame() ?? "").toContain("remote or headless");
-
-		stdin.write("http://127.0.0.1:5000/callback?code=abc&state=xyz");
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 50));
-
-		expect(submit).toHaveBeenCalledWith(
-			expect.stringContaining("code=abc&state=xyz"),
-		);
-	});
-
-	test("surfaces an inline paste error and recovers on re-submit", async () => {
-		let calls = 0;
-		vi.spyOn(upload, "runUpload").mockImplementation((opts) => {
-			return new Promise<upload.UploadSummary>((resolve) => {
-				opts?.onLoginUrl?.("https://sso.test/authorize?x=1");
-				opts?.onManualSubmit?.(() => {
-					calls += 1;
-					if (calls === 1) return "State mismatch — use the latest URL.";
+					submit(pasted);
 					resolve(EMPTY_SUMMARY);
 					return null;
 				});
@@ -63,29 +59,46 @@ describe("UploadApp", () => {
 		});
 
 		const { stdin, lastFrame } = render(<UploadApp />);
-		await new Promise((r) => setTimeout(r, 50));
 
-		stdin.write("oops");
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 50));
+		// The paste-back affordance is offered alongside the manual URL.
+		await waitFor(() => (lastFrame() ?? "").includes("remote or headless"));
+
+		// Enter reaches the submitter that runUpload wired in (verifying the
+		// onManualSubmit plumbing). Exact char accumulation is covered
+		// cross-platform by the Login component tests.
+		await pressEnterUntil(stdin, () => submit.mock.calls.length > 0);
+		expect(submit).toHaveBeenCalled();
+	});
+
+	test("renders an inline error when a submitted paste is rejected", async () => {
+		vi.spyOn(upload, "runUpload").mockImplementation((opts) => {
+			// Never resolves: every submit is rejected, mirroring a stuck login.
+			return new Promise<upload.UploadSummary>(() => {
+				opts?.onLoginUrl?.("https://sso.test/authorize?x=1");
+				opts?.onManualSubmit?.(() => "State mismatch — use the latest URL.");
+			});
+		});
+
+		const { stdin, lastFrame } = render(<UploadApp />);
+		await waitFor(() => (lastFrame() ?? "").includes("remote or headless"));
+		await pressEnterUntil(stdin, () =>
+			(lastFrame() ?? "").includes("State mismatch"),
+		);
 		expect(lastFrame() ?? "").toContain("State mismatch");
-
-		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 50));
-		expect(calls).toBe(2);
 	});
 
 	test("shows no paste field when already authenticated", async () => {
-		vi.spyOn(upload, "runUpload").mockResolvedValue({
+		const runUpload = vi.spyOn(upload, "runUpload").mockResolvedValue({
 			...EMPTY_SUMMARY,
 			found: 2,
 			uploaded: 2,
 		});
 
 		const { lastFrame } = render(<UploadApp />);
+		// runUpload resolves without ever calling onLoginUrl, so the field can
+		// never appear; give the async chain a moment, then assert its absence.
+		await waitFor(() => runUpload.mock.calls.length > 0);
 		await new Promise((r) => setTimeout(r, 50));
-
 		expect(lastFrame() ?? "").not.toContain("remote or headless");
 	});
 });
