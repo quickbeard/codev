@@ -1292,6 +1292,22 @@ describe("login manual paste-back (no-browser)", () => {
 		expect(result.access_token).toBe("flow-access-token");
 	});
 
+	test("accepts a scheme-less callback URL (host:port/callback?code=...)", async () => {
+		const result = await login(
+			() => {},
+			(_open, url, submit) => {
+				const u = new URL(url);
+				const state = u.searchParams.get("state") ?? "";
+				const port = new URL(u.searchParams.get("redirect_uri") ?? "").port;
+				// No "http://" prefix — as some browsers show (and copy) it.
+				expect(
+					submit(`127.0.0.1:${port}/callback?code=schemeless&state=${state}`),
+				).toBeNull();
+			},
+		);
+		expect(result.access_token).toBe("flow-access-token");
+	});
+
 	test("rejects a state mismatch inline, then recovers on re-paste", async () => {
 		const result = await login(
 			() => {},

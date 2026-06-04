@@ -463,18 +463,26 @@ export async function refreshCodevConfig(
 
 // Extracts OAuth callback params from text the user pasted back during a
 // no-browser login. Handles a full callback URL (the unreachable
-// http://127.0.0.1:<port>/callback?... their browser landed on), a bare query
-// string copied without the scheme, or a leading "?". Returns null when the
-// paste carries no recognizable params — the caller then treats it as a bare
-// authorization code.
+// http://127.0.0.1:<port>/callback?... their browser landed on), a scheme-less
+// "127.0.0.1:<port>/callback?..." (some browsers hide/drop the scheme), a bare
+// query string, or a leading "?". Returns null when the paste carries no
+// recognizable params — the caller then treats it as a bare authorization code.
 function parseCallbackParams(pasted: string): URLSearchParams | null {
 	try {
 		return new URL(pasted).searchParams;
 	} catch {
 		// Not a full URL — fall through.
 	}
-	if (/(?:^|[?&])(?:code|state|error)=/.test(pasted)) {
-		return new URLSearchParams(pasted.replace(/^\?/, ""));
+	// Not a parseable URL — e.g. a scheme-less "127.0.0.1:PORT/callback?..."
+	// (a digit-led authority isn't a valid URL scheme, so new URL() rejected
+	// it) or a bare query string. Slice off everything up to the first "?" so a
+	// host/path prefix doesn't get swallowed into the first param's name, then
+	// parse just the query.
+	const query = pasted.includes("?")
+		? pasted.slice(pasted.indexOf("?") + 1)
+		: pasted;
+	if (/(?:^|&)(?:code|state|error)=/.test(query)) {
+		return new URLSearchParams(query);
 	}
 	return null;
 }
