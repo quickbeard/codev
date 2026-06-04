@@ -13,7 +13,7 @@ import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import open from "open";
-import { SSO_URL } from "@/lib/const.js";
+import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
 import { fetchCodevConfig } from "@/lib/proxy.js";
 
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
@@ -505,8 +505,19 @@ async function getAuthCode(
 			const returnedState = url.searchParams.get("state");
 
 			const respond = (ok: boolean, msg?: string) => {
-				res.writeHead(ok ? 200 : 400, { "Content-Type": "text/html" });
-				res.end(loginResultHtml(ok, msg));
+				// Hand the browser to the hosted success page instead of serving
+				// inline HTML. We already hold the code by now, so this is purely the
+				// user-facing confirmation; failures carry ?error=... so the page can
+				// render its own error state.
+				const base = LOGIN_SUCCESS_URL;
+				let location = base;
+				if (!ok) {
+					const sep = base.includes("?") ? "&" : "?";
+					const desc = encodeURIComponent(msg ?? "Unknown error");
+					location = `${base}${sep}error=login_failed&error_description=${desc}`;
+				}
+				res.writeHead(302, { Location: location });
+				res.end();
 			};
 
 			if (error) {
@@ -647,33 +658,4 @@ function openBrowser(url: string) {
 	// <Login> flow also surfaces this URL (handed to onReady) so the user can
 	// paste it manually if the browser never opened.
 	browserOpener.open(url).catch(() => {});
-}
-
-function escapeHtml(str: string): string {
-	return str
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#039;");
-}
-
-function loginResultHtml(success: boolean, error?: string): string {
-	const title = success ? "Login Successful" : "Login Failed";
-	const safeError = error ? escapeHtml(error) : "Unknown error";
-	const message = success
-		? "You have been logged in. You can close this tab and return to the terminal."
-		: `Login failed: ${safeError}. Please try again.`;
-	const color = success ? "#22c55e" : "#ef4444";
-
-	return `<!DOCTYPE html>
-<html>
-<head><title>${title}</title></head>
-<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0a0a0a;color:#fafafa">
-<div style="text-align:center">
-<h1 style="color:${color}">${title}</h1>
-<p>${message}</p>
-</div>
-</body>
-</html>`;
 }
