@@ -109,6 +109,13 @@ interface TokenResponse {
 // (or a bare authorization code) back in. It returns an inline error string to
 // re-prompt without restarting, or null once the code is accepted — after
 // which the login() promise resolves on its own.
+//
+// `authUrl` is ALWAYS the directly-pasteable /authorize URL — even on the
+// force-login path. `openBrowserFn` may instead route a *local* browser through
+// the wrapper /logout bounce (to clear the IdP session cookie), but that bounce
+// redirects to a loopback-only /logout-done page a remote browser can't reach.
+// A no-browser user authenticates on another device, so handing them the
+// /authorize URL is the only form that can actually produce a code to paste.
 export type OnLoginReady = (
 	openBrowserFn: () => void,
 	authUrl: string,
@@ -644,9 +651,16 @@ async function getAuthCode(
 
 		server.listen(0, "127.0.0.1", () => {
 			boundPort = (server.address() as AddressInfo).port;
+			// On force-login we open the *browser* at the wrapper /logout URL so a
+			// local browser clears its IdP session cookie before re-authing. The
+			// manual paste-back channel, however, always gets the plain /authorize
+			// URL: the /logout bounce redirects to a loopback-only /logout-done page
+			// that a remote user's browser can't load, so it could never yield a
+			// code to paste back. (Off the force path the two are identical.)
 			const initialUrl = forceLogin
 				? `${SSO_URL}/logout?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${boundPort}/logout-done`)}`
 				: buildAuthorizeUrl(boundPort);
+			const authorizeUrl = buildAuthorizeUrl(boundPort);
 
 			// Arm the timeout before handing control to the caller, so a caller
 			// that settles synchronously (an immediate manual paste, or a very
@@ -666,7 +680,7 @@ async function getAuthCode(
 					);
 					openBrowser(initialUrl);
 				},
-				initialUrl,
+				authorizeUrl,
 				submitManualCode,
 			);
 		});

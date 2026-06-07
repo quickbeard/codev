@@ -1234,6 +1234,37 @@ describe("login with force-login marker", () => {
 		await loginPromise;
 		expect((openedUrl as unknown as URL).pathname).toBe("/sso-wrapper/logout");
 	});
+
+	test("hands the manual paste-back channel the /authorize URL, not the loopback-only /logout bounce", async () => {
+		// On force-login the browser is opened at /logout (to clear the IdP
+		// cookie), but that bounce redirects to a loopback-only /logout-done page
+		// a remote browser can't reach — so the no-browser channel must instead be
+		// given the plain /authorize URL, which a remote browser CAN complete.
+		writeMarker();
+		let manualUrl = "";
+
+		const result = await login(
+			() => {},
+			(_open, url, submit) => {
+				manualUrl = url;
+				// Reconstruct the callback the remote user copies back, from the
+				// same loopback port + state the /authorize URL carries.
+				const u = new URL(url);
+				const state = u.searchParams.get("state") ?? "";
+				const port = new URL(u.searchParams.get("redirect_uri") ?? "").port;
+				expect(
+					submit(
+						`http://127.0.0.1:${port}/callback?code=pasted&state=${state}`,
+					),
+				).toBeNull();
+			},
+		);
+
+		expect(new URL(manualUrl).pathname).toBe("/sso-wrapper/authorize");
+		// No browser was opened — the remote user pasted the callback URL by hand.
+		expect(openBrowserSpy).not.toHaveBeenCalled();
+		expect(result.access_token).toBe("flow-access-token");
+	});
 });
 
 describe("login manual paste-back (no-browser)", () => {

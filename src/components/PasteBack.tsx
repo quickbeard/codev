@@ -44,7 +44,14 @@ export function usePasteBack(active: boolean): PasteBack {
 			const submit = submitRef.current;
 			if (!submit) return;
 			if (key.return) {
-				const err = submit(pasteValue.trim());
+				// Enter on an empty field is a no-op here, freeing the host to give
+				// that keystroke another meaning while the field is on screen —
+				// <Login> uses an empty-field Enter to open the browser, and only a
+				// non-empty Enter submits the pasted URL. (UploadApp has no such
+				// alternate action, so there an empty Enter simply does nothing.)
+				const value = pasteValue.trim();
+				if (!value) return;
+				const err = submit(value);
 				if (err) {
 					setPasteError(err);
 				} else {

@@ -16,9 +16,13 @@ export function Login({ onDone }: LoginProps) {
 	const [browserOpened, setBrowserOpened] = useState(false);
 	const openBrowserRef = useRef<(() => void) | null>(null);
 
-	// The paste-back field is live once the browser step is done and no fatal
-	// error has taken over the screen.
-	const paste = usePasteBack(browserOpened && !error);
+	// The URL and paste-back field go live as soon as login() hands us the
+	// authorize URL (waitingForEnter) — not only after the browser step — so a
+	// no-browser user can copy the URL and paste their callback back without
+	// first pressing Enter into a browser that will never open. The field stays
+	// live through browserOpened; a fatal error takes over the screen and ends it.
+	const urlReady = (waitingForEnter || browserOpened) && !error;
+	const paste = usePasteBack(urlReady);
 
 	const addLog = useCallback((msg: string) => {
 		setLogs((prev) => [...prev, msg]);
@@ -67,10 +71,16 @@ export function Login({ onDone }: LoginProps) {
 			if (key.return) setAttempt((n) => n + 1);
 			return;
 		}
-		// First Enter opens the browser (and reveals the URL + paste field for a
-		// no-browser user). Once the browser step is done, keystrokes belong to the
-		// paste-back field, which usePasteBack listens for on its own.
-		if (waitingForEnter && key.return && openBrowserRef.current) {
+		// Enter on an empty paste field opens the browser. A non-empty field means
+		// the user is pasting a callback URL back by hand, so that Enter belongs to
+		// usePasteBack's submit (which only fires on a non-empty field) and we leave
+		// the browser closed.
+		if (
+			waitingForEnter &&
+			key.return &&
+			openBrowserRef.current &&
+			!paste.pasteValue.trim()
+		) {
 			setWaitingForEnter(false);
 			setBrowserOpened(true);
 			openBrowserRef.current();
@@ -85,10 +95,12 @@ export function Login({ onDone }: LoginProps) {
 			))}
 			{waitingForEnter && (
 				<Text color="cyan">
-					{"Press Enter to open the browser and login..."}
+					{
+						"Press Enter to open the browser and login (or paste your callback URL below to sign in without one)..."
+					}
 				</Text>
 			)}
-			{browserOpened && !error && (
+			{urlReady && (
 				<Box flexDirection="column" marginTop={1}>
 					{authUrl && (
 						// Break the URL out to column 0. Negative margin cancels the

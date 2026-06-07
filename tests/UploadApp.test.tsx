@@ -28,20 +28,24 @@ async function waitFor(predicate: () => boolean, tries = 100): Promise<void> {
 	throw new Error("waitFor: condition not met within timeout");
 }
 
-// Press Enter until `predicate` holds. Keystrokes written before Ink's input
-// listener is attached are silently dropped, so retrying makes the test
-// independent of that activation timing (the source of the Windows-only race).
-async function pressEnterUntil(
+// Paste `value` then press Enter until `predicate` holds. Keystrokes written
+// before Ink's input listener is attached are silently dropped, so retrying
+// makes the test independent of that activation timing (the source of the
+// Windows-only race). An empty-field Enter is a no-op in the paste-back hook, so
+// a value must accompany each submit attempt.
+async function pasteAndSubmitUntil(
 	stdin: { write: (data: string) => void },
+	value: string,
 	predicate: () => boolean,
 	tries = 100,
 ): Promise<void> {
 	for (let i = 0; i < tries; i++) {
 		if (predicate()) return;
+		stdin.write(value);
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 20));
 	}
-	throw new Error("pressEnterUntil: condition not met within timeout");
+	throw new Error("pasteAndSubmitUntil: condition not met within timeout");
 }
 
 describe("UploadApp", () => {
@@ -63,10 +67,14 @@ describe("UploadApp", () => {
 		// The paste-back affordance is offered alongside the manual URL.
 		await waitFor(() => (lastFrame() ?? "").includes("remote or headless"));
 
-		// Enter reaches the submitter that runUpload wired in (verifying the
-		// onManualSubmit plumbing). Exact char accumulation is covered
-		// cross-platform by the Login component tests.
-		await pressEnterUntil(stdin, () => submit.mock.calls.length > 0);
+		// A pasted value + Enter reaches the submitter that runUpload wired in
+		// (verifying the onManualSubmit plumbing). Exact char accumulation is
+		// covered cross-platform by the Login component tests.
+		await pasteAndSubmitUntil(
+			stdin,
+			"http://127.0.0.1:5000/callback?code=abc&state=xyz",
+			() => submit.mock.calls.length > 0,
+		);
 		expect(submit).toHaveBeenCalled();
 	});
 
@@ -81,8 +89,10 @@ describe("UploadApp", () => {
 
 		const { stdin, lastFrame } = render(<UploadApp />);
 		await waitFor(() => (lastFrame() ?? "").includes("remote or headless"));
-		await pressEnterUntil(stdin, () =>
-			(lastFrame() ?? "").includes("State mismatch"),
+		await pasteAndSubmitUntil(
+			stdin,
+			"http://127.0.0.1:5000/callback?code=abc&state=xyz",
+			() => (lastFrame() ?? "").includes("State mismatch"),
 		);
 		expect(lastFrame() ?? "").toContain("State mismatch");
 	});

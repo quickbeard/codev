@@ -144,7 +144,7 @@ describe("Login", () => {
 		expect(openBrowserFn).not.toHaveBeenCalled();
 	});
 
-	test("does not show the fallback URL before Enter is pressed", async () => {
+	test("shows the fallback URL as soon as it is ready, before Enter is pressed", async () => {
 		const url = "https://sso.test/authorize?x=1";
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
 			onReady(
@@ -156,13 +156,15 @@ describe("Login", () => {
 		});
 
 		const onDone = vi.fn();
-		const { lastFrame } = render(<Login onDone={onDone} />);
+		// Render inside the Step frame so the URL's column-0 break-out (negative
+		// margin) lands correctly, same as the after-Enter fallback test below.
+		const { lastFrame } = renderInFrame(onDone);
 
 		await new Promise((r) => setTimeout(r, 50));
 
-		// The URL is only revealed after the user presses Enter to open the
-		// browser, so it must not be on screen while we're still waiting.
-		expect(lastFrame() ?? "").not.toContain(url);
+		// A no-browser user can copy the URL right away — it no longer hides
+		// behind the browser-open Enter.
+		expect(lastFrame() ?? "").toContain(url);
 	});
 
 	test("shows the authorize URL as a manual fallback after Enter is pressed", async () => {
@@ -276,7 +278,7 @@ describe("Login", () => {
 		expect(after).not.toContain("Press Enter to retry");
 	});
 
-	test("reveals the paste-back prompt only after Enter is pressed", async () => {
+	test("shows the paste-back prompt as soon as the URL is ready", async () => {
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
 			onReady(
 				() => {},
@@ -287,17 +289,51 @@ describe("Login", () => {
 		});
 
 		const onDone = vi.fn();
-		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
+		const { lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
-		expect(lastFrame() ?? "").not.toContain("remote or headless");
 
-		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 50));
-
+		// The paste-back affordance is offered up front, so a no-browser user
+		// never has to press Enter into a browser that will never open.
 		const output = lastFrame() ?? "";
 		expect(output).toContain("remote or headless");
 		expect(output).toContain("Press Enter to submit");
+	});
+
+	test("completes paste-back without opening the browser first", async () => {
+		const authData = fakeAuth();
+		const openBrowserFn = vi.fn();
+		const submit = vi.fn((_pasted: string) => null);
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			return new Promise<auth.AuthData>((resolve) => {
+				onReady(openBrowserFn, "https://sso.test/authorize?x=1", (pasted) => {
+					const err = submit(pasted);
+					if (!err) resolve(authData);
+					return err;
+				});
+			});
+		});
+
+		const onDone = vi.fn();
+		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 50));
+		// No Enter to open the browser — paste straight away. Re-write until the
+		// field shows the value, in case Ink's input listener attaches a beat late.
+		const pasted = "http://127.0.0.1:5000/callback?code=abc&state=xyz";
+		for (let i = 0; i < 50 && !(lastFrame() ?? "").includes("code=abc"); i++) {
+			stdin.write(pasted);
+			await new Promise((r) => setTimeout(r, 20));
+		}
+		stdin.write("\r"); // a non-empty field means Enter submits, not open-browser
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(submit).toHaveBeenCalledWith(
+			expect.stringContaining("code=abc&state=xyz"),
+		);
+		// The browser was never opened — the whole point of the no-browser path.
+		expect(openBrowserFn).not.toHaveBeenCalled();
+		expect(onDone).toHaveBeenCalledWith(authData);
 	});
 
 	test("completes via manual paste-back of the callback URL", async () => {
