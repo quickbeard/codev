@@ -39,6 +39,11 @@ export interface UploadOptions {
 	// — there's no human watching the log, and it basically never reaches the
 	// login path anyway since it's gated on loadAuth().
 	onLoginUrl?: (url: string) => void;
+	// Hands the interactive caller the paste-back submitter when a fresh SSO
+	// login is needed, so a no-browser user can complete login inline (see
+	// UploadApp). Returns an inline error string to re-prompt, or null once the
+	// pasted code is accepted. The daemon doesn't pass this — no TTY.
+	onManualSubmit?: (submit: (pasted: string) => string | null) => void;
 }
 
 export interface UploadSummary {
@@ -75,6 +80,7 @@ export async function runUpload({
 	cwd = process.cwd(),
 	onStatus = () => {},
 	onLoginUrl,
+	onManualSubmit,
 }: UploadOptions = {}): Promise<UploadSummary> {
 	onStatus("Exporting local conversations...");
 	await runExport(onStatus);
@@ -92,7 +98,7 @@ export async function runUpload({
 		};
 	}
 
-	const auth = await ensureAuth(onStatus, onLoginUrl);
+	const auth = await ensureAuth(onStatus, onLoginUrl, onManualSubmit);
 
 	// Try the Supabase block once. If it trips a refreshable failure (cache
 	// missing, or Supabase rejected our credentials), refresh the cached
@@ -200,10 +206,11 @@ export function filterNewFiles(
 async function ensureAuth(
 	onStatus: (message: string) => void,
 	onLoginUrl?: (url: string) => void,
+	onManualSubmit?: (submit: (pasted: string) => string | null) => void,
 ) {
 	const auth = loadAuth();
 	if (auth) return auth;
-	const fresh = await login(onStatus, (openBrowser, url) => {
+	const fresh = await login(onStatus, (openBrowser, url, submitManualCode) => {
 		// Hand the URL to the dedicated channel when the caller provides one
 		// (UploadApp pins it under the spinner). Fall back to onStatus so the
 		// daemon log — or any future caller that doesn't wire onLoginUrl —
@@ -211,6 +218,10 @@ async function ensureAuth(
 		if (onLoginUrl) onLoginUrl(url);
 		else
 			onStatus(`If your browser didn't open, visit this URL manually: ${url}`);
+		// Expose the paste-back submitter to an interactive caller (UploadApp) so
+		// a no-browser user can finish login without leaving `codev upload`. The
+		// daemon doesn't wire this — it has no TTY and bails when logged out.
+		onManualSubmit?.(submitManualCode);
 		openBrowser();
 	});
 	// login() no longer refreshes CoDev config on its own — every caller does
