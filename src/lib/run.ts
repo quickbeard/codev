@@ -1,5 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { constants } from "node:os";
+import { claudeNativeBinaryMissing } from "@/lib/npm.js";
 import { stripShimDirFromPath } from "@/lib/shims.js";
 
 const AGENT_LABEL: Record<string, string> = {
@@ -71,9 +72,25 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 			resolve(1);
 		});
 
-		child.once("exit", (code, signal) => {
+		child.once("exit", async (code, signal) => {
 			cleanup();
 			if (code !== null) {
+				// A non-zero `claude` exit can be the leftover placeholder stub
+				// erroring with "native binary not installed" (suppressed
+				// postinstall / omitted optional dependency). The stub already
+				// printed its own message via inherited stderr; we only add a
+				// codev-specific repair hint when we can positively confirm the
+				// native binary is missing, so normal claude failures stay quiet.
+				if (
+					code !== 0 &&
+					cmd === "claude" &&
+					(await claudeNativeBinaryMissing())
+				) {
+					process.stderr.write(
+						"\nclaude's native binary is missing. Run 'codev install' to repair it " +
+							"(reinstalls Claude Code with the platform binary included).\n",
+					);
+				}
 				resolve(code);
 				return;
 			}
