@@ -5,7 +5,19 @@ import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { claudeNativeBinaryMissing } from "@/lib/npm.js";
 import { runAgent, spawner } from "@/lib/run.js";
+
+// Stub the native-binary probe so the runtime repair hint can be exercised
+// without a real npm-global Claude Code install. Defaults to "present" so
+// existing tests that launch `node` (or other agents) never see the hint.
+vi.mock("@/lib/npm.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/npm.js")>();
+	return {
+		...actual,
+		claudeNativeBinaryMissing: vi.fn().mockResolvedValue(false),
+	};
+});
 
 let tempDir: string;
 let errorSpy: MockInstance;
@@ -13,6 +25,9 @@ let errorSpy: MockInstance;
 beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-run-test-"));
 	errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+	// Clear call history + the mockResolvedValueOnce queue, then restore the
+	// "binary present" default so per-test assertions start from a clean slate.
+	vi.mocked(claudeNativeBinaryMissing).mockReset().mockResolvedValue(false);
 });
 
 afterEach(() => {
@@ -136,5 +151,66 @@ describe("runAgent", () => {
 			spawnSpy.mockRestore();
 		}
 		expect(calls.some((m) => m.includes("Starting Claude Code..."))).toBe(true);
+	});
+
+	// Stub spawn to emit a chosen exit code without launching a real binary,
+	// and capture our own stderr writes (stdio:'inherit' bypasses this method,
+	// so we only see codev's banner + repair hint).
+	function runWithFakeExit(
+		cmd: string,
+		exitCode: number,
+	): Promise<{ code: number; stderr: string[] }> {
+		const fakeChild = new EventEmitter() as unknown as ChildProcess;
+		const spawnSpy = vi.spyOn(spawner, "spawn").mockImplementation(((
+			..._args: unknown[]
+		) => {
+			queueMicrotask(() => fakeChild.emit("exit", exitCode, null));
+			return fakeChild;
+		}) as unknown as typeof spawner.spawn);
+
+		const original = process.stderr.write.bind(process.stderr);
+		const stderr: string[] = [];
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			stderr.push(typeof chunk === "string" ? chunk : chunk.toString());
+			return true;
+		}) as typeof process.stderr.write;
+
+		return runAgent(cmd, [])
+			.then((code) => ({ code, stderr }))
+			.finally(() => {
+				process.stderr.write = original;
+				spawnSpy.mockRestore();
+			});
+	}
+
+	test("prints native-binary repair hint when claude exits non-zero and binary is missing", async () => {
+		vi.mocked(claudeNativeBinaryMissing).mockResolvedValueOnce(true);
+		const { code, stderr } = await runWithFakeExit("claude", 1);
+		expect(code).toBe(1);
+		expect(stderr.some((m) => m.includes("native binary is missing"))).toBe(
+			true,
+		);
+		expect(stderr.some((m) => m.includes("codev install"))).toBe(true);
+	});
+
+	test("stays quiet when claude exits non-zero but the binary is present", async () => {
+		vi.mocked(claudeNativeBinaryMissing).mockResolvedValueOnce(false);
+		const { code, stderr } = await runWithFakeExit("claude", 1);
+		expect(code).toBe(1);
+		expect(stderr.some((m) => m.includes("native binary is missing"))).toBe(
+			false,
+		);
+	});
+
+	test("does not probe the claude binary on a clean (zero) exit", async () => {
+		const { code } = await runWithFakeExit("claude", 0);
+		expect(code).toBe(0);
+		expect(claudeNativeBinaryMissing).not.toHaveBeenCalled();
+	});
+
+	test("does not probe for non-claude agents that exit non-zero", async () => {
+		const { code } = await runWithFakeExit("codex", 1);
+		expect(code).toBe(1);
+		expect(claudeNativeBinaryMissing).not.toHaveBeenCalled();
 	});
 });
