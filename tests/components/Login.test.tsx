@@ -137,7 +137,7 @@ describe("Login", () => {
 		expect(output).toContain("Waiting for sign-in to complete");
 		// The URL and paste field stay hidden — no clutter for the common case.
 		expect(output).not.toContain(url);
-		expect(output).not.toContain("Paste the page it lands on");
+		expect(output).not.toContain("copy the code shown");
 	});
 
 	test("reveals the sign-in URL fallback after the delay", async () => {
@@ -220,7 +220,7 @@ describe("Login", () => {
 		expect(output).toContain("Already logged in as test@example.com");
 		// No URL ever became ready, so the manual fallback (a live branch in the
 		// URL-ready state) must not appear.
-		expect(output).not.toContain("Paste the page it lands on");
+		expect(output).not.toContain("copy the code shown");
 		expect(onDone).toHaveBeenCalledTimes(1);
 		expect(onDone).toHaveBeenCalledWith(authData);
 	});
@@ -290,7 +290,7 @@ describe("Login", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		const output = lastFrame() ?? "";
-		expect(output).toContain("Signing in on another device");
+		expect(output).toContain("copy the code shown");
 		expect(output).toContain("Press Enter to submit");
 	});
 

@@ -8,12 +8,12 @@ import {
 } from "react";
 
 // Shared no-browser paste-back affordance for the SSO login flow. A remote or
-// headless user finishes login in a browser on another device, then copies the
-// dead loopback callback URL (or just the code) from the address bar — the one
-// their browser couldn't load because it points at this machine's localhost —
-// and pastes it here. Both <Login> (install/config) and <UploadApp> (codev
-// upload) drive the same auth.login() submitManualCode closure, so they share
-// this hook and the matching <PasteBackPrompt> renderer to stay identical.
+// headless user finishes login in a browser on another device and lands on the
+// hosted success page, which shows their authorization code with a "Copy code"
+// button; they paste that code here. (A full callback URL still works too —
+// submitManualCode accepts either.) Both <Login> (install/config) and
+// <UploadApp> (codev upload) drive the same auth.login() submitManualCode
+// closure, so they share this hook and the matching <PasteBackPrompt> renderer.
 
 export interface PasteBack {
 	pasteValue: string;
@@ -110,14 +110,11 @@ export function PasteBackPrompt({
 			{caption ?? (
 				<>
 					<Text dimColor>
-						{"On a remote or headless machine? After you sign in, the browser"}
+						{"After you sign in, the page shows an authorization code."}
 					</Text>
 					<Text dimColor>
-						{
-							"can't load the localhost page it lands on — paste that page's full"
-						}
+						{'Use its "Copy code" button, then paste the code here:'}
 					</Text>
-					<Text dimColor>{"URL (or just the code) here:"}</Text>
 				</>
 			)}
 			<Box>

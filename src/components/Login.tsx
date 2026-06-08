@@ -167,9 +167,7 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 						submitting={paste.submitting}
 						caption={
 							<Text dimColor>
-								{
-									"Signing in on another device? Paste the page it lands on here:"
-								}
+								{"After signing in, copy the code shown and paste it here:"}
 							</Text>
 						}
 					/>

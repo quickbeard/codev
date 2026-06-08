@@ -65,7 +65,7 @@ describe("UploadApp", () => {
 		const { stdin, lastFrame } = render(<UploadApp />);
 
 		// The paste-back affordance is offered alongside the manual URL.
-		await waitFor(() => (lastFrame() ?? "").includes("remote or headless"));
+		await waitFor(() => (lastFrame() ?? "").includes("authorization code"));
 
 		// A pasted value + Enter reaches the submitter that runUpload wired in
 		// (verifying the onManualSubmit plumbing). Exact char accumulation is
@@ -88,7 +88,7 @@ describe("UploadApp", () => {
 		});
 
 		const { stdin, lastFrame } = render(<UploadApp />);
-		await waitFor(() => (lastFrame() ?? "").includes("remote or headless"));
+		await waitFor(() => (lastFrame() ?? "").includes("authorization code"));
 		await pasteAndSubmitUntil(
 			stdin,
 			"http://127.0.0.1:5000/callback?code=abc&state=xyz",
@@ -109,6 +109,6 @@ describe("UploadApp", () => {
 		// never appear; give the async chain a moment, then assert its absence.
 		await waitFor(() => runUpload.mock.calls.length > 0);
 		await new Promise((r) => setTimeout(r, 50));
-		expect(lastFrame() ?? "").not.toContain("remote or headless");
+		expect(lastFrame() ?? "").not.toContain("authorization code");
 	});
 });
