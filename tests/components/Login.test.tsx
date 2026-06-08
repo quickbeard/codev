@@ -42,6 +42,37 @@ function fakeAuth(): auth.AuthData {
 	};
 }
 
+// Poll until `predicate` holds, instead of a fixed sleep. The fallback (URL +
+// paste field) appears one chained tick after the URL is ready
+// (setAuthUrl → re-render → setTimeout → setShowFallback → re-render), and that
+// lag balloons under Windows CI load — a fixed 50 ms wait races it.
+async function waitFor(predicate: () => boolean, tries = 100): Promise<void> {
+	for (let i = 0; i < tries; i++) {
+		if (predicate()) return;
+		await new Promise((r) => setTimeout(r, 20));
+	}
+	throw new Error("waitFor: condition not met within timeout");
+}
+
+// Paste `value` then press Enter until `predicate` holds. Keystrokes written
+// before Ink attaches its input listener (a useEffect gated on the paste field
+// being active) are silently dropped, so retrying makes the test independent of
+// that activation timing — the source of the Windows-only race.
+async function pasteAndSubmitUntil(
+	stdin: { write: (data: string) => void },
+	value: string,
+	predicate: () => boolean,
+	tries = 100,
+): Promise<void> {
+	for (let i = 0; i < tries; i++) {
+		if (predicate()) return;
+		stdin.write(value);
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 20));
+	}
+	throw new Error("pasteAndSubmitUntil: condition not met within timeout");
+}
+
 describe("Login", () => {
 	test("auto-opens the browser as soon as the URL is ready (no Enter gate)", async () => {
 		const openBrowserFn = vi.fn();
@@ -154,7 +185,9 @@ describe("Login", () => {
 		const onDone = vi.fn();
 		const { lastFrame } = renderInFrame(onDone);
 
-		await new Promise((r) => setTimeout(r, 50));
+		await waitFor(() =>
+			(lastFrame() ?? "").includes("Browser didn't open? Sign in here"),
+		);
 
 		const output = lastFrame() ?? "";
 		expect(output).toContain("Browser didn't open? Sign in here");
@@ -180,7 +213,7 @@ describe("Login", () => {
 		const onDone = vi.fn();
 		const { lastFrame } = renderInFrame(onDone);
 
-		await new Promise((r) => setTimeout(r, 50));
+		await waitFor(() => (lastFrame() ?? "").includes(url));
 		const first = lastFrame() ?? "";
 		expect(first).toContain(url);
 		// Wait well past the spinner's ~80 ms tick; the frame must be byte-identical.
@@ -313,7 +346,7 @@ describe("Login", () => {
 		const onDone = vi.fn();
 		const { lastFrame } = renderInFrame(onDone);
 
-		await new Promise((r) => setTimeout(r, 50));
+		await waitFor(() => (lastFrame() ?? "").includes("copy the code shown"));
 
 		const output = lastFrame() ?? "";
 		expect(output).toContain("copy the code shown");
@@ -359,15 +392,18 @@ describe("Login", () => {
 
 	test("shows an inline paste error and recovers on re-submit", async () => {
 		const authData = fakeAuth();
-		let calls = 0;
+		// Phase-gated rather than call-counted: every submit errors while
+		// phase===1 and succeeds once the test flips to phase 2. That keeps the
+		// retrying pasteAndSubmitUntil from accidentally tripping a count-based
+		// success on a Windows-CI double-submit.
+		const ctrl = { phase: 1 };
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
 			return new Promise<auth.AuthData>((resolve) => {
 				onReady(
 					() => {},
 					"https://sso.test/authorize?x=1",
 					() => {
-						calls += 1;
-						if (calls === 1) return "State mismatch — use the latest URL.";
+						if (ctrl.phase === 1) return "State mismatch — use the latest URL.";
 						resolve(authData);
 						return null;
 					},
@@ -378,17 +414,19 @@ describe("Login", () => {
 		const onDone = vi.fn();
 		const { stdin, lastFrame } = renderInFrame(onDone);
 
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("oops");
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\r"); // first submit → inline error
-		await new Promise((r) => setTimeout(r, 50));
-
+		await waitFor(() => (lastFrame() ?? "").includes("copy the code shown"));
+		await pasteAndSubmitUntil(stdin, "oops", () =>
+			(lastFrame() ?? "").includes("State mismatch"),
+		);
 		expect(lastFrame() ?? "").toContain("State mismatch");
 		expect(onDone).not.toHaveBeenCalled();
 
-		stdin.write("\r"); // re-submit → resolves
-		await new Promise((r) => setTimeout(r, 50));
+		ctrl.phase = 2;
+		await pasteAndSubmitUntil(
+			stdin,
+			"oops",
+			() => onDone.mock.calls.length > 0,
+		);
 		expect(onDone).toHaveBeenCalledWith(authData);
 	});
 
@@ -407,7 +445,9 @@ describe("Login", () => {
 		const onDone = vi.fn();
 		const { lastFrame } = renderInFrame(onDone);
 
-		await new Promise((r) => setTimeout(r, 50));
+		// Poll on a stable marker rather than the URL itself — the URL wraps, so
+		// it never appears un-broken in a raw frame.
+		await waitFor(() => (lastFrame() ?? "").includes("Browser didn't open?"));
 
 		// The long URL wraps across several lines. Dropping ANSI codes and the
 		// wrap newlines must leave it intact — i.e. no "│  " gutter (or padding)
