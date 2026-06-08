@@ -134,9 +134,18 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 	return (
 		<Box flexDirection="column">
 			<Box>
-				<Text color="cyan">
-					<Spinner />
-				</Text>
+				{/* Animate only until the fallback (URL + paste field) appears.
+				    Once the URL is on screen the user may be selecting it to copy,
+				    and a ticking spinner redraws the whole frame ~12×/s — which
+				    clears their terminal selection and reads as flicker. A static
+				    marker keeps the frame stable so the URL stays selectable. */}
+				{showFallback ? (
+					<Text color="cyan">{"●"}</Text>
+				) : (
+					<Text color="cyan">
+						<Spinner />
+					</Text>
+				)}
 				<Text>{" Waiting for sign-in to complete in your browser..."}</Text>
 			</Box>
 			{showFallback && (

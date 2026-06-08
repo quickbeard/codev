@@ -162,6 +162,32 @@ describe("Login", () => {
 		expect(output).toContain(url);
 	});
 
+	test("holds a stable frame once the URL is shown (no spinner flicker)", async () => {
+		// Regression: an animated spinner kept redrawing the frame while the URL
+		// was on screen, clearing the user's terminal selection mid-copy. Once
+		// the fallback is up the frame must not change on its own — otherwise a
+		// selection can't survive long enough to copy.
+		const url = "https://sso.test/authorize?x=1";
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			onReady(
+				() => {},
+				url,
+				() => null,
+			);
+			return new Promise(() => {});
+		});
+
+		const onDone = vi.fn();
+		const { lastFrame } = renderInFrame(onDone);
+
+		await new Promise((r) => setTimeout(r, 50));
+		const first = lastFrame() ?? "";
+		expect(first).toContain(url);
+		// Wait well past the spinner's ~80 ms tick; the frame must be byte-identical.
+		await new Promise((r) => setTimeout(r, 250));
+		expect(lastFrame() ?? "").toBe(first);
+	});
+
 	test("copies the sign-in URL to the clipboard when 'c' is pressed", async () => {
 		const url = "https://sso.test/authorize?x=1";
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
