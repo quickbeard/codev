@@ -24,6 +24,11 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 	// path). Gates the whole manual fallback block — URL, copy hint, paste field.
 	const [showFallback, setShowFallback] = useState(false);
 	const [copied, setCopied] = useState(false);
+	// Set once login() resolves. The parent advances but keeps this Step mounted
+	// as read-only history, so without this the pre-URL / waiting spinner would
+	// keep animating (and flickering) forever — and misleadingly say "Starting
+	// sign-in..." after we're already done.
+	const [completed, setCompleted] = useState(false);
 
 	// The paste field goes live with the fallback. Until then keystrokes are
 	// ignored, so the lone-"c" copy shortcut and the paste input never compete
@@ -44,6 +49,7 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 		setAuthUrl(null);
 		setShowFallback(false);
 		setCopied(false);
+		setCompleted(false);
 		paste.reset();
 
 		login(addLog, (openBrowserFn, url, submitManualCode) => {
@@ -55,6 +61,9 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 			openBrowserFn();
 		})
 			.then((auth) => {
+				// Freeze the UI to a static log history before handing off, so the
+				// kept-mounted Step stops spinning once we're done.
+				setCompleted(true);
 				onDone(auth);
 			})
 			.catch((err: Error) => {
@@ -105,6 +114,22 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 			<Box flexDirection="column">
 				<Text color="red">{`Login failed: ${error}`}</Text>
 				<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
+			</Box>
+		);
+	}
+
+	// Login resolved: render the log history statically (no spinner). Covers the
+	// already-logged-in path (onReady never fires, so authUrl stays null) and
+	// the normal success path alike — in both, the parent keeps this Step
+	// mounted as history and a live spinner would just churn.
+	if (completed) {
+		return (
+			<Box flexDirection="column">
+				{logs.map((log, i) => (
+					<Text key={`login-${i.toString()}`} dimColor>
+						{log}
+					</Text>
+				))}
 			</Box>
 		);
 	}
