@@ -521,16 +521,29 @@ async function getAuthCode(
 		// throw "Cannot destructure property 'port' of 'server.address(...)'".
 		let boundPort = 0;
 
-		const buildAuthorizeUrl = (port: number) =>
-			`${SSO_URL}/authorize?` +
-			`response_type=code` +
-			`&client_id=${encodeURIComponent(CLIENT_ID)}` +
-			`&redirect_uri=${encodeURIComponent(`http://127.0.0.1:${port}/callback`)}` +
-			`&scope=openid%20profile%20email%20offline_access` +
-			`&state=${expectedState}` +
-			`&nonce=${nonce}` +
-			`&code_challenge=${codeChallenge}` +
-			`&code_challenge_method=S256`;
+		const buildAuthorizeUrl = (port: number) => {
+			// Hand the wrapper the *public* success page as the redirect target, with
+			// this CLI's loopback callback tucked inside as a nested redirect_uri.
+			// After auth the wrapper bounces the browser to the success page (which is
+			// reachable from any device, unlike 127.0.0.1); the page then relays
+			// code+state back to the loopback for a same-machine login, or shows a
+			// copy-code button when the terminal is on another machine. The token
+			// exchange still uses the plain loopback redirect_uri (see succeed()) — the
+			// wrapper keys the code to PKCE, not to an exact redirect_uri match.
+			const loopback = `http://127.0.0.1:${port}/callback`;
+			const successTarget = `${LOGIN_SUCCESS_URL}?redirect_uri=${encodeURIComponent(loopback)}`;
+			return (
+				`${SSO_URL}/authorize?` +
+				`response_type=code` +
+				`&client_id=${encodeURIComponent(CLIENT_ID)}` +
+				`&redirect_uri=${encodeURIComponent(successTarget)}` +
+				`&scope=openid%20profile%20email%20offline_access` +
+				`&state=${expectedState}` +
+				`&nonce=${nonce}` +
+				`&code_challenge=${codeChallenge}` +
+				`&code_challenge_method=S256`
+			);
+		};
 
 		// Resolve exactly once. The loopback callback and the manual paste-back
 		// path both funnel through here, so whichever lands first wins and the
@@ -611,10 +624,13 @@ async function getAuthCode(
 			const returnedState = url.searchParams.get("state");
 
 			const respond = (ok: boolean, msg?: string) => {
-				// Hand the browser to the hosted success page instead of serving
-				// inline HTML. We already hold the code by now, so this is purely the
-				// user-facing confirmation; failures carry ?error=... so the page can
-				// render its own error state.
+				// This /callback is now reached by the success page's background image
+				// ping (it relays code+state here for a same-machine login), not by the
+				// browser directly — the wrapper redirects the browser to the success
+				// page, not the loopback. So the 302 below is consumed by an <img> that
+				// just fails to decode it: harmless. We still point it at the hosted
+				// success page (failures carry ?error=...) to stay correct for any
+				// direct hit (e.g. an older wrapper that still redirects to loopback).
 				const base = LOGIN_SUCCESS_URL;
 				let location = base;
 				if (!ok) {

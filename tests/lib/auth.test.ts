@@ -614,11 +614,37 @@ function getAuthorizeUrl(spy: MockInstance): URL | null {
 	return new URL(call[0] as string);
 }
 
+// The CLI now hands the wrapper the public success page as redirect_uri, with the
+// loopback callback nested inside as its own `redirect_uri` query param. Dig the
+// loopback back out — falling back to the value itself when it's already a loopback
+// URL (the /logout-done bounce passes the loopback directly, no nesting).
+function loopbackFromRedirectUri(
+	redirectUriParam: string | null | undefined,
+): URL | null {
+	if (!redirectUriParam) return null;
+	let outer: URL;
+	try {
+		outer = new URL(redirectUriParam);
+	} catch {
+		return null;
+	}
+	const nested = outer.searchParams.get("redirect_uri");
+	const target = nested ?? redirectUriParam;
+	try {
+		return new URL(target);
+	} catch {
+		return null;
+	}
+}
+
+function loopbackPort(redirectUriParam: string | null | undefined): number {
+	const loop = loopbackFromRedirectUri(redirectUriParam);
+	return loop ? Number.parseInt(loop.port, 10) : 0;
+}
+
 function getCallbackPort(spy: MockInstance): number {
 	const authorizeUrl = getAuthorizeUrl(spy);
-	const redirectUri = authorizeUrl?.searchParams.get("redirect_uri");
-	if (!redirectUri) return 0;
-	return Number.parseInt(new URL(redirectUri).port, 10);
+	return loopbackPort(authorizeUrl?.searchParams.get("redirect_uri"));
 }
 
 function getCallbackState(spy: MockInstance): string {
@@ -744,6 +770,35 @@ describe("login full OAuth flow", () => {
 		const openedUrl = openBrowserSpy.mock.calls[0]?.[0] as string;
 		expect(capturedUrl).toBe(openedUrl);
 		expect(capturedUrl).toContain("/authorize");
+	});
+
+	test("points the authorize redirect_uri at the public success page wrapping the loopback", async () => {
+		mockSsoFetch();
+
+		const loginPromise = login(
+			() => {},
+			(openBrowserFn) => {
+				openBrowserFn();
+				const port = getCallbackPort(openBrowserSpy);
+				const state = getCallbackState(openBrowserSpy);
+				setTimeout(() => {
+					originalFetch(
+						`http://localhost:${port}/callback?code=c&state=${state}`,
+					);
+				}, 50);
+			},
+		);
+		await loginPromise;
+
+		const authorizeUrl = getAuthorizeUrl(openBrowserSpy);
+		const outer = new URL(authorizeUrl?.searchParams.get("redirect_uri") ?? "");
+		// The wrapper-facing redirect_uri is the hosted success page, not loopback.
+		expect(outer.origin).toBe(new URL(LOGIN_SUCCESS_URL).origin);
+		// …with the CLI's loopback callback nested inside for the page to relay to.
+		const nested = new URL(outer.searchParams.get("redirect_uri") ?? "");
+		expect(nested.hostname).toBe("127.0.0.1");
+		expect(nested.pathname).toBe("/callback");
+		expect(Number.parseInt(nested.port, 10)).toBeGreaterThan(0);
 	});
 
 	test("does not call codev-proxy /config during login", async () => {
@@ -1180,12 +1235,7 @@ describe("login with force-login marker", () => {
 			(openBrowserFn) => {
 				openBrowserFn();
 				openedUrl = getInitialUrl();
-				const port = Number.parseInt(
-					openedUrl.searchParams.get("redirect_uri")
-						? new URL(openedUrl.searchParams.get("redirect_uri") as string).port
-						: "0",
-					10,
-				);
+				const port = loopbackPort(openedUrl.searchParams.get("redirect_uri"));
 				const state = openedUrl.searchParams.get("state") ?? "";
 				setTimeout(() => {
 					originalFetch(
@@ -1251,7 +1301,7 @@ describe("login with force-login marker", () => {
 				// same loopback port + state the /authorize URL carries.
 				const u = new URL(url);
 				const state = u.searchParams.get("state") ?? "";
-				const port = new URL(u.searchParams.get("redirect_uri") ?? "").port;
+				const port = loopbackPort(u.searchParams.get("redirect_uri"));
 				expect(
 					submit(
 						`http://127.0.0.1:${port}/callback?code=pasted&state=${state}`,
@@ -1315,7 +1365,7 @@ describe("login manual paste-back (no-browser)", () => {
 	): string {
 		const u = new URL(authUrl);
 		const state = stateOverride ?? u.searchParams.get("state") ?? "";
-		const port = new URL(u.searchParams.get("redirect_uri") ?? "").port;
+		const port = loopbackPort(u.searchParams.get("redirect_uri"));
 		return `http://127.0.0.1:${port}/callback?code=${code}&state=${state}`;
 	}
 
@@ -1350,7 +1400,7 @@ describe("login manual paste-back (no-browser)", () => {
 			(_open, url, submit) => {
 				const u = new URL(url);
 				const state = u.searchParams.get("state") ?? "";
-				const port = new URL(u.searchParams.get("redirect_uri") ?? "").port;
+				const port = loopbackPort(u.searchParams.get("redirect_uri"));
 				// No "http://" prefix — as some browsers show (and copy) it.
 				expect(
 					submit(`127.0.0.1:${port}/callback?code=schemeless&state=${state}`),
@@ -1378,9 +1428,9 @@ describe("login manual paste-back (no-browser)", () => {
 		const result = await login(
 			() => {},
 			(_open, url, submit) => {
-				const port = new URL(
-					new URL(url).searchParams.get("redirect_uri") ?? "",
-				).port;
+				const port = loopbackPort(
+					new URL(url).searchParams.get("redirect_uri"),
+				);
 				expect(
 					submit(
 						`http://127.0.0.1:${port}/callback?error=access_denied&error_description=denied`,
