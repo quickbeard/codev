@@ -1,5 +1,11 @@
 import { Box, Text, useInput } from "ink";
-import { type RefObject, useCallback, useRef, useState } from "react";
+import {
+	type ReactNode,
+	type RefObject,
+	useCallback,
+	useRef,
+	useState,
+} from "react";
 
 // Shared no-browser paste-back affordance for the SSO login flow. A remote or
 // headless user finishes login in a browser on another device, then copies the
@@ -20,6 +26,10 @@ export interface PasteBack {
 	// Clears the field, error, submitting flag, and stashed submitter — for
 	// callers that re-run login() on retry (e.g. <Login>'s attempt bump).
 	reset: () => void;
+	// Clears just the typed value + inline error, leaving the stashed submitter
+	// and submitting flag intact. <Login> uses it to consume a lone "c"
+	// keystroke (the copy-URL shortcut) without tearing down the paste flow.
+	clearValue: () => void;
 }
 
 // `active` gates the keystroke listener: pass the caller's "the paste field is
@@ -39,16 +49,20 @@ export function usePasteBack(active: boolean): PasteBack {
 		submitRef.current = null;
 	}, []);
 
+	const clearValue = useCallback(() => {
+		setPasteValue("");
+		setPasteError(null);
+	}, []);
+
 	useInput(
 		(input, key) => {
 			const submit = submitRef.current;
 			if (!submit) return;
 			if (key.return) {
-				// Enter on an empty field is a no-op here, freeing the host to give
-				// that keystroke another meaning while the field is on screen —
-				// <Login> uses an empty-field Enter to open the browser, and only a
-				// non-empty Enter submits the pasted URL. (UploadApp has no such
-				// alternate action, so there an empty Enter simply does nothing.)
+				// Enter on an empty field is a no-op here; only a non-empty field
+				// submits the pasted URL. Both <Login> and <UploadApp> auto-open the
+				// browser without an Enter gate, so an empty-field Enter simply does
+				// nothing.
 				const value = pasteValue.trim();
 				if (!value) return;
 				const err = submit(value);
@@ -77,23 +91,35 @@ export function usePasteBack(active: boolean): PasteBack {
 		{ isActive: active && !submitting },
 	);
 
-	return { pasteValue, pasteError, submitting, submitRef, reset };
+	return { pasteValue, pasteError, submitting, submitRef, reset, clearValue };
 }
 
 export function PasteBackPrompt({
 	pasteValue,
 	pasteError,
 	submitting,
-}: Pick<PasteBack, "pasteValue" | "pasteError" | "submitting">) {
+	caption,
+}: Pick<PasteBack, "pasteValue" | "pasteError" | "submitting"> & {
+	// Optional override for the lines above the input. <Login> passes a concise
+	// one-liner; callers that omit it (e.g. <UploadApp>) get the original,
+	// fuller explanation of why the localhost page can't load.
+	caption?: ReactNode;
+}) {
 	return (
 		<Box flexDirection="column" marginTop={1}>
-			<Text dimColor>
-				{"On a remote or headless machine? After you sign in, the browser"}
-			</Text>
-			<Text dimColor>
-				{"can't load the localhost page it lands on — paste that page's full"}
-			</Text>
-			<Text dimColor>{"URL (or just the code) here:"}</Text>
+			{caption ?? (
+				<>
+					<Text dimColor>
+						{"On a remote or headless machine? After you sign in, the browser"}
+					</Text>
+					<Text dimColor>
+						{
+							"can't load the localhost page it lands on — paste that page's full"
+						}
+					</Text>
+					<Text dimColor>{"URL (or just the code) here:"}</Text>
+				</>
+			)}
 			<Box>
 				<Text color="cyan">{"> "}</Text>
 				<Text>{pasteValue}</Text>

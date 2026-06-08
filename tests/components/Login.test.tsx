@@ -5,6 +5,7 @@ import { Frame } from "@/components/Frame.js";
 import { Login, loginTitle } from "@/components/Login.js";
 import { Step } from "@/components/Step.js";
 import * as auth from "@/lib/auth.js";
+import { clipboard } from "@/lib/clipboard.js";
 
 const ESC = String.fromCharCode(27);
 const stripAnsi = (s: string) =>
@@ -13,12 +14,14 @@ const stripAnsi = (s: string) =>
 // Mirrors how LoginApp/SetupApp/ModelApp mount <Login> — inside a Step's
 // bordered, padded box. The manual URL relies on that geometry to break itself
 // back out to column 0, so URL-rendering assertions must use this wrapper.
-function renderInFrame(onDone: () => void) {
+// `delay` overrides the fallback reveal so URL/paste assertions don't have to
+// wait the real 3 s.
+function renderInFrame(onDone: () => void, delay = 0) {
 	return render(
 		<Box padding={1}>
 			<Frame tag="CoDev">
 				<Step active title={loginTitle()}>
-					<Login onDone={onDone} />
+					<Login onDone={onDone} fallbackDelayMs={delay} />
 				</Step>
 			</Frame>
 		</Box>,
@@ -27,6 +30,7 @@ function renderInFrame(onDone: () => void) {
 
 afterEach(() => {
 	cleanup();
+	vi.restoreAllMocks();
 });
 
 function fakeAuth(): auth.AuthData {
@@ -39,13 +43,10 @@ function fakeAuth(): auth.AuthData {
 }
 
 describe("Login", () => {
-	test("shows 'Press Enter' when onReady is called", async () => {
+	test("auto-opens the browser as soon as the URL is ready (no Enter gate)", async () => {
+		const openBrowserFn = vi.fn();
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(
-				() => {},
-				"https://sso.test/authorize?x=1",
-				() => null,
-			);
+			onReady(openBrowserFn, "https://sso.test/authorize?x=1", () => null);
 			return new Promise(() => {});
 		});
 
@@ -54,11 +55,13 @@ describe("Login", () => {
 
 		await new Promise((r) => setTimeout(r, 50));
 
-		const output = lastFrame() ?? "";
-		expect(output).toContain("Press Enter to open the browser and login");
+		// Opened without any keystroke, and the screen is a clean spinner — no
+		// wall of instructions until the fallback delay elapses.
+		expect(openBrowserFn).toHaveBeenCalledTimes(1);
+		expect(lastFrame() ?? "").toContain("Waiting for sign-in to complete");
 	});
 
-	test("shows log messages from login", async () => {
+	test("shows pre-URL log messages from login", async () => {
 		vi.spyOn(auth, "login").mockImplementation((onLog) => {
 			onLog("Starting SSO login...");
 			onLog("Already logged in as test@example.com");
@@ -111,40 +114,7 @@ describe("Login", () => {
 		);
 	});
 
-	test("opens browser when Enter is pressed", async () => {
-		const openBrowserFn = vi.fn();
-		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(openBrowserFn, "https://sso.test/authorize?x=1", () => null);
-			return new Promise(() => {});
-		});
-
-		const onDone = vi.fn();
-		const { stdin } = render(<Login onDone={onDone} />);
-
-		await new Promise((r) => setTimeout(r, 50));
-
-		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 50));
-
-		expect(openBrowserFn).toHaveBeenCalled();
-	});
-
-	test("does not open browser before Enter is pressed", async () => {
-		const openBrowserFn = vi.fn();
-		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(openBrowserFn, "https://sso.test/authorize?x=1", () => null);
-			return new Promise(() => {});
-		});
-
-		const onDone = vi.fn();
-		render(<Login onDone={onDone} />);
-
-		await new Promise((r) => setTimeout(r, 50));
-
-		expect(openBrowserFn).not.toHaveBeenCalled();
-	});
-
-	test("shows the fallback URL as soon as it is ready, before Enter is pressed", async () => {
+	test("keeps the happy path to a one-line spinner until the fallback delay elapses", async () => {
 		const url = "https://sso.test/authorize?x=1";
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
 			onReady(
@@ -156,18 +126,43 @@ describe("Login", () => {
 		});
 
 		const onDone = vi.fn();
-		// Render inside the Step frame so the URL's column-0 break-out (negative
-		// margin) lands correctly, same as the after-Enter fallback test below.
+		// A long delay that won't fire within the test window.
+		const { lastFrame } = render(
+			<Login onDone={onDone} fallbackDelayMs={100_000} />,
+		);
+
+		await new Promise((r) => setTimeout(r, 50));
+
+		const output = lastFrame() ?? "";
+		expect(output).toContain("Waiting for sign-in to complete");
+		// The URL and paste field stay hidden — no clutter for the common case.
+		expect(output).not.toContain(url);
+		expect(output).not.toContain("Paste the page it lands on");
+	});
+
+	test("reveals the sign-in URL fallback after the delay", async () => {
+		const url = "https://sso.test/authorize?x=1";
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			onReady(
+				() => {},
+				url,
+				() => null,
+			);
+			return new Promise(() => {});
+		});
+
+		const onDone = vi.fn();
 		const { lastFrame } = renderInFrame(onDone);
 
 		await new Promise((r) => setTimeout(r, 50));
 
-		// A no-browser user can copy the URL right away — it no longer hides
-		// behind the browser-open Enter.
-		expect(lastFrame() ?? "").toContain(url);
+		const output = lastFrame() ?? "";
+		expect(output).toContain("Browser didn't open? Sign in here");
+		expect(output).toContain("press c to copy");
+		expect(output).toContain(url);
 	});
 
-	test("shows the authorize URL as a manual fallback after Enter is pressed", async () => {
+	test("copies the sign-in URL to the clipboard when 'c' is pressed", async () => {
 		const url = "https://sso.test/authorize?x=1";
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
 			onReady(
@@ -177,17 +172,20 @@ describe("Login", () => {
 			);
 			return new Promise(() => {});
 		});
+		const copySpy = vi.spyOn(clipboard, "copy").mockImplementation(() => {});
 
 		const onDone = vi.fn();
 		const { stdin, lastFrame } = renderInFrame(onDone);
 
 		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 50));
+		// Re-write until the listener attaches, mirroring the paste tests.
+		for (let i = 0; i < 50 && copySpy.mock.calls.length === 0; i++) {
+			stdin.write("c");
+			await new Promise((r) => setTimeout(r, 20));
+		}
 
-		const output = lastFrame() ?? "";
-		expect(output).toContain("copy this URL to sign in");
-		expect(output).toContain(url);
+		expect(copySpy).toHaveBeenCalledWith(url);
+		expect(lastFrame() ?? "").toContain("(copied!)");
 	});
 
 	test("calls onDone with the auth data after a successful login", async () => {
@@ -220,7 +218,9 @@ describe("Login", () => {
 
 		const output = lastFrame() ?? "";
 		expect(output).toContain("Already logged in as test@example.com");
-		expect(output).not.toContain("Press Enter to open the browser");
+		// No URL ever became ready, so the manual fallback (a live branch in the
+		// URL-ready state) must not appear.
+		expect(output).not.toContain("Paste the page it lands on");
 		expect(onDone).toHaveBeenCalledTimes(1);
 		expect(onDone).toHaveBeenCalledWith(authData);
 	});
@@ -247,12 +247,9 @@ describe("Login", () => {
 		expect(onDone).toHaveBeenCalledWith(authData);
 	});
 
-	test("clears the previous error and logs when retrying", async () => {
+	test("clears the previous error when retrying", async () => {
 		vi.spyOn(auth, "login")
-			.mockImplementationOnce((onLog) => {
-				onLog("first attempt log");
-				return Promise.reject(new Error("boom"));
-			})
+			.mockImplementationOnce(() => Promise.reject(new Error("boom")))
 			.mockImplementationOnce((_onLog, onReady) => {
 				onReady(
 					() => {},
@@ -266,19 +263,18 @@ describe("Login", () => {
 		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
-		expect(lastFrame() ?? "").toContain("first attempt log");
 		expect(lastFrame() ?? "").toContain("Login failed: boom");
 
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 50));
 
 		const after = lastFrame() ?? "";
-		expect(after).not.toContain("first attempt log");
 		expect(after).not.toContain("Login failed: boom");
-		expect(after).not.toContain("Press Enter to retry");
+		// Now waiting on the second attempt's interactive flow.
+		expect(after).toContain("Waiting for sign-in to complete");
 	});
 
-	test("shows the paste-back prompt as soon as the URL is ready", async () => {
+	test("shows the paste-back fallback once the URL is ready", async () => {
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
 			onReady(
 				() => {},
@@ -289,51 +285,13 @@ describe("Login", () => {
 		});
 
 		const onDone = vi.fn();
-		const { lastFrame } = render(<Login onDone={onDone} />);
+		const { lastFrame } = renderInFrame(onDone);
 
 		await new Promise((r) => setTimeout(r, 50));
 
-		// The paste-back affordance is offered up front, so a no-browser user
-		// never has to press Enter into a browser that will never open.
 		const output = lastFrame() ?? "";
-		expect(output).toContain("remote or headless");
+		expect(output).toContain("Signing in on another device");
 		expect(output).toContain("Press Enter to submit");
-	});
-
-	test("completes paste-back without opening the browser first", async () => {
-		const authData = fakeAuth();
-		const openBrowserFn = vi.fn();
-		const submit = vi.fn((_pasted: string) => null);
-		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			return new Promise<auth.AuthData>((resolve) => {
-				onReady(openBrowserFn, "https://sso.test/authorize?x=1", (pasted) => {
-					const err = submit(pasted);
-					if (!err) resolve(authData);
-					return err;
-				});
-			});
-		});
-
-		const onDone = vi.fn();
-		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
-
-		await new Promise((r) => setTimeout(r, 50));
-		// No Enter to open the browser — paste straight away. Re-write until the
-		// field shows the value, in case Ink's input listener attaches a beat late.
-		const pasted = "http://127.0.0.1:5000/callback?code=abc&state=xyz";
-		for (let i = 0; i < 50 && !(lastFrame() ?? "").includes("code=abc"); i++) {
-			stdin.write(pasted);
-			await new Promise((r) => setTimeout(r, 20));
-		}
-		stdin.write("\r"); // a non-empty field means Enter submits, not open-browser
-		await new Promise((r) => setTimeout(r, 50));
-
-		expect(submit).toHaveBeenCalledWith(
-			expect.stringContaining("code=abc&state=xyz"),
-		);
-		// The browser was never opened — the whole point of the no-browser path.
-		expect(openBrowserFn).not.toHaveBeenCalled();
-		expect(onDone).toHaveBeenCalledWith(authData);
 	});
 
 	test("completes via manual paste-back of the callback URL", async () => {
@@ -354,14 +312,17 @@ describe("Login", () => {
 		});
 
 		const onDone = vi.fn();
-		const { stdin } = render(<Login onDone={onDone} />);
+		const { stdin, lastFrame } = renderInFrame(onDone);
 
 		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\r"); // open browser → reveals the paste field
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("http://127.0.0.1:5000/callback?code=abc&state=xyz");
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\r"); // submit the pasted URL
+		// Paste straight into the revealed field. Re-write until it registers,
+		// in case Ink's input listener attaches a beat late.
+		const pasted = "http://127.0.0.1:5000/callback?code=abc&state=xyz";
+		for (let i = 0; i < 50 && !(lastFrame() ?? "").includes("code=abc"); i++) {
+			stdin.write(pasted);
+			await new Promise((r) => setTimeout(r, 20));
+		}
+		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 50));
 
 		expect(submit).toHaveBeenCalledWith(
@@ -389,10 +350,8 @@ describe("Login", () => {
 		});
 
 		const onDone = vi.fn();
-		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
+		const { stdin, lastFrame } = renderInFrame(onDone);
 
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\r"); // open browser → paste field
 		await new Promise((r) => setTimeout(r, 50));
 		stdin.write("oops");
 		await new Promise((r) => setTimeout(r, 50));
@@ -420,10 +379,8 @@ describe("Login", () => {
 		});
 
 		const onDone = vi.fn();
-		const { stdin, lastFrame } = renderInFrame(onDone);
+		const { lastFrame } = renderInFrame(onDone);
 
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\r"); // reveal the URL
 		await new Promise((r) => setTimeout(r, 50));
 
 		// The long URL wraps across several lines. Dropping ANSI codes and the
