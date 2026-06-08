@@ -284,6 +284,30 @@ describe("Login", () => {
 		expect(onDone).toHaveBeenCalledWith(authData);
 	});
 
+	test("already-logged-in: no live spinner, frame stays static (no flicker)", async () => {
+		// Regression: when login() resolves without calling onReady (cached
+		// session), the parent keeps this Step mounted. The pre-URL spinner used
+		// to keep animating — flickering and falsely showing "Starting sign-in..."
+		// after login was already done.
+		const authData = fakeAuth();
+		vi.spyOn(auth, "login").mockImplementation((onLog) => {
+			onLog(`Already logged in as ${authData.user.email}`);
+			return Promise.resolve(authData);
+		});
+
+		const onDone = vi.fn();
+		const { lastFrame } = render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 50));
+		const first = lastFrame() ?? "";
+		// The spinner line is gone once login has resolved.
+		expect(first).not.toContain("Starting sign-in");
+		// And the frame no longer redraws on its own (the spinner was the only
+		// animating source) — well past the ~80 ms spinner tick.
+		await new Promise((r) => setTimeout(r, 250));
+		expect(lastFrame() ?? "").toBe(first);
+	});
+
 	test("retries on Enter after a failure and succeeds on the second attempt", async () => {
 		const authData = fakeAuth();
 		const loginSpy = vi

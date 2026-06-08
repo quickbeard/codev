@@ -125,13 +125,12 @@ async function advanceThroughConfirm(
 }
 
 async function settleAfterLogin(
-	stdin: { write: (s: string) => void },
+	_stdin: { write: (s: string) => void },
 	frames: string[],
 ) {
-	// Config mode jumps login → proxy-url → refreshing-config → key-choice.
-	await waitForFrame(frames, "Choose proxy URL");
-	stdin.write("\r");
-	await new Promise((r) => setTimeout(r, 30));
+	// Config mode jumps login → refreshing-config → key-choice. The
+	// "Choose proxy URL" step is currently hidden (SHOW_PROXY_URL_STEP=false),
+	// so the flow auto-advances past it on the default URL.
 	await waitForFrame(frames, "Choose configuration method");
 }
 
