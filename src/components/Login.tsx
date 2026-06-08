@@ -1,28 +1,35 @@
 import { Box, Text, useInput } from "ink";
-import { useCallback, useEffect, useRef, useState } from "react";
+import Spinner from "ink-spinner";
+import { useCallback, useEffect, useState } from "react";
 import { PasteBackPrompt, usePasteBack } from "@/components/PasteBack.js";
 import { type AuthData, login } from "@/lib/auth.js";
+import { clipboard } from "@/lib/clipboard.js";
 
 interface LoginProps {
 	onDone: (auth: AuthData) => void;
+	// How long to wait, after the browser is auto-opened, before revealing the
+	// manual sign-in fallback (URL + paste field). Most users finish in the
+	// browser well before this fires and never see the fallback at all — it
+	// only surfaces for headless/remote machines or a browser that didn't open.
+	// Overridable so tests can reveal it immediately.
+	fallbackDelayMs?: number;
 }
 
-export function Login({ onDone }: LoginProps) {
+export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 	const [logs, setLogs] = useState<string[]>([]);
 	const [error, setError] = useState<string | null>(null);
-	const [waitingForEnter, setWaitingForEnter] = useState(false);
 	const [attempt, setAttempt] = useState(0);
 	const [authUrl, setAuthUrl] = useState<string | null>(null);
-	const [browserOpened, setBrowserOpened] = useState(false);
-	const openBrowserRef = useRef<(() => void) | null>(null);
+	// Revealed by a timer once the URL is ready (or kept hidden on the happy
+	// path). Gates the whole manual fallback block — URL, copy hint, paste field.
+	const [showFallback, setShowFallback] = useState(false);
+	const [copied, setCopied] = useState(false);
 
-	// The URL and paste-back field go live as soon as login() hands us the
-	// authorize URL (waitingForEnter) — not only after the browser step — so a
-	// no-browser user can copy the URL and paste their callback back without
-	// first pressing Enter into a browser that will never open. The field stays
-	// live through browserOpened; a fatal error takes over the screen and ends it.
-	const urlReady = (waitingForEnter || browserOpened) && !error;
-	const paste = usePasteBack(urlReady);
+	// The paste field goes live with the fallback. Until then keystrokes are
+	// ignored, so the lone-"c" copy shortcut and the paste input never compete
+	// with the spinner-only waiting state.
+	const fallbackReady = authUrl !== null && showFallback && !error;
+	const paste = usePasteBack(fallbackReady);
 
 	const addLog = useCallback((msg: string) => {
 		setLogs((prev) => [...prev, msg]);
@@ -34,17 +41,18 @@ export function Login({ onDone }: LoginProps) {
 	useEffect(() => {
 		setLogs([]);
 		setError(null);
-		setWaitingForEnter(false);
 		setAuthUrl(null);
-		setBrowserOpened(false);
-		openBrowserRef.current = null;
+		setShowFallback(false);
+		setCopied(false);
 		paste.reset();
 
 		login(addLog, (openBrowserFn, url, submitManualCode) => {
-			openBrowserRef.current = openBrowserFn;
 			paste.submitRef.current = submitManualCode;
 			setAuthUrl(url);
-			setWaitingForEnter(true);
+			// Auto-open the browser the moment the URL is ready — no Enter gate.
+			// On a headless box the open is a harmless no-op and the user waits
+			// for the fallback to reveal the URL/paste field instead.
+			openBrowserFn();
 		})
 			.then((auth) => {
 				onDone(auth);
@@ -65,72 +73,114 @@ export function Login({ onDone }: LoginProps) {
 			});
 	}, [addLog, onDone, attempt]);
 
+	// Reveal the manual fallback a few seconds after the URL is ready, so the
+	// happy path stays a clean one-line spinner.
+	useEffect(() => {
+		if (authUrl === null || error) return;
+		const timer = setTimeout(() => setShowFallback(true), fallbackDelayMs);
+		return () => clearTimeout(timer);
+	}, [authUrl, error, fallbackDelayMs]);
+
+	// Pressing "c" while the fallback is up copies the sign-in URL to the
+	// clipboard. We watch the paste field for a lone "c" (the same trick Claude
+	// Code uses): a real pasted callback URL arrives as one long string and
+	// never settles on a bare "c", so this can't swallow a genuine paste.
+	useEffect(() => {
+		if (!fallbackReady || authUrl === null) return;
+		if (paste.pasteValue !== "c") return;
+		clipboard.copy(authUrl);
+		paste.clearValue();
+		setCopied(true);
+		const timer = setTimeout(() => setCopied(false), 2000);
+		return () => clearTimeout(timer);
+	}, [fallbackReady, authUrl, paste.pasteValue, paste.clearValue]);
+
 	useInput((_input, key) => {
 		// A fatal failure takes over the screen: Enter restarts the attempt.
-		if (error) {
-			if (key.return) setAttempt((n) => n + 1);
-			return;
-		}
-		// Enter on an empty paste field opens the browser. A non-empty field means
-		// the user is pasting a callback URL back by hand, so that Enter belongs to
-		// usePasteBack's submit (which only fires on a non-empty field) and we leave
-		// the browser closed.
-		if (
-			waitingForEnter &&
-			key.return &&
-			openBrowserRef.current &&
-			!paste.pasteValue.trim()
-		) {
-			setWaitingForEnter(false);
-			setBrowserOpened(true);
-			openBrowserRef.current();
-			openBrowserRef.current = null;
-		}
+		if (error && key.return) setAttempt((n) => n + 1);
 	});
+
+	if (error) {
+		return (
+			<Box flexDirection="column">
+				<Text color="red">{`Login failed: ${error}`}</Text>
+				<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
+			</Box>
+		);
+	}
+
+	// Pre-URL: cached-session resolves and transient status (e.g. "Already
+	// logged in as…", "Refreshing session…") show here, then the component
+	// hands off via onDone. Once the URL is ready we switch to the interactive
+	// waiting UI and stop echoing login()'s internal log lines.
+	if (authUrl === null) {
+		return (
+			<Box flexDirection="column">
+				{logs.map((log, i) => (
+					<Text key={`login-${i.toString()}`} dimColor>
+						{log}
+					</Text>
+				))}
+				<Box>
+					<Text color="cyan">
+						<Spinner />
+					</Text>
+					<Text>{" Starting sign-in..."}</Text>
+				</Box>
+			</Box>
+		);
+	}
 
 	return (
 		<Box flexDirection="column">
-			{logs.map((log, i) => (
-				<Text key={`login-${i.toString()}`}>{log}</Text>
-			))}
-			{waitingForEnter && (
-				<Text color="cyan">
-					{
-						"Press Enter to open the browser and login (or paste your callback URL below to sign in without one)..."
-					}
-				</Text>
-			)}
-			{urlReady && (
+			<Box>
+				{/* Animate only until the fallback (URL + paste field) appears.
+				    Once the URL is on screen the user may be selecting it to copy,
+				    and a ticking spinner redraws the whole frame ~12×/s — which
+				    clears their terminal selection and reads as flicker. A static
+				    marker keeps the frame stable so the URL stays selectable. */}
+				{showFallback ? (
+					<Text color="cyan">{"●"}</Text>
+				) : (
+					<Text color="cyan">
+						<Spinner />
+					</Text>
+				)}
+				<Text>{" Waiting for sign-in to complete in your browser..."}</Text>
+			</Box>
+			{showFallback && (
 				<Box flexDirection="column" marginTop={1}>
-					{authUrl && (
-						// Break the URL out to column 0. Negative margin cancels the
-						// root padding(1) + the Step's borderLeft(1) + paddingLeft(2) = 4
-						// columns. Left inside the Step's bordered box, a wrapped URL gets
-						// a "│  " gutter redrawn on every continuation line, which is then
-						// copied into the middle of the URL and corrupts it. Flush-left,
-						// wrapped lines carry only a newline — which `new URL()` and browser
-						// address bars both strip — so the copied URL stays intact.
-						<Box flexDirection="column" marginLeft={-4}>
-							<Text dimColor>
-								{
-									"If the browser didn't open, copy this URL to sign in (here or on another device):"
-								}
-							</Text>
-							<Text>{authUrl}</Text>
+					{/* Break the URL out to column 0. Negative margin cancels the
+					    root padding(1) + the Step's borderLeft(1) + paddingLeft(2) = 4
+					    columns. Left inside the Step's bordered box, a wrapped URL gets
+					    a "│  " gutter redrawn on every continuation line, which is then
+					    copied into the middle of the URL and corrupts it. Flush-left,
+					    wrapped lines carry only a newline — which `new URL()` and browser
+					    address bars both strip — so the copied URL stays intact. The
+					    press-c-to-copy shortcut sidesteps manual selection entirely. */}
+					<Box flexDirection="column" marginLeft={-4}>
+						<Box>
+							<Text dimColor>{"Browser didn't open? Sign in here "}</Text>
+							{copied ? (
+								<Text color="green">{"(copied!)"}</Text>
+							) : (
+								<Text dimColor>{"(press c to copy)"}</Text>
+							)}
+							<Text dimColor>{":"}</Text>
 						</Box>
-					)}
+						<Text>{authUrl}</Text>
+					</Box>
 					<PasteBackPrompt
 						pasteValue={paste.pasteValue}
 						pasteError={paste.pasteError}
 						submitting={paste.submitting}
+						caption={
+							<Text dimColor>
+								{"After signing in, copy the code shown and paste it here:"}
+							</Text>
+						}
 					/>
 				</Box>
-			)}
-			{error && (
-				<>
-					<Text color="red">{`Login failed: ${error}`}</Text>
-					<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
-				</>
 			)}
 		</Box>
 	);
