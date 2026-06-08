@@ -185,15 +185,13 @@ async function settleAfterInstall(
 	await waitForFrame(frames, "Choose configuration method");
 }
 
-// Picks "Use the default proxy URL" — the first option, so just Enter.
+// The "Choose proxy URL" step is currently hidden (SHOW_PROXY_URL_STEP=false):
+// the flow auto-advances past it using the default URL, so there's nothing to
+// drive here. Kept as a seam so re-enabling the step only needs this body back.
 async function advanceThroughProxyUrl(
-	stdin: { write: (s: string) => void },
-	frames: string[],
-) {
-	await waitForFrame(frames, "Choose proxy URL");
-	stdin.write("\r");
-	await new Promise((r) => setTimeout(r, 30));
-}
+	_stdin: { write: (s: string) => void },
+	_frames: string[],
+) {}
 
 async function pickNewKey(
 	stdin: { write: (s: string) => void },
@@ -398,6 +396,34 @@ describe("InstallApp fail-stop invariant", () => {
 			model: "m-alpha",
 			models: ["m-alpha", "m-beta"],
 		});
+	});
+
+	test("proxy-url step is hidden and never persists a proxy URL", async () => {
+		// SHOW_PROXY_URL_STEP is false: the flow must complete without ever
+		// showing the picker, and must not write proxy_url to ~/.codev/auth.json
+		// (the default URL is used implicitly via PROXY_URL()).
+		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		const saveProxyUrlSpy = vi.spyOn(auth, "saveProxyUrl");
+		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.b",
+				created: true,
+			},
+		]);
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		expect(allFrames(frames)).not.toContain("Choose proxy URL");
+		expect(saveProxyUrlSpy).not.toHaveBeenCalled();
 	});
 
 	test("Codex selection routes to configureCodex and reaches done", async () => {

@@ -1,6 +1,6 @@
 import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AuthMethodChoice } from "@/components/AuthMethod.js";
 import {
 	AuthMethod,
@@ -142,6 +142,14 @@ const POST_MODEL_CHOICE: Phase[] = [
 	"finalizing",
 	"done",
 ];
+
+// Temporarily hide the "Choose proxy URL" step. When false, the step never
+// renders and the flow advances past it using the default proxy URL — without
+// persisting anything (~/.codev/auth.json is left untouched, so PROXY_URL()
+// resolves to the baked-in default). Flip to true to bring back the
+// interactive picker + its persistence with no other changes. Typed `boolean`
+// (not the literal `false`) so the gated render stays type-reachable.
+const SHOW_PROXY_URL_STEP: boolean = false;
 
 export type SetupMode = "install" | "config";
 
@@ -359,6 +367,17 @@ export function SetupApp({ mode }: SetupAppProps) {
 		[auth, pendingSurvivors, runPostInstallSideEffects],
 	);
 
+	// When the proxy-url step is hidden, advance straight past it. We bypass
+	// handleProxyUrlConfirm on purpose: no saveProxyUrl, so ~/.codev/auth.json is
+	// left untouched and PROXY_URL() resolves to the default. Fires once when the
+	// flow parks on "proxy-url"; runPostInstallSideEffects moves step forward so
+	// the guard below is false on every later render.
+	useEffect(() => {
+		if (SHOW_PROXY_URL_STEP) return;
+		if (step !== "proxy-url" || !auth) return;
+		runPostInstallSideEffects(pendingSurvivors, auth);
+	}, [step, auth, pendingSurvivors, runPostInstallSideEffects]);
+
 	const handleAuthMethod = useCallback(
 		(choice: AuthMethodChoice) => {
 			setAuthMethod(choice);
@@ -536,7 +555,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 						<Install tools={tools} onDone={handleInstallDone} />
 					</Step>
 				)}
-				{POST_INSTALL.includes(step) && (
+				{SHOW_PROXY_URL_STEP && POST_INSTALL.includes(step) && (
 					<Step
 						active={step === "proxy-url"}
 						title={proxyUrlTitle(step !== "proxy-url")}
