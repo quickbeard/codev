@@ -614,32 +614,15 @@ function getAuthorizeUrl(spy: MockInstance): URL | null {
 	return new URL(call[0] as string);
 }
 
-// The CLI now hands the wrapper the public success page as redirect_uri, with the
-// loopback callback nested inside as its own `redirect_uri` query param. Dig the
-// loopback back out — falling back to the value itself when it's already a loopback
-// URL (the /logout-done bounce passes the loopback directly, no nesting).
-function loopbackFromRedirectUri(
-	redirectUriParam: string | null | undefined,
-): URL | null {
-	if (!redirectUriParam) return null;
-	let outer: URL;
-	try {
-		outer = new URL(redirectUriParam);
-	} catch {
-		return null;
-	}
-	const nested = outer.searchParams.get("redirect_uri");
-	const target = nested ?? redirectUriParam;
-	try {
-		return new URL(target);
-	} catch {
-		return null;
-	}
-}
-
+// The CLI opens the local browser at the loopback authorize URL, whose
+// redirect_uri is the 127.0.0.1 callback directly; pull its port back out.
 function loopbackPort(redirectUriParam: string | null | undefined): number {
-	const loop = loopbackFromRedirectUri(redirectUriParam);
-	return loop ? Number.parseInt(loop.port, 10) : 0;
+	if (!redirectUriParam) return 0;
+	try {
+		return Number.parseInt(new URL(redirectUriParam).port, 10) || 0;
+	} catch {
+		return 0;
+	}
 }
 
 function getCallbackPort(spy: MockInstance): number {
@@ -745,7 +728,37 @@ describe("login full OAuth flow", () => {
 		expect(logs.some((l) => l.includes("Logged in as"))).toBe(true);
 	});
 
-	test("hands onReady the same authorize URL the browser is opened with", async () => {
+	test("opens the local browser at the loopback callback (no public page in the middle)", async () => {
+		mockSsoFetch();
+
+		const loginPromise = login(
+			() => {},
+			(openBrowserFn) => {
+				openBrowserFn();
+				const port = getCallbackPort(openBrowserSpy);
+				const state = getCallbackState(openBrowserSpy);
+				setTimeout(() => {
+					originalFetch(
+						`http://localhost:${port}/callback?code=c&state=${state}`,
+					);
+				}, 50);
+			},
+		);
+		await loginPromise;
+
+		// The browser is sent straight to the loopback callback so the IdP
+		// navigates it to 127.0.0.1 directly — no public page reaches into
+		// localhost, so there's no "local network access" prompt.
+		const opened = getAuthorizeUrl(openBrowserSpy);
+		const redirectUri = new URL(opened?.searchParams.get("redirect_uri") ?? "");
+		expect(redirectUri.hostname).toBe("127.0.0.1");
+		expect(redirectUri.pathname).toBe("/callback");
+		expect(Number.parseInt(redirectUri.port, 10)).toBeGreaterThan(0);
+		// No nested redirect_uri — it's the plain loopback, not a wrapped page URL.
+		expect(redirectUri.searchParams.get("redirect_uri")).toBeNull();
+	});
+
+	test("hands onReady the public success-page URL for manual paste-back", async () => {
 		mockSsoFetch();
 		let capturedUrl = "";
 
@@ -765,40 +778,14 @@ describe("login full OAuth flow", () => {
 		);
 
 		expect(result.access_token).toBe("flow-access-token");
-		// The URL handed to onReady is exactly the URL the browser is opened
-		// with — the SSO authorize endpoint on the normal (non-force) path.
+		// The manual URL points at the public success page (which displays the code
+		// to copy), NOT the loopback the browser was opened with.
+		const manual = new URL(capturedUrl);
+		expect(manual.pathname).toBe("/sso-wrapper/authorize");
+		const manualRedirect = manual.searchParams.get("redirect_uri") ?? "";
+		expect(manualRedirect).toBe(LOGIN_SUCCESS_URL);
 		const openedUrl = openBrowserSpy.mock.calls[0]?.[0] as string;
-		expect(capturedUrl).toBe(openedUrl);
-		expect(capturedUrl).toContain("/authorize");
-	});
-
-	test("points the authorize redirect_uri at the public success page wrapping the loopback", async () => {
-		mockSsoFetch();
-
-		const loginPromise = login(
-			() => {},
-			(openBrowserFn) => {
-				openBrowserFn();
-				const port = getCallbackPort(openBrowserSpy);
-				const state = getCallbackState(openBrowserSpy);
-				setTimeout(() => {
-					originalFetch(
-						`http://localhost:${port}/callback?code=c&state=${state}`,
-					);
-				}, 50);
-			},
-		);
-		await loginPromise;
-
-		const authorizeUrl = getAuthorizeUrl(openBrowserSpy);
-		const outer = new URL(authorizeUrl?.searchParams.get("redirect_uri") ?? "");
-		// The wrapper-facing redirect_uri is the hosted success page, not loopback.
-		expect(outer.origin).toBe(new URL(LOGIN_SUCCESS_URL).origin);
-		// …with the CLI's loopback callback nested inside for the page to relay to.
-		const nested = new URL(outer.searchParams.get("redirect_uri") ?? "");
-		expect(nested.hostname).toBe("127.0.0.1");
-		expect(nested.pathname).toBe("/callback");
-		expect(Number.parseInt(nested.port, 10)).toBeGreaterThan(0);
+		expect(capturedUrl).not.toBe(openedUrl);
 	});
 
 	test("does not call codev-proxy /config during login", async () => {
@@ -1297,15 +1284,12 @@ describe("login with force-login marker", () => {
 			() => {},
 			(_open, url, submit) => {
 				manualUrl = url;
-				// Reconstruct the callback the remote user copies back, from the
-				// same loopback port + state the /authorize URL carries.
+				// Reconstruct the success-page URL the remote user copies back, with
+				// the same state the /authorize URL carries.
 				const u = new URL(url);
 				const state = u.searchParams.get("state") ?? "";
-				const port = loopbackPort(u.searchParams.get("redirect_uri"));
 				expect(
-					submit(
-						`http://127.0.0.1:${port}/callback?code=pasted&state=${state}`,
-					),
+					submit(`${LOGIN_SUCCESS_URL}?code=pasted&state=${state}`),
 				).toBeNull();
 			},
 		);
@@ -1355,9 +1339,9 @@ describe("login manual paste-back (no-browser)", () => {
 		openBrowserSpy?.mockRestore();
 	});
 
-	// Reconstruct the callback URL the IdP would redirect a remote user's
-	// browser to (and which they copy from the address bar) out of the authorize
-	// URL handed to onReady — same state, same loopback port.
+	// In the manual flow the IdP lands the remote browser on the public success
+	// page, which shows the code. Reconstruct that page URL (same state) — what the
+	// user copies back into the prompt.
 	function callbackUrlFor(
 		authUrl: string,
 		code: string,
@@ -1365,11 +1349,10 @@ describe("login manual paste-back (no-browser)", () => {
 	): string {
 		const u = new URL(authUrl);
 		const state = stateOverride ?? u.searchParams.get("state") ?? "";
-		const port = loopbackPort(u.searchParams.get("redirect_uri"));
-		return `http://127.0.0.1:${port}/callback?code=${code}&state=${state}`;
+		return `${LOGIN_SUCCESS_URL}?code=${code}&state=${state}`;
 	}
 
-	test("completes when the user pastes the full callback URL", async () => {
+	test("completes when the user pastes the success-page URL", async () => {
 		const result = await login(
 			() => {},
 			(_open, url, submit) => {
@@ -1394,17 +1377,14 @@ describe("login manual paste-back (no-browser)", () => {
 		expect(result.access_token).toBe("flow-access-token");
 	});
 
-	test("accepts a scheme-less callback URL (host:port/callback?code=...)", async () => {
+	test("accepts a scheme-less success-page URL (host/?code=...)", async () => {
 		const result = await login(
 			() => {},
 			(_open, url, submit) => {
-				const u = new URL(url);
-				const state = u.searchParams.get("state") ?? "";
-				const port = loopbackPort(u.searchParams.get("redirect_uri"));
-				// No "http://" prefix — as some browsers show (and copy) it.
-				expect(
-					submit(`127.0.0.1:${port}/callback?code=schemeless&state=${state}`),
-				).toBeNull();
+				const state = new URL(url).searchParams.get("state") ?? "";
+				const host = new URL(LOGIN_SUCCESS_URL).host;
+				// No "https://" prefix — as some browsers show (and copy) it.
+				expect(submit(`${host}/?code=schemeless&state=${state}`)).toBeNull();
 			},
 		);
 		expect(result.access_token).toBe("flow-access-token");
@@ -1428,12 +1408,9 @@ describe("login manual paste-back (no-browser)", () => {
 		const result = await login(
 			() => {},
 			(_open, url, submit) => {
-				const port = loopbackPort(
-					new URL(url).searchParams.get("redirect_uri"),
-				);
 				expect(
 					submit(
-						`http://127.0.0.1:${port}/callback?error=access_denied&error_description=denied`,
+						`${LOGIN_SUCCESS_URL}?error=access_denied&error_description=denied`,
 					),
 				).toContain("denied");
 				expect(submit(callbackUrlFor(url, "good-code"))).toBeNull();
