@@ -521,16 +521,38 @@ async function getAuthCode(
 		// throw "Cannot destructure property 'port' of 'server.address(...)'".
 		let boundPort = 0;
 
-		const buildAuthorizeUrl = (port: number) =>
+		// Build the wrapper /authorize URL for a chosen redirect target. We use two
+		// targets — mirroring how standard loopback OAuth CLIs (gh, gcloud, Claude
+		// Code) avoid the browser's "local network access" prompt:
+		//   • the *local* browser is sent to the loopback callback directly, so the
+		//     IdP navigates the browser to 127.0.0.1 (a top-level navigation, never
+		//     gated) and our local server captures the code — no public page ever
+		//     reaches into localhost;
+		//   • the manual paste-back URL points at the public success page, which
+		//     simply *shows* the code to copy when the terminal is on another machine.
+		// The wrapper keys the code to PKCE (not an exact redirect_uri match), so the
+		// token exchange in succeed() can use the loopback redirect_uri for either.
+		const buildAuthorizeUrl = (redirectUri: string) =>
 			`${SSO_URL}/authorize?` +
 			`response_type=code` +
 			`&client_id=${encodeURIComponent(CLIENT_ID)}` +
-			`&redirect_uri=${encodeURIComponent(`http://127.0.0.1:${port}/callback`)}` +
+			`&redirect_uri=${encodeURIComponent(redirectUri)}` +
 			`&scope=openid%20profile%20email%20offline_access` +
 			`&state=${expectedState}` +
 			`&nonce=${nonce}` +
 			`&code_challenge=${codeChallenge}` +
 			`&code_challenge_method=S256`;
+
+		const loopbackRedirectUri = (port: number) =>
+			`http://127.0.0.1:${port}/callback`;
+		// Opened in the user's local browser: the IdP redirects straight to the
+		// loopback callback (a top-level navigation — no prompt) and login completes
+		// on its own.
+		const loopbackAuthorizeUrl = (port: number) =>
+			buildAuthorizeUrl(loopbackRedirectUri(port));
+		// Handed to the manual paste-back channel for remote/headless logins: the IdP
+		// lands on the public success page, which displays the code to copy back.
+		const manualAuthorizeUrl = buildAuthorizeUrl(LOGIN_SUCCESS_URL);
 
 		// Resolve exactly once. The loopback callback and the manual paste-back
 		// path both funnel through here, so whichever lands first wins and the
@@ -556,11 +578,11 @@ async function getAuthCode(
 		};
 
 		// Manual paste-back for no-browser environments (remote SSH, headless):
-		// the user finishes login on another device, then copies the callback
-		// URL their browser couldn't load (it points at this machine's loopback)
-		// and pastes it here. Accepts a full URL, a bare query string, or a bare
-		// code. Returns an inline error string to re-prompt without restarting,
-		// or null once the code is accepted (login() then resolves on its own).
+		// the user finishes login on another device, lands on the public success
+		// page, and copies the code it shows (or the page URL) back here. Accepts a
+		// full URL, a bare query string, or a bare code. Returns an inline error
+		// string to re-prompt without restarting, or null once the code is accepted
+		// (login() then resolves on its own).
 		const submitManualCode = (pasted: string): string | null => {
 			if (settled) return null;
 			const trimmed = pasted.trim();
@@ -595,7 +617,7 @@ async function getAuthCode(
 			// so the wrapper can start a fresh login — this time CAS will show
 			// the credential form because there's no session cookie.
 			if (url.pathname === "/logout-done") {
-				res.writeHead(302, { Location: buildAuthorizeUrl(boundPort) });
+				res.writeHead(302, { Location: loopbackAuthorizeUrl(boundPort) });
 				res.end();
 				return;
 			}
@@ -611,10 +633,10 @@ async function getAuthCode(
 			const returnedState = url.searchParams.get("state");
 
 			const respond = (ok: boolean, msg?: string) => {
-				// Hand the browser to the hosted success page instead of serving
-				// inline HTML. We already hold the code by now, so this is purely the
-				// user-facing confirmation; failures carry ?error=... so the page can
-				// render its own error state.
+				// In the loopback flow the wrapper navigates the browser *here* with the
+				// code. Once we've captured it, hand the browser on to the hosted
+				// success page as the final, user-facing confirmation (failures carry
+				// ?error=... so the page can render its own error state).
 				const base = LOGIN_SUCCESS_URL;
 				let location = base;
 				if (!ok) {
@@ -651,16 +673,16 @@ async function getAuthCode(
 
 		server.listen(0, "127.0.0.1", () => {
 			boundPort = (server.address() as AddressInfo).port;
-			// On force-login we open the *browser* at the wrapper /logout URL so a
-			// local browser clears its IdP session cookie before re-authing. The
-			// manual paste-back channel, however, always gets the plain /authorize
-			// URL: the /logout bounce redirects to a loopback-only /logout-done page
-			// that a remote user's browser can't load, so it could never yield a
-			// code to paste back. (Off the force path the two are identical.)
+			// The *local* browser opens the loopback authorize URL (on force-login,
+			// via the /logout bounce that clears the IdP cookie first, then lands on
+			// the loopback /logout-done → loopback /authorize). The manual paste-back
+			// channel instead gets the public-success-page authorize URL: a remote
+			// browser can complete it and copy the code back, whereas the loopback URL
+			// would only yield an unreachable 127.0.0.1 page on another machine.
 			const initialUrl = forceLogin
 				? `${SSO_URL}/logout?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${boundPort}/logout-done`)}`
-				: buildAuthorizeUrl(boundPort);
-			const authorizeUrl = buildAuthorizeUrl(boundPort);
+				: loopbackAuthorizeUrl(boundPort);
+			const authorizeUrl = manualAuthorizeUrl;
 
 			// Arm the timeout before handing control to the caller, so a caller
 			// that settles synchronously (an immediate manual paste, or a very
