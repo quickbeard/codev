@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import * as codegraph from "@/lib/codegraph.js";
 import { runRemove } from "@/lib/remove.js";
 
 let tempDir: string;
@@ -17,6 +18,10 @@ beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-remove-test-"));
 	vi.stubEnv("HOME", tempDir);
 	vi.stubEnv("USERPROFILE", tempDir);
+	// The CodeGraph uninstall step shells out to the `codegraph` CLI. Default it
+	// to a clean success so the remove tests never spawn the real binary (which
+	// would edit the developer's actual agent configs); specific tests override.
+	vi.spyOn(codegraph, "runCodegraphUninstall").mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -176,17 +181,40 @@ describe("runRemove", () => {
 		expect(result.steps.find((s) => s.label === "~/.codev")).toBeDefined();
 	});
 
-	test("step order: SSO before Shims before configs before ~/.codev", async () => {
+	test("step order: SSO, Shims, CodeGraph, configs, then ~/.codev", async () => {
 		stubFetchOk();
 		const result = await runRemove();
 		const order = result.steps.map((s) => s.label);
 		expect(order[0]).toBe("SSO");
 		expect(order[1]).toBe("Shims");
-		expect(order.slice(2, 5).sort()).toEqual([
+		expect(order[2]).toBe("CodeGraph");
+		expect(order.slice(3, 6).sort()).toEqual([
 			"Claude Code config",
 			"Codex config",
 			"OpenCode config",
 		]);
 		expect(order[order.length - 1]).toBe("~/.codev");
+	});
+
+	test("codegraph: removes MCP wiring from agents (ok step)", async () => {
+		stubFetchOk();
+		const result = await runRemove();
+		const cg = result.steps.find((s) => s.label === "CodeGraph");
+		expect(cg?.status).toBe("ok");
+		expect(result.anyFailed).toBe(false);
+	});
+
+	test("codegraph: an uninstall error warns but does NOT fail the remove", async () => {
+		stubFetchOk();
+		// Simulate the codegraph package having been removed already.
+		vi.mocked(codegraph.runCodegraphUninstall).mockResolvedValue(
+			"spawn codegraph ENOENT",
+		);
+		const result = await runRemove();
+		const cg = result.steps.find((s) => s.label === "CodeGraph");
+		expect(cg?.status).toBe("warning");
+		expect(cg?.detail).toContain("ENOENT");
+		// Non-fatal: the overall remove still succeeds.
+		expect(result.anyFailed).toBe(false);
 	});
 });

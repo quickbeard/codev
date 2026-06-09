@@ -1,4 +1,10 @@
 import { type TaskItem, TaskList } from "@/components/TaskList.js";
+import {
+	CODEGRAPH_PKG,
+	CODEGRAPH_TASK_KEY,
+	codegraphTargets,
+	ensureCodegraphInstalled,
+} from "@/lib/codegraph.js";
 import type { Tool } from "@/lib/configure.js";
 import {
 	CLAUDE_CODE_INTELLIJ_PLUGIN_ID,
@@ -36,10 +42,14 @@ interface InstallProps {
 	// the list to either park at install-failed (empty) or advance to
 	// Configure with just the survivors.
 	onDone: (succeededKeys: string[]) => void;
+	// When false, skip the agent install rows and only install CodeGraph. Used
+	// by config mode, where the agents are already installed but CodeGraph
+	// isn't. Defaults to true (install mode).
+	includeAgents?: boolean;
 }
 
-export function Install({ tools, onDone }: InstallProps) {
-	const tasks: TaskItem[] = tools.map((tool) => {
+export function Install({ tools, onDone, includeAgents = true }: InstallProps) {
+	const tasks: TaskItem[] = (includeAgents ? tools : []).map((tool) => {
 		if (isNpmTool(tool)) {
 			return {
 				key: tool,
@@ -91,6 +101,23 @@ export function Install({ tools, onDone }: InstallProps) {
 			},
 		};
 	});
+
+	// When any selected agent maps to a CodeGraph target, install CodeGraph
+	// alongside the agents (it runs in parallel with them). Best-effort: a
+	// failure is a soft ▲ warning, never a hard ✗ — CodeGraph is an enhancement
+	// and must never drop an agent or trip the all-failed gate. SetupApp splits
+	// CODEGRAPH_TASK_KEY out of the survivor set (it isn't a Tool).
+	if (codegraphTargets(tools).length > 0) {
+		tasks.push({
+			key: CODEGRAPH_TASK_KEY,
+			label: CODEGRAPH_PKG,
+			run: async () => {
+				const err = await ensureCodegraphInstalled();
+				return err ? { warning: `CodeGraph not installed: ${err}` } : null;
+			},
+		});
+	}
+
 	return (
 		<TaskList
 			tasks={tasks}

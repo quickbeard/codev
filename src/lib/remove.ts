@@ -2,10 +2,15 @@ import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { logout } from "@/lib/auth.js";
+import { runCodegraphUninstall } from "@/lib/codegraph.js";
 import { restoreTool, type Tool } from "@/lib/configure.js";
 import { uninstallShims } from "@/lib/shims.js";
 
-export type StepStatus = "ok" | "noop" | "failed";
+// "warning" is non-fatal: it surfaces a ▲ note to the user but does NOT count
+// toward `anyFailed`, so the overall remove still reports success. Used for the
+// best-effort CodeGraph uninstall — if the codegraph package was already
+// removed, the command errors, and we warn-and-continue rather than fail.
+export type StepStatus = "ok" | "noop" | "warning" | "failed";
 
 export interface StepResult {
 	label: string;
@@ -39,23 +44,57 @@ const TOOL_LABEL: Record<Tool, string> = {
 	"jetbrains-continue": "Continue config",
 };
 
-// Composes the four reversal steps (logout → unhook → restore-or-delete each
-// tool → wipe ~/.codev). Order matters: logout runs first because it reads
-// ~/.codev/auth.json to revoke tokens, and the final step deletes that dir;
-// unhook runs before the wipe because it cleans rc-file sentinel blocks and
-// (on Windows) the user PATH registry entry — state that lives OUTSIDE ~/.codev
-// and wouldn't be reached by rmSync(~/.codev).
+// Composes the reversal steps (logout → unhook → codegraph uninstall →
+// restore-or-delete each tool → wipe ~/.codev). Order matters: logout runs
+// first because it reads ~/.codev/auth.json to revoke tokens, and the final
+// step deletes that dir; unhook runs before the wipe because it cleans rc-file
+// sentinel blocks and (on Windows) the user PATH registry entry — state that
+// lives OUTSIDE ~/.codev and wouldn't be reached by rmSync(~/.codev). The
+// CodeGraph uninstall runs before the config restores so codev's restores are
+// the final writer on the files it owns, while CodeGraph still cleans the
+// files codev doesn't (e.g. opencode.jsonc); it's best-effort and never fails
+// the remove.
 export async function runRemove(): Promise<RemoveResult> {
 	const steps: StepResult[] = [];
 
 	steps.push(await runLogout());
 	steps.push(runUnhook());
+	steps.push(await runCodegraphRemoval());
 	for (const tool of TOOLS) {
 		steps.push(runRestoreOrDelete(tool));
 	}
 	steps.push(runWipeCodevDir());
 
 	return { steps, anyFailed: steps.some((s) => s.status === "failed") };
+}
+
+// Best-effort: revert CodeGraph's MCP wiring across all agents. If the
+// codegraph package was already removed, the command errors (e.g. ENOENT) — we
+// surface a ▲ warning and continue rather than fail the remove.
+async function runCodegraphRemoval(): Promise<StepResult> {
+	try {
+		const err = await runCodegraphUninstall();
+		if (!err) {
+			return {
+				label: "CodeGraph",
+				detail: "removed from agents",
+				status: "ok",
+			};
+		}
+		return {
+			label: "CodeGraph",
+			detail: `CodeGraph not available — skipped: ${err}`,
+			status: "warning",
+		};
+	} catch (err) {
+		// Defensive: runCodegraphUninstall resolves rather than throws, but keep
+		// the remove resilient to anything unexpected.
+		return {
+			label: "CodeGraph",
+			detail: `skipped: ${errorMessage(err)}`,
+			status: "warning",
+		};
+	}
 }
 
 async function runLogout(): Promise<StepResult> {
