@@ -40,17 +40,7 @@ CoDev points your agents at a self-hosted AI gateway, but you can flip any agent
 codev config
 ```
 
-`codev config` writes the gateway config exactly like `codev install` does — it just skips installing the agent packages.
-
 CoDev will replace `~/.claude/settings.json`, `~/.codex/config.toml`, and `~/.config/opencode/opencode.json` with new configs. For Claude Code, CoDev also resets the CLI's auth state so the new gateway credentials aren't shadowed: it rewrites `~/.claude.json` to skip the onboarding wizard, and removes `~/.claude/.credentials.json` so stale session auth can't take precedence. Before writing or removing any file, CoDev backs it up. If a backup already exists from a prior CoDev run (`*.backup`), CoDev leaves it untouched and proceeds. The existing backup is assumed to be your pre-CoDev original and is never clobbered by later runs.
-
-| Selection   | Backed up                                                                                           |
-| ----------- | --------------------------------------------------------------------------------------------------- |
-| Claude Code | `~/.claude/settings.json.backup`<br>`~/.claude.json.backup`<br>`~/.claude/.credentials.json.backup` |
-| Codex       | `~/.codex/config.toml.backup`                                                                       |
-| OpenCode    | `~/.config/opencode/opencode.json.backup`                                                           |
-
-`settings.json`, `config.toml`, and `opencode.json` are **replaced** (not merged), so any keys you had before live only in the file backup.
 
 **Go back to the proprietary models** — restore each agent's pre-CoDev config from its `*.backup`:
 
