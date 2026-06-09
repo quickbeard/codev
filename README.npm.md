@@ -20,11 +20,12 @@ After install, type `claude`, `codex`, or `opencode` to launch.
 
 ## CodeGraph integration
 
-When you run `codev install` (or `codev config`), CoDev also installs [CodeGraph](https://github.com/colbymchenry/codegraph) — a local, MCP-based code-intelligence server — and wires it into each agent you selected (Claude Code, Codex, OpenCode), user-wide (`--location global`). Picking the Claude Code editor extension counts as Claude Code. This step is best-effort: if it can't complete, CoDev prints a warning and finishes anyway.
+When you run `codev install` (or `codev config`), CoDev also installs [CodeGraph](https://github.com/colbymchenry/codegraph) — a local, MCP-based code-intelligence server — and wires it into each agent you selected (Claude Code, Codex, OpenCode), user-wide (`--location global`). This step is best-effort: if it can't complete, CoDev prints a warning and finishes anyway. You can drive CodeGraph through CoDev — `codev codegraph <args>` is equivalent to `codegraph <args>`.
 
-You can drive CodeGraph through CoDev — `codev codegraph <args>` is equivalent to `codegraph <args>`:
+### Initialize your project
 
 ```bash
+cd your-project
 codev codegraph init -y     # initialize + index the current project (one time)
 codev codegraph status      # show index status
 ```
@@ -68,3 +69,11 @@ npm uninstall -g codev-ai
 ```
 
 Then restart your terminal.
+
+## Development
+
+```bash
+corepack enable
+pnpm install
+pnpm dev
+```
