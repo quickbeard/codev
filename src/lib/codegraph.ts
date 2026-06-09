@@ -85,6 +85,22 @@ export async function runCodegraphInstall(
 	return r.stderr.trim() || r.error.message;
 }
 
+// Run CodeGraph's uninstaller (the inverse of runCodegraphInstall): removes the
+// MCP server wiring from every agent, user-wide and non-interactively. Used by
+// `codev remove`. Returns an error string on failure — including ENOENT when
+// the codegraph package was already removed, which the caller treats as a
+// non-fatal warning — or null on success.
+export async function runCodegraphUninstall(): Promise<string | null> {
+	const r = await execAsync(CODEGRAPH_BIN, [
+		"uninstall",
+		"--location",
+		"global",
+		"--yes",
+	]);
+	if (!r.error) return null;
+	return r.stderr.trim() || r.error.message;
+}
+
 export type CodegraphSetupStatus = "skipped" | "ok" | "warning";
 
 export interface CodegraphSetupResult {

@@ -89,10 +89,20 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 		);
 	}
 
+	// Non-fatal warnings (e.g. the CodeGraph CLI was already removed) are shown
+	// in both the success and failure views so the user always sees them.
+	const warnings = result.steps.filter((s) => s.status === "warning");
+	const warningRows = warnings.map((s) => (
+		<Text key={s.label} color="yellow">
+			▲ {s.label}: {s.detail}
+		</Text>
+	));
+
 	if (result.anyFailed) {
 		const failures = result.steps.filter((s) => s.status === "failed");
 		return (
 			<Box flexDirection="column">
+				{warningRows}
 				<Text color="red">✗ Some steps failed:</Text>
 				{failures.map((s) => (
 					<Text key={s.label} dimColor>
@@ -104,10 +114,13 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 	}
 
 	return (
-		<Text>
-			{"Removed successfully. You can now run "}
-			<Text color="cyan">npm uninstall -g codev-ai</Text>
-			{" to remove the CoDev package. Restart your terminal to apply."}
-		</Text>
+		<Box flexDirection="column">
+			{warningRows}
+			<Text>
+				{"Removed successfully. You can now run "}
+				<Text color="cyan">npm uninstall -g codev-ai</Text>
+				{" to remove the CoDev package. Restart your terminal to apply."}
+			</Text>
+		</Box>
 	);
 }

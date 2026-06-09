@@ -9,6 +9,7 @@ import {
 	ensureCodegraphInstalled,
 	forwardToCodegraph,
 	runCodegraphInstall,
+	runCodegraphUninstall,
 	setupCodegraph,
 	toolToCodegraphTarget,
 } from "@/lib/codegraph.js";
@@ -97,6 +98,40 @@ describe("runCodegraphInstall", () => {
 			error: new Error("exit 1"),
 		});
 		expect(await runCodegraphInstall(["claude"])).toBe("boom");
+	});
+});
+
+describe("runCodegraphUninstall", () => {
+	let execSpy: MockInstance;
+
+	beforeEach(() => {
+		execSpy = vi
+			.spyOn(npm, "execAsync")
+			.mockResolvedValue({ stdout: "", stderr: "", error: null });
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	test("invokes codegraph uninstall user-wide and non-interactively", async () => {
+		const err = await runCodegraphUninstall();
+		expect(err).toBeNull();
+		expect(execSpy).toHaveBeenCalledWith("codegraph", [
+			"uninstall",
+			"--location",
+			"global",
+			"--yes",
+		]);
+	});
+
+	test("returns the error string on failure (e.g. package already removed)", async () => {
+		execSpy.mockResolvedValue({
+			stdout: "",
+			stderr: "spawn codegraph ENOENT",
+			error: new Error("ENOENT"),
+		});
+		expect(await runCodegraphUninstall()).toBe("spawn codegraph ENOENT");
 	});
 });
 

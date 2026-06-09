@@ -136,4 +136,6 @@ Supabase coordinates (`supabase_url`, `supabase_anon_key`) are not baked into th
 
 2. **Command passthrough.** `codev codegraph <args>` forwards verbatim to `codegraph <args>` via `forwardToCodegraph` (e.g. `codev codegraph init -y`). It mirrors `src/lib/run.ts#runAgent` (inherited stdio, SIGINT/SIGTERM swallowing, win32 `shell:true`) minus the shim-dir stripping and upload daemon — CodeGraph isn't a chat agent and isn't shimmed. ENOENT prints an install hint.
 
+3. **Removal.** `codev remove` (`src/lib/remove.ts#runRemove`) runs `runCodegraphUninstall` (`codegraph uninstall --location global --yes`) before the config restores, to revert CodeGraph's MCP wiring across agents. It does NOT npm-uninstall the codegraph package (matching how remove leaves the codev-ai package). It's best-effort via a new `"warning"` `StepStatus`: if the codegraph package was already removed the command errors (ENOENT), and the step is a ▲ warning that's excluded from `anyFailed` — so the remove still succeeds. `RemoveApp` renders warning steps in both the success and failure views.
+
 Spawn/exec are routed through stubbable indirections for tests: `codegraphRunner.spawn` (passthrough) and `lib/npm.ts#execAsync` (install). The Install/Config integration tests spy on both `ensureCodegraphInstalled` and `setupCodegraph` so neither the Install step nor finalize shells out.

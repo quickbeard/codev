@@ -123,6 +123,27 @@ describe("RemoveApp", () => {
 		expect(out).toContain("Removed successfully.");
 	});
 
+	test("surfaces a non-fatal CodeGraph warning above the success message", async () => {
+		stubRunRemove({
+			steps: [
+				...SUCCESS_RESULT.steps,
+				{
+					label: "CodeGraph",
+					detail:
+						"CodeGraph CLI not available — skipped: spawn codegraph ENOENT",
+					status: "warning",
+				},
+			],
+			anyFailed: false,
+		});
+		const { frames } = render(<RemoveApp skipConfirm />);
+		await tick(50);
+		const out = flat(history(frames));
+		expect(out).toContain("▲ CodeGraph: CodeGraph CLI not available");
+		// A warning does not fail the remove — the success message still shows.
+		expect(out).toContain("Removed successfully.");
+	});
+
 	test("failure surfaces 'Some steps failed' with the failed step details", async () => {
 		stubRunRemove(FAILED_RESULT);
 		const { frames } = render(<RemoveApp skipConfirm />);
