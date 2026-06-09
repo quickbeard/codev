@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { readAgentConfig } from "@/lib/configure.js";
 import { renderMarkdown } from "@/lib/markdown.js";
 import { buildFilename, projectLogsDir } from "@/lib/paths.js";
 import {
@@ -93,7 +94,12 @@ export async function runExport(
 		onStatus(`Writing ${provider.agent} (${sessions.length})...`);
 		const agentDir = join(outDir, provider.agent);
 		mkdirSync(agentDir, { recursive: true });
+		// Read the tool's CoDev-managed config once and inject baseUrl into every
+		// session from this provider. The worker uses base_url in the session
+		// comment to determine internal vs external model usage.
+		const agentConfig = readAgentConfig(provider.agent);
 		for (const session of sessions) {
+			session.baseUrl = agentConfig.baseUrl;
 			const filename = buildFilename(session);
 			const filePath = join(agentDir, filename);
 			const md = renderMarkdown(session);

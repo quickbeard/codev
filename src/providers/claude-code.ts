@@ -28,6 +28,13 @@ interface RawRecord {
 	timestamp?: string;
 	sessionId?: string;
 	aiTitle?: string;
+	// Marks records belonging to a subagent's own conversation. Claude Code
+	// writes the subagent transcript into the parent's session file (sharing
+	// the sessionId) flagged with isSidechain. We fold subagents into the
+	// parent — the parent's main chain already carries the `Task` spawn and its
+	// result — so sidechain records are skipped to avoid double-counting the
+	// subagent's internal turns and tool calls.
+	isSidechain?: boolean;
 	message?: {
 		role?: string;
 		content?: unknown;
@@ -153,6 +160,8 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 		} catch {
 			continue;
 		}
+		// Skip subagent turns — folded into the parent via the `Task` tool-use.
+		if (rec.isSidechain === true) continue;
 		if (!sessionId && typeof rec.sessionId === "string") {
 			sessionId = rec.sessionId;
 		}

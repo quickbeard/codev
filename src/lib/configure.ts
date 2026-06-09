@@ -17,6 +17,7 @@ import {
 	CLAUDE_AUTO_COMPACT_WINDOW,
 	CLAUDE_AUTOCOMPACT_PCT,
 } from "@/lib/const.js";
+import type { Agent } from "@/providers/types.js";
 
 export type Tool =
 	| "claude-code"
@@ -132,6 +133,111 @@ const OPENCODE_K = {
 	apiKey: atob("YXBpS2V5"),
 	models: atob("bW9kZWxz"),
 };
+
+// The base URL CoDev writes to each tool's config. Read back at export time so
+// the session comment (markdown.ts) can embed base_url, enabling the worker to
+// determine internal vs external model usage without any env-var timing tricks.
+//
+// Three patterns, one per tool:
+//   Claude Code → settings.json → env.ANTHROPIC_BASE_URL
+//   Codex       → config.toml   → model_providers.aigateway.base_url
+//   OpenCode    → opencode.json → provider.aigateway.options.baseURL
+//
+// Returns undefined when the file is absent, not CoDev-managed, or unreadable.
+
+export interface AgentConfigResult {
+	baseUrl?: string;
+	model?: string;
+}
+
+export function readAgentConfig(agent: Agent): AgentConfigResult {
+	switch (agent) {
+		case "claude-code":
+			return readClaudeCodeConfig();
+		case "codex":
+			return readCodexConfig();
+		case "opencode":
+			return readOpenCodeConfig();
+	}
+}
+
+// Internal helpers follow. All throw on malformed JSON/TOML so callers that
+// encounter genuinely old/corrupt configs see a clear error rather than silently
+// returning undefined.
+
+function readClaudeCodeConfig(): AgentConfigResult {
+	const path = sourcePathOf("claude-settings");
+	if (!existsSync(path)) return {};
+	try {
+		const raw = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		// Guard: skip files CoDev did not write (no ANTHROPIC_DEFAULT_OPUS_MODEL).
+		if (!hasNestedKey(raw, CLAUDE_K.env, CLAUDE_K.opus)) return {};
+		const env = (raw as Record<string, unknown>)[CLAUDE_K.env] as Record<
+			string,
+			unknown
+		>;
+		return {
+			baseUrl: (env[CLAUDE_K.baseUrl] as string) || undefined,
+			model: (env[CLAUDE_K.model] as string) || undefined,
+		};
+	} catch {
+		return {};
+	}
+}
+
+function readCodexConfig(): AgentConfigResult {
+	const path = sourcePathOf("codex-config");
+	if (!existsSync(path)) return {};
+	try {
+		const raw = TOML.parse(readFileSync(path, "utf-8")) as unknown;
+		// Guard: skip non-CoDev configs (no aigateway provider).
+		if (!hasNestedKey(raw, CODEX_K.modelProviders, CODEX_K.providerId))
+			return {};
+		const r = raw as Record<string, unknown>;
+		const providers =
+			(r[CODEX_K.modelProviders] as Record<string, unknown>) || {};
+		const aigateway =
+			(providers[CODEX_K.providerId as string] as Record<string, unknown>) ||
+			{};
+		return {
+			baseUrl: (aigateway[CODEX_K.baseUrl as string] as string) || undefined,
+			model: (r[CODEX_K.model as string] as string) || undefined,
+		};
+	} catch {
+		return {};
+	}
+}
+
+function readOpenCodeConfig(): AgentConfigResult {
+	const path = sourcePathOf("opencode-config");
+	if (!existsSync(path)) return {};
+	try {
+		const raw = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		// Guard: skip non-CoDev configs (no aigateway provider).
+		if (!hasNestedKey(raw, OPENCODE_K.provider, OPENCODE_K.providerKey))
+			return {};
+		const r = raw as Record<string, unknown>;
+		const provider = (r[OPENCODE_K.provider] as Record<string, unknown>) || {};
+		const aigateway =
+			(provider[OPENCODE_K.providerKey as string] as Record<string, unknown>) ||
+			{};
+		const options =
+			(aigateway[OPENCODE_K.options as string] as Record<string, unknown>) ||
+			{};
+		// OpenCode's model field is "aigateway/MiniMax/MiniMax-M2.7"; strip the
+		// provider prefix so the value is a plain model ID like Claude/Codex use.
+		const fullModel = (r[OPENCODE_K.model as string] as string) || "";
+		const model = fullModel.startsWith(`${OPENCODE_K.providerKey}/`)
+			? fullModel.slice(OPENCODE_K.providerKey.length + 1)
+			: fullModel;
+		return {
+			baseUrl: (options[OPENCODE_K.baseURL as string] as string) || undefined,
+			model: model || undefined,
+		};
+	} catch {
+		return {};
+	}
+}
 
 // Continue reads ~/.continue/config.yaml from a single shared location across
 // editors (VS Code + JetBrains both load this file). We write the OpenAI-

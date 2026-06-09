@@ -18,6 +18,8 @@ export interface Session {
 	title?: string;
 	firstUserMessage?: string;
 	messages: Message[];
+	/** Base URL the tool used for this session. Read from CoDev-managed config at export time. */
+	baseUrl?: string;
 }
 
 export interface Provider {

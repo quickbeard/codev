@@ -65,6 +65,12 @@ interface SessionRow {
 	id: string;
 	title: string | null;
 	directory: string | null;
+	// Set on subagent sessions, pointing at the spawning session. Top-level
+	// sessions have it NULL. Subagent runs are folded into their parent (the
+	// parent already embeds the spawn prompt + result as an inline `task`
+	// tool-use), so child rows are skipped rather than uploaded as standalone
+	// conversations.
+	parent_id: string | null;
 	time_created: number;
 	time_updated: number;
 }
@@ -107,18 +113,20 @@ function resolveProject(db: DB, cwd: string): ProjectMatch | null {
 }
 
 function listSessionRows(db: DB, match: ProjectMatch): SessionRow[] {
+	// `parent_id IS NULL` drops subagent sessions — they're folded into their
+	// spawning session, which already carries the spawn inline.
 	if (match.directoryFilter) {
 		return db
 			.prepare<[string, string], SessionRow>(
-				"SELECT id, title, directory, time_created, time_updated " +
-					"FROM session WHERE project_id = ? AND directory = ? ORDER BY time_created",
+				"SELECT id, title, directory, parent_id, time_created, time_updated " +
+					"FROM session WHERE project_id = ? AND directory = ? AND parent_id IS NULL ORDER BY time_created",
 			)
 			.all(match.projectId, match.directoryFilter);
 	}
 	return db
 		.prepare<[string], SessionRow>(
-			"SELECT id, title, directory, time_created, time_updated " +
-				"FROM session WHERE project_id = ? ORDER BY time_created",
+			"SELECT id, title, directory, parent_id, time_created, time_updated " +
+				"FROM session WHERE project_id = ? AND parent_id IS NULL ORDER BY time_created",
 		)
 		.all(match.projectId);
 }

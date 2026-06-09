@@ -24,7 +24,7 @@ function createSchema(db: Database): void {
 	run(db, "CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)");
 	run(
 		db,
-		"CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, slug TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER)",
+		"CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, slug TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER)",
 	);
 	run(
 		db,
@@ -275,6 +275,52 @@ describe("openCodeProvider.listSessions", () => {
 		const nested = sessions.find((s) => s.id === "ses-nested");
 		if (!nested) throw new Error("expected nested session");
 		expect(nested.messages[1]?.model).toBe("claude-opus-4-7");
+	});
+
+	test("excludes subagent (child) sessions, keeping only the parent", async () => {
+		seedProjectAndSession();
+		const db = new Database(dbPath);
+		// A subagent session: same project, but parent_id points at ses-1. It has
+		// its own message so it would otherwise build into a standalone session.
+		run(
+			db,
+			"INSERT INTO session (id, project_id, parent_id, slug, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			[
+				"ses-sub",
+				"proj-1",
+				"ses-1",
+				"explore",
+				"Find staging models (@explore subagent)",
+				projectCwd,
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				Math.floor(Date.UTC(2026, 3, 27, 18, 41, 0) / 1000),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+			[
+				"msg-sub",
+				"ses-sub",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				JSON.stringify({ role: "user" }),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-sub",
+				"msg-sub",
+				"ses-sub",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				JSON.stringify({ type: "text", text: "Find staging models" }),
+			],
+		);
+		db.close();
+
+		const sessions = await openCodeProvider.listSessions(projectCwd);
+		expect(sessions.map((s) => s.id)).toEqual(["ses-1"]);
 	});
 
 	test("returns empty list when no project matches the cwd", async () => {
