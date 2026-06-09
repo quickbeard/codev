@@ -89,7 +89,7 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 		);
 	}
 
-	// Non-fatal warnings (e.g. the CodeGraph CLI was already removed) are shown
+	// Non-fatal warnings (e.g. CodeGraph was already removed) are shown
 	// in both the success and failure views so the user always sees them.
 	const warnings = result.steps.filter((s) => s.status === "warning");
 	const warningRows = warnings.map((s) => (

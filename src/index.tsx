@@ -224,7 +224,7 @@ switch (command) {
 		spawnUploadDaemon();
 		process.exit(await runAgent("opencode", args));
 		break;
-	// Transparent passthrough to the CodeGraph CLI: `codev codegraph <args>` ≡
+	// Transparent passthrough to CodeGraph: `codev codegraph <args>` ≡
 	// `codegraph <args>` (e.g. `codev codegraph init -y`). No upload daemon and
 	// no shim handling — CodeGraph isn't a chat agent and isn't shimmed.
 	case "codegraph":

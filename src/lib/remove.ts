@@ -83,7 +83,7 @@ async function runCodegraphRemoval(): Promise<StepResult> {
 		}
 		return {
 			label: "CodeGraph",
-			detail: `CodeGraph CLI not available — skipped: ${err}`,
+			detail: `CodeGraph not available — skipped: ${err}`,
 			status: "warning",
 		};
 	} catch (err) {

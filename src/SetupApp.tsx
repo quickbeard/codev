@@ -324,7 +324,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 			}
 			// Config mode skips the *agent* install (they're treated as already
 			// installed, so the survivor set equals `tools`), but still installs
-			// the CodeGraph CLI. When any selected agent maps to a CodeGraph
+			// the CodeGraph. When any selected agent maps to a CodeGraph
 			// target, show the CodeGraph-only Install step right after login;
 			// otherwise skip straight to the post-login side-effects via proxy-url.
 			if (codegraphTargets(tools).length > 0) {
@@ -350,7 +350,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// survivor set.
 	const handleInstallDone = useCallback(
 		(succeededKeys: string[]) => {
-			// Config mode's Install step only ran the CodeGraph CLI row (agents
+			// Config mode's Install step only ran the CodeGraph row (agents
 			// are assumed already installed), so the survivor set is the full
 			// selection regardless of the CodeGraph row's outcome — it's
 			// best-effort and must never drop an agent or park the flow.
@@ -359,7 +359,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 				setStep("proxy-url");
 				return;
 			}
-			// The CodeGraph CLI task shares this TaskList but isn't an agent: split
+			// The CodeGraph task shares this TaskList but isn't an agent: split
 			// its sentinel key out so it never flows into the survivor set (Configure
 			// / shims would choke on a non-Tool key) and never masks a total agent
 			// failure in the fail-stop check below.

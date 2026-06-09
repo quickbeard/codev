@@ -1,5 +1,6 @@
 import { type TaskItem, TaskList } from "@/components/TaskList.js";
 import {
+	CODEGRAPH_PKG,
 	CODEGRAPH_TASK_KEY,
 	codegraphTargets,
 	ensureCodegraphInstalled,
@@ -101,18 +102,19 @@ export function Install({ tools, onDone, includeAgents = true }: InstallProps) {
 		};
 	});
 
-	// When any selected agent maps to a CodeGraph target, install the CodeGraph
-	// CLI alongside the agents (it runs in parallel with them). Best-effort: a
-	// failure is a soft ▲ warning, never a hard ✗ — CodeGraph is an enhancement
-	// and must never drop an agent or trip the all-failed gate. SetupApp splits
-	// CODEGRAPH_TASK_KEY out of the survivor set (it isn't a Tool).
+	// When any selected agent maps to a CodeGraph target, install CodeGraph
+	// alongside the agents (it runs in parallel with them). Labeled with the npm
+	// package name to match the agent rows. Best-effort: a failure is a soft ▲
+	// warning, never a hard ✗ — CodeGraph is an enhancement and must never drop
+	// an agent or trip the all-failed gate. SetupApp splits CODEGRAPH_TASK_KEY
+	// out of the survivor set (it isn't a Tool).
 	if (codegraphTargets(tools).length > 0) {
 		tasks.push({
 			key: CODEGRAPH_TASK_KEY,
-			label: "CodeGraph CLI",
+			label: CODEGRAPH_PKG,
 			run: async () => {
 				const err = await ensureCodegraphInstalled();
-				return err ? { warning: `CodeGraph CLI not installed: ${err}` } : null;
+				return err ? { warning: `CodeGraph not installed: ${err}` } : null;
 			},
 		});
 	}

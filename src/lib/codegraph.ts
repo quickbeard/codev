@@ -12,7 +12,7 @@ export const CODEGRAPH_BIN = "codegraph";
 // CLI agents, so they're the only targets we ever forward.
 export type CodegraphTarget = "claude" | "codex" | "opencode";
 
-// TaskList row key for the CodeGraph CLI install that runs in the "Installing
+// TaskList row key for the CodeGraph install that runs in the "Installing
 // packages" step. Deliberately not a valid `Tool` so SetupApp can split it out
 // of the surviving tool set (it must not flow into Configure / shims) — see
 // handleInstallDone.
@@ -56,7 +56,7 @@ export function codegraphTargets(tools: Tool[]): CodegraphTarget[] {
 	return out;
 }
 
-// Always (re)install the global CodeGraph CLI. CodeGraph's own `install --yes`
+// Always (re)install the global CodeGraph. CodeGraph's own `install --yes`
 // deliberately SKIPS putting itself on PATH, and the MCP configs it writes
 // reference the bare `codegraph` command — so CoDev must guarantee the binary
 // is resolvable. Returns an error string on failure, or null on success.

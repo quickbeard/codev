@@ -432,7 +432,7 @@ describe("InstallApp fail-stop invariant", () => {
 		await pickFirstModel(stdin, frames);
 		await waitForFrame(frames, "Happy coding");
 
-		// The CodeGraph CLI is installed during the Installing step (alongside
+		// CodeGraph is installed during the Installing step (alongside
 		// the agents), then the finalize step wires the MCP server. Survivors are
 		// handed to setupCodegraph verbatim; the mapping/dedupe to `--target` is
 		// covered in lib/codegraph.test.ts.

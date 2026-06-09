@@ -54,7 +54,7 @@ beforeEach(() => {
 	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
 	// inline post-login refresh doesn't block tests on a real fetch.
 	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);
-	// Config mode installs the CodeGraph CLI right after login
+	// Config mode installs CodeGraph right after login
 	// (ensureCodegraphInstalled) and wires it in finalize (setupCodegraph).
 	// Default both to no-ops so the config-mode tests stay isolated from the
 	// agent npm-install assertions below (which expect zero npm installs).
@@ -267,8 +267,8 @@ describe("ConfigApp", () => {
 		});
 		expect(npmInstallCalls).toHaveLength(0);
 		// Config mode DOES show a visible CodeGraph-only install step right after
-		// login, then wires the MCP server in finalize.
-		expect(history).toContain("CodeGraph CLI");
+		// login (labeled with the npm package name), then wires in finalize.
+		expect(history).toContain("@colbymchenry/codegraph");
 		expect(codegraph.ensureCodegraphInstalled).toHaveBeenCalled();
 		expect(codegraph.setupCodegraph).toHaveBeenCalledWith(["claude-code"]);
 		// Configure still ran for the selected tool.
