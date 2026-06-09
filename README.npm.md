@@ -61,7 +61,7 @@ If you have a session running, you might need to restart it with `claude -c`, `c
 codev remove
 ```
 
-After confirmation, this reverts your machine to its pre-CoDev state — including running `codegraph uninstall` to remove CodeGraph's MCP wiring from your agents (best-effort: if CodeGraph was already removed, it prints a warning and continues). Add `--yes` (or `-y`) to skip the confirmation prompt.
+After confirmation, this reverts your machine to its pre-CoDev state — including running `codegraph uninstall` to remove CodeGraph's MCP wiring from your agents. Add `--yes` (or `-y`) to skip the confirmation prompt.
 
 CoDev itself is still installed globally — finish with:
 
