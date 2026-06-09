@@ -123,3 +123,13 @@ Supabase coordinates (`supabase_url`, `supabase_anon_key`) are not baked into th
    - `src/lib/upload.ts`'s `ensureAuth` calls `refreshCodevConfig` on the fresh-login branch (so the first Supabase attempt doesn't have to fail and retry just to populate the cache).
    - Tests that exercise real `login()` must mock `POST /codev-proxy/config` if (and only if) the caller also calls `refreshCodevConfig`.
 2. **`runUpload` retries once on a "refreshable" error.** `isRefreshableError` (in `src/lib/upload.ts`) is deliberately narrow: `Missing supabase_…` from the cache accessors, or HTTP `401`/`403` from any Supabase or proxy fetch. `5xx`, `404`, network errors, and timeouts are NOT retried — refreshing won't help and we'd amplify the outage. Per-file upload errors stay in `summary.errors` and don't trigger the pipeline-level retry. If you change `runSupabaseUpload`'s shape, keep that boundary intact.
+
+## CodeGraph integration
+
+`src/lib/codegraph.ts` integrates the external [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) CLI/MCP server. Two surfaces:
+
+1. **Install wiring.** `SetupApp`'s finalize step (`runFinalizeSideEffects`, shared by `codev install` and `codev config`) calls `setupCodegraph(installedTools)`. It maps the surviving tools to CodeGraph `--target` ids via `toolToCodegraphTarget` (the three CLI agents, plus both Claude Code *extension* variants → `claude`; Continue → none), **always** `npm i -g @colbymchenry/codegraph`, then runs `codegraph install --target <csv> --location global --yes`. The whole thing is **best-effort**: any failure becomes a `warning` result rendered as a yellow ▲ row — it never aborts the CoDev flow. An empty target set returns `skipped` and renders nothing. CodeGraph's own `--yes` install skips putting itself on PATH, which is why CoDev installs the package itself (the MCP configs reference a bare `codegraph` command that must resolve at agent-launch time).
+
+2. **Command passthrough.** `codev codegraph <args>` forwards verbatim to `codegraph <args>` via `forwardToCodegraph` (e.g. `codev codegraph init -y`). It mirrors `src/lib/run.ts#runAgent` (inherited stdio, SIGINT/SIGTERM swallowing, win32 `shell:true`) minus the shim-dir stripping and upload daemon — CodeGraph isn't a chat agent and isn't shimmed. ENOENT prints an install hint.
+
+Spawn/exec are routed through stubbable indirections for tests: `codegraphRunner.spawn` (passthrough) and `lib/npm.ts#execAsync` (install). `tests/InstallApp.test.tsx` spies on `setupCodegraph` so the finalize step never shells out.

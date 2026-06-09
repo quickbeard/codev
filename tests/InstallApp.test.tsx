@@ -13,6 +13,7 @@ import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { InstallApp } from "@/InstallApp.js";
 import * as auth from "@/lib/auth.js";
+import * as codegraph from "@/lib/codegraph.js";
 import * as configure from "@/lib/configure.js";
 import * as npm from "@/lib/npm.js";
 import * as proxy from "@/lib/proxy.js";
@@ -69,6 +70,13 @@ beforeEach(() => {
 	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
 	// inline post-install refresh doesn't block tests on a real fetch.
 	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);
+	// The finalize Phase runs setupCodegraph, which shells out to npm /
+	// codegraph. Default it to a no-op so full-flow tests neither hang nor hit
+	// the network; specific tests override this to assert the wiring.
+	vi.spyOn(codegraph, "setupCodegraph").mockResolvedValue({
+		status: "skipped",
+		targets: [],
+	});
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
@@ -396,6 +404,67 @@ describe("InstallApp fail-stop invariant", () => {
 			model: "m-alpha",
 			models: ["m-alpha", "m-beta"],
 		});
+	});
+
+	test("wires CodeGraph for the selected agent after a successful install", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.b",
+				created: true,
+			},
+		]);
+		vi.mocked(codegraph.setupCodegraph).mockResolvedValue({
+			status: "ok",
+			targets: ["claude"],
+		});
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		// Survivors of the install step are handed to setupCodegraph verbatim;
+		// the mapping/dedupe to `--target` is covered in lib/codegraph.test.ts.
+		expect(codegraph.setupCodegraph).toHaveBeenCalledWith(["claude-code"]);
+		expect(allFrames(frames)).toContain("Wired CodeGraph into claude");
+	});
+
+	test("a CodeGraph setup failure warns but does not block completion", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.b",
+				created: true,
+			},
+		]);
+		vi.mocked(codegraph.setupCodegraph).mockResolvedValue({
+			status: "warning",
+			targets: ["claude"],
+			message: "CodeGraph install failed: boom",
+		});
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		const history = allFrames(frames);
+		expect(history).toContain("CodeGraph install failed: boom");
+		// Best-effort: the warning never aborts the CoDev flow.
+		expect(history).toContain("Happy coding");
 	});
 
 	test("proxy-url step is hidden and never persists a proxy URL", async () => {

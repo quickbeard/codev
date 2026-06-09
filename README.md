@@ -18,6 +18,17 @@ codev install
 
 After install, type `claude`, `codex`, or `opencode` to launch.
 
+## CodeGraph integration
+
+When you run `codev install` (or `codev config`), CoDev also installs [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) — a local, MCP-based code-intelligence server — and wires it into each agent you selected (Claude Code, Codex, OpenCode), user-wide (`--location global`). Picking the Claude Code editor extension counts as Claude Code. This step is best-effort: if it can't complete, CoDev prints a warning and finishes anyway.
+
+You can drive the CodeGraph CLI through CoDev — `codev codegraph <args>` is equivalent to `codegraph <args>`:
+
+```bash
+codev codegraph init -y     # initialize + index the current project
+codev codegraph status      # show index status
+```
+
 ## Restoring a previous configuration
 
 CoDev will replace `~/.claude/settings.json`, `~/.codex/config.toml`, and `~/.config/opencode/opencode.json` with new configs. For Claude Code, CoDev also resets the CLI's auth state so the new gateway credentials aren't shadowed: it rewrites `~/.claude.json` to skip the onboarding wizard, and removes `~/.claude/.credentials.json` so stale session auth can't take precedence. Before writing or removing any file, CoDev backs it up. If a backup already exists from a prior CoDev run (`*.backup`), CoDev leaves it untouched and proceeds. The existing backup is assumed to be your pre-CoDev original and is never clobbered by later runs.

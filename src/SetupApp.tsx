@@ -47,6 +47,11 @@ import {
 	saveProxyUrl,
 } from "@/lib/auth.js";
 import {
+	type CodegraphSetupResult,
+	codegraphTargets,
+	setupCodegraph,
+} from "@/lib/codegraph.js";
+import {
 	backupClaudeAuth,
 	type Credentials,
 	resetClaudeAuth,
@@ -187,6 +192,12 @@ export function SetupApp({ mode }: SetupAppProps) {
 	const [existingValid, setExistingValid] = useState(false);
 	const [existingMessage, setExistingMessage] = useState<string | null>(null);
 	const [shimsInstalled, setShimsInstalled] = useState(false);
+	// Result of the best-effort CodeGraph setup that runs during the finalize
+	// Phase. null while it's still running (drives the spinner); set once
+	// setupCodegraph resolves. "skipped" when the selection had no
+	// CodeGraph-eligible tools, so the row never renders.
+	const [codegraphResult, setCodegraphResult] =
+		useState<CodegraphSetupResult | null>(null);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
 	// Set only when refreshCodevConfig fails. Drives a yellow ▲ row that
 	// appears between the install Step and the next visible Step. Stays null
@@ -485,12 +496,30 @@ export function SetupApp({ mode }: SetupAppProps) {
 				// Leave shimsInstalled=false so the terminal message degrades to
 				// plain "Done!".
 			}
-			setStep("done");
-			// Hold the terminal frame for ~1s so the user can read "Done! Run
-			// exec $SHELL" and "Happy coding!" before Ink tears down. Without
-			// this, React's render of the "done" Phase wouldn't flush to the
-			// terminal before exit() unmounts the app.
-			setTimeout(() => exit(), 1000);
+			// Best-effort CodeGraph setup: install the CLI and wire its MCP server
+			// into each selected agent. Runs in both install and config mode. The
+			// flow holds on "finalizing" (spinner) until this resolves; a failure
+			// surfaces as a warning row but never blocks completion. setupCodegraph
+			// never throws, but the catch is defensive.
+			setupCodegraph(installedTools)
+				.then(setCodegraphResult)
+				.catch((err: unknown) =>
+					setCodegraphResult({
+						status: "warning",
+						targets: codegraphTargets(installedTools),
+						message: `CodeGraph setup could not run: ${
+							err instanceof Error ? err.message : String(err)
+						}`,
+					}),
+				)
+				.finally(() => {
+					setStep("done");
+					// Hold the terminal frame for ~1s so the user can read "Done! Run
+					// exec $SHELL" and "Happy coding!" before Ink tears down. Without
+					// this, React's render of the "done" Phase wouldn't flush to the
+					// terminal before exit() unmounts the app.
+					setTimeout(() => exit(), 1000);
+				});
 		},
 		[installedTools, exit],
 	);
@@ -670,6 +699,34 @@ export function SetupApp({ mode }: SetupAppProps) {
 							/>
 						</Step>
 					))}
+				{(step === "finalizing" || step === "done") &&
+					codegraphTargets(installedTools).length > 0 &&
+					codegraphResult?.status !== "skipped" && (
+						<Step
+							active={step === "finalizing"}
+							title={<Text bold>Set up CodeGraph</Text>}
+						>
+							{codegraphResult === null ? (
+								<Box>
+									<Text color="cyan">
+										<Spinner />
+									</Text>
+									<Text> Installing CodeGraph and wiring its MCP server…</Text>
+								</Box>
+							) : codegraphResult.status === "warning" ? (
+								<Box>
+									<Text color="yellow">▲</Text>
+									<Text color="yellow">
+										{` ${codegraphResult.message ?? "CodeGraph setup did not complete."}`}
+									</Text>
+								</Box>
+							) : (
+								<Text dimColor>
+									{`Wired CodeGraph into ${codegraphResult.targets.join(", ")}.`}
+								</Text>
+							)}
+						</Step>
+					)}
 				{step === "done" && (
 					<SetupComplete
 						tools={installedTools}

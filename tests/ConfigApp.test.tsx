@@ -13,6 +13,7 @@ import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ConfigApp } from "@/ConfigApp.js";
 import * as auth from "@/lib/auth.js";
+import * as codegraph from "@/lib/codegraph.js";
 import * as configure from "@/lib/configure.js";
 import * as proxy from "@/lib/proxy.js";
 
@@ -51,6 +52,13 @@ beforeEach(() => {
 	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
 	// inline post-login refresh doesn't block tests on a real fetch.
 	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);
+	// The finalize Phase runs setupCodegraph (in config mode too), which shells
+	// out to npm / codegraph. Default it to a no-op so the config-mode tests
+	// stay isolated from the agent npm-install assertions below.
+	vi.spyOn(codegraph, "setupCodegraph").mockResolvedValue({
+		status: "skipped",
+		targets: [],
+	});
 	// Default to "no saved API key" so the validating-existing branch doesn't
 	// surface a stale dev-machine key.
 	vi.spyOn(auth, "loadApiKey").mockReturnValue(null);
@@ -253,6 +261,9 @@ describe("ConfigApp", () => {
 			return first.startsWith("npm i");
 		});
 		expect(npmInstallCalls).toHaveLength(0);
+		// CodeGraph setup still runs in config mode (the agent npm install is
+		// skipped, but CodeGraph wiring is not).
+		expect(codegraph.setupCodegraph).toHaveBeenCalledWith(["claude-code"]);
 		// Configure still ran for the selected tool.
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 		expect(configureSpy).toHaveBeenCalledWith({
