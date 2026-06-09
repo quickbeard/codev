@@ -41,10 +41,14 @@ interface InstallProps {
 	// the list to either park at install-failed (empty) or advance to
 	// Configure with just the survivors.
 	onDone: (succeededKeys: string[]) => void;
+	// When false, skip the agent install rows and only install the CodeGraph
+	// CLI. Used by config mode, where the agents are already installed but
+	// CodeGraph still needs its global CLI. Defaults to true (install mode).
+	includeAgents?: boolean;
 }
 
-export function Install({ tools, onDone }: InstallProps) {
-	const tasks: TaskItem[] = tools.map((tool) => {
+export function Install({ tools, onDone, includeAgents = true }: InstallProps) {
+	const tasks: TaskItem[] = (includeAgents ? tools : []).map((tool) => {
 		if (isNpmTool(tool)) {
 			return {
 				key: tool,

@@ -20,10 +20,12 @@ import * as proxy from "@/lib/proxy.js";
 // ConfigApp shares its state machine with InstallApp (both render <SetupApp />).
 // These tests cover only the config-specific deltas:
 //   1. ToolSelect title verb is "configure", not "install".
-//   2. The Install Step never mounts — no `Installing packages` row, no
-//      `npm install` execFile calls.
+//   2. The *agent* install never runs — no `Installing packages` row, no
+//      `npm install` execFile calls. (Config mode DOES show a CodeGraph-only
+//      "Installing CodeGraph" step right after login — see the CodeGraph
+//      assertions — but the agents are treated as already installed.)
 //   3. Configure / backupOnly still run for the selected tools (we want the
-//      same on-disk effect as install, just without the Install step).
+//      same on-disk effect as install, just without the agent install step).
 // The full grid of auth methods, retries, partial-failure handling, etc., is
 // already covered by InstallApp.test.tsx against the same component.
 
@@ -250,10 +252,11 @@ describe("ConfigApp", () => {
 
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
-		// Install Step never rendered.
+		// The *agent* install step never rendered (no "Installing packages"
+		// title; config uses the CodeGraph-only "Installing CodeGraph" step).
 		expect(history).not.toContain("Installing packages");
 		expect(history).not.toContain("Failed to install");
-		// No `npm install` ever attempted.
+		// No agent `npm install` ever attempted.
 		const npmInstallCalls = execFileMock.mock.calls.filter((call) => {
 			const first = call[0] as string;
 			const second = call[1];
@@ -263,9 +266,9 @@ describe("ConfigApp", () => {
 			return first.startsWith("npm i");
 		});
 		expect(npmInstallCalls).toHaveLength(0);
-		// CodeGraph still runs in config mode: the CLI is installed right after
-		// login (the agent npm install is skipped, but CodeGraph's is not), then
-		// the MCP server is wired in finalize.
+		// Config mode DOES show a visible CodeGraph-only install step right after
+		// login, then wires the MCP server in finalize.
+		expect(history).toContain("CodeGraph CLI");
 		expect(codegraph.ensureCodegraphInstalled).toHaveBeenCalled();
 		expect(codegraph.setupCodegraph).toHaveBeenCalledWith(["claude-code"]);
 		// Configure still ran for the selected tool.
