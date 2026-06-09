@@ -7,6 +7,7 @@ import {
 	codegraphRunner,
 	codegraphTargets,
 	ensureCodegraphInstalled,
+	formatCodegraphTargets,
 	forwardToCodegraph,
 	runCodegraphInstall,
 	runCodegraphUninstall,
@@ -56,6 +57,32 @@ describe("codegraphTargets", () => {
 		expect(codegraphTargets(["codex", "vscode-continue"] as Tool[])).toEqual([
 			"codex",
 		]);
+	});
+});
+
+describe("formatCodegraphTargets", () => {
+	test("maps target ids to display names", () => {
+		expect(formatCodegraphTargets(["claude"])).toBe("Claude Code");
+		expect(formatCodegraphTargets(["codex"])).toBe("Codex");
+		expect(formatCodegraphTargets(["opencode"])).toBe("OpenCode");
+	});
+
+	test("joins two targets with 'and' (no comma)", () => {
+		expect(formatCodegraphTargets(["codex", "opencode"])).toBe(
+			"Codex and OpenCode",
+		);
+	});
+
+	test("joins three targets with an Oxford comma", () => {
+		expect(formatCodegraphTargets(["claude", "codex", "opencode"])).toBe(
+			"Claude Code, Codex, and OpenCode",
+		);
+	});
+
+	test("preserves the given order", () => {
+		expect(formatCodegraphTargets(["opencode", "claude"])).toBe(
+			"OpenCode and Claude Code",
+		);
 	});
 });
 

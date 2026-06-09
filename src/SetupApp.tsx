@@ -50,6 +50,7 @@ import {
 	CODEGRAPH_TASK_KEY,
 	type CodegraphSetupResult,
 	codegraphTargets,
+	formatCodegraphTargets,
 	setupCodegraph,
 } from "@/lib/codegraph.js";
 import {
@@ -759,7 +760,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 								</Box>
 							) : (
 								<Text dimColor>
-									{`Wired CodeGraph into ${codegraphResult.targets.join(", ")}.`}
+									{`Wired CodeGraph into ${formatCodegraphTargets(codegraphResult.targets)}.`}
 								</Text>
 							)}
 						</Step>

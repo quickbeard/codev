@@ -438,7 +438,7 @@ describe("InstallApp fail-stop invariant", () => {
 		// covered in lib/codegraph.test.ts.
 		expect(codegraph.ensureCodegraphInstalled).toHaveBeenCalled();
 		expect(codegraph.setupCodegraph).toHaveBeenCalledWith(["claude-code"]);
-		expect(allFrames(frames)).toContain("Wired CodeGraph into claude");
+		expect(allFrames(frames)).toContain("Wired CodeGraph into Claude Code");
 	});
 
 	test("a CodeGraph setup failure warns but does not block completion", async () => {

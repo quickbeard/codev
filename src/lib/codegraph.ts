@@ -2,6 +2,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { constants } from "node:os";
 import type { Tool } from "@/lib/configure.js";
 import { execAsync } from "@/lib/npm.js";
+import { formatToolList } from "@/lib/text.js";
 
 // The npm package that ships the `codegraph` CLI + MCP server.
 export const CODEGRAPH_PKG = "@colbymchenry/codegraph";
@@ -54,6 +55,22 @@ export function codegraphTargets(tools: Tool[]): CodegraphTarget[] {
 		}
 	}
 	return out;
+}
+
+// Human-readable agent names for the CodeGraph `--target` ids (which are the
+// bare CLI ids — `claude`/`codex`/`opencode`). Used in user-facing messages so
+// we show "Claude Code" / "Codex" / "OpenCode" rather than the raw ids.
+const CODEGRAPH_TARGET_LABEL: Record<CodegraphTarget, string> = {
+	claude: "Claude Code",
+	codex: "Codex",
+	opencode: "OpenCode",
+};
+
+// Format a list of CodeGraph targets as a natural-English sentence fragment
+// with display names and Oxford-comma / "and" joining (e.g. "Codex and
+// OpenCode", "Claude Code, Codex, and OpenCode"). Preserves the given order.
+export function formatCodegraphTargets(targets: CodegraphTarget[]): string {
+	return formatToolList(targets.map((t) => CODEGRAPH_TARGET_LABEL[t]));
 }
 
 // Always (re)install the global CodeGraph. CodeGraph's own `install --yes`
