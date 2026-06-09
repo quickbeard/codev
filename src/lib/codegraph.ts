@@ -12,6 +12,12 @@ export const CODEGRAPH_BIN = "codegraph";
 // CLI agents, so they're the only targets we ever forward.
 export type CodegraphTarget = "claude" | "codex" | "opencode";
 
+// TaskList row key for the CodeGraph CLI install that runs in the "Installing
+// packages" step. Deliberately not a valid `Tool` so SetupApp can split it out
+// of the surviving tool set (it must not flow into Configure / shims) — see
+// handleInstallDone.
+export const CODEGRAPH_TASK_KEY = "__codegraph__";
+
 // Map a CoDev tool to the CodeGraph `--target` id, or null when CodeGraph has
 // no target for it. The two Claude Code *extension* variants map to `claude`
 // too: they share ~/.claude config with the CLI, so wiring CodeGraph's MCP
@@ -88,25 +94,19 @@ export interface CodegraphSetupResult {
 	message?: string;
 }
 
-// Best-effort end-to-end CodeGraph setup for a tool selection: install the
-// CLI, then wire its MCP server into each agent. Never throws — any failure is
-// folded into a `warning` result so the caller (the install/config finalize
-// step) can surface it without aborting CoDev's own flow. `skipped` means the
-// selection had no CodeGraph-eligible tools (e.g. Continue only).
+// Best-effort CodeGraph MCP wiring for a tool selection. Assumes the CodeGraph
+// CLI is already installed — the global `npm i -g` happens earlier (the
+// "Installing packages" step in install mode, or right after login in config
+// mode), so this only runs `codegraph install` to wire the MCP server into each
+// agent. Never throws: any failure (including the binary being absent because
+// the earlier install didn't land) folds into a `warning` result so the
+// finalize step can surface it without aborting CoDev's own flow. `skipped`
+// means the selection had no CodeGraph-eligible tools (e.g. Continue only).
 export async function setupCodegraph(
 	tools: Tool[],
 ): Promise<CodegraphSetupResult> {
 	const targets = codegraphTargets(tools);
 	if (targets.length === 0) return { status: "skipped", targets };
-
-	const installErr = await ensureCodegraphInstalled();
-	if (installErr) {
-		return {
-			status: "warning",
-			targets,
-			message: `Could not install the CodeGraph CLI: ${installErr}`,
-		};
-	}
 
 	const configErr = await runCodegraphInstall(targets);
 	if (configErr) {

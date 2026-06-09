@@ -1,6 +1,6 @@
 import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AuthMethodChoice } from "@/components/AuthMethod.js";
 import {
 	AuthMethod,
@@ -47,8 +47,10 @@ import {
 	saveProxyUrl,
 } from "@/lib/auth.js";
 import {
+	CODEGRAPH_TASK_KEY,
 	type CodegraphSetupResult,
 	codegraphTargets,
+	ensureCodegraphInstalled,
 	setupCodegraph,
 } from "@/lib/codegraph.js";
 import {
@@ -198,6 +200,12 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// CodeGraph-eligible tools, so the row never renders.
 	const [codegraphResult, setCodegraphResult] =
 		useState<CodegraphSetupResult | null>(null);
+	// Holds the in-flight `npm i -g @colbymchenry/codegraph` promise in config
+	// mode, where there's no "Installing packages" step to host it. Kicked off
+	// right after login (handleLoginDone) so it overlaps with the key/model
+	// steps; the finalize step awaits it before wiring. Stays null in install
+	// mode, where the Install TaskList owns the CLI install instead.
+	const codegraphInstallRef = useRef<Promise<string | null> | null>(null);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
 	// Set only when refreshCodevConfig fails. Drives a yellow ▲ row that
 	// appears between the install Step and the next visible Step. Stays null
@@ -323,6 +331,18 @@ export function SetupApp({ mode }: SetupAppProps) {
 			}
 			// Config mode skips the Install step entirely: every selected tool
 			// is treated as already installed (the survivor set equals `tools`).
+			// There's no "Installing packages" step here to host the CodeGraph
+			// CLI install, so kick it off right after login (best-effort, errors
+			// swallowed) so it overlaps with the steps below; the finalize step
+			// awaits this promise before wiring the MCP server.
+			if (
+				codegraphTargets(tools).length > 0 &&
+				codegraphInstallRef.current === null
+			) {
+				codegraphInstallRef.current = ensureCodegraphInstalled().catch(
+					() => null,
+				);
+			}
 			// Route through the proxy-url Step before the post-install
 			// side-effects so the user's chosen URL is in effect for the
 			// refreshCodevConfig call inside runPostInstallSideEffects.
@@ -344,7 +364,14 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// are rendered as yellow ▲ rows by TaskList and are included in the
 	// survivor set.
 	const handleInstallDone = useCallback((succeededKeys: string[]) => {
-		if (succeededKeys.length === 0) {
+		// The CodeGraph CLI task shares this TaskList but isn't an agent: split
+		// its sentinel key out so it never flows into the survivor set (Configure
+		// / shims would choke on a non-Tool key) and never masks a total agent
+		// failure in the fail-stop check below.
+		const toolSurvivors = succeededKeys.filter(
+			(k): k is Tool => k !== CODEGRAPH_TASK_KEY,
+		);
+		if (toolSurvivors.length === 0) {
 			setStep("install-failed");
 			return;
 		}
@@ -352,7 +379,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 		// side-effects (resetClaudeAuth, installShims, refreshCodevConfig)
 		// run after handleProxyUrlConfirm so the chosen proxy URL is in
 		// effect for the very first refresh call.
-		setPendingSurvivors(succeededKeys as Tool[]);
+		setPendingSurvivors(toolSurvivors);
 		setStep("proxy-url");
 	}, []);
 
@@ -496,12 +523,15 @@ export function SetupApp({ mode }: SetupAppProps) {
 				// Leave shimsInstalled=false so the terminal message degrades to
 				// plain "Done!".
 			}
-			// Best-effort CodeGraph setup: install the CLI and wire its MCP server
-			// into each selected agent. Runs in both install and config mode. The
-			// flow holds on "finalizing" (spinner) until this resolves; a failure
-			// surfaces as a warning row but never blocks completion. setupCodegraph
-			// never throws, but the catch is defensive.
-			setupCodegraph(installedTools)
+			// Best-effort CodeGraph wiring. The CLI install ran earlier — in the
+			// Install step (install mode) or right after login (config mode) — so
+			// first await that install (no-op in install mode, where the ref is
+			// null), then run `codegraph install` to wire the MCP server into each
+			// selected agent. The flow holds on "finalizing" (spinner) until this
+			// resolves; a failure surfaces as a warning row but never blocks
+			// completion. setupCodegraph never throws, but the catch is defensive.
+			Promise.resolve(codegraphInstallRef.current)
+				.then(() => setupCodegraph(installedTools))
 				.then(setCodegraphResult)
 				.catch((err: unknown) =>
 					setCodegraphResult({
@@ -711,7 +741,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 									<Text color="cyan">
 										<Spinner />
 									</Text>
-									<Text> Installing CodeGraph and wiring its MCP server…</Text>
+									<Text> Setting up CodeGraph…</Text>
 								</Box>
 							) : codegraphResult.status === "warning" ? (
 								<Box>

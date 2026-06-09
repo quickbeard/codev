@@ -52,9 +52,11 @@ beforeEach(() => {
 	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
 	// inline post-login refresh doesn't block tests on a real fetch.
 	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);
-	// The finalize Phase runs setupCodegraph (in config mode too), which shells
-	// out to npm / codegraph. Default it to a no-op so the config-mode tests
-	// stay isolated from the agent npm-install assertions below.
+	// Config mode installs the CodeGraph CLI right after login
+	// (ensureCodegraphInstalled) and wires it in finalize (setupCodegraph).
+	// Default both to no-ops so the config-mode tests stay isolated from the
+	// agent npm-install assertions below (which expect zero npm installs).
+	vi.spyOn(codegraph, "ensureCodegraphInstalled").mockResolvedValue(null);
 	vi.spyOn(codegraph, "setupCodegraph").mockResolvedValue({
 		status: "skipped",
 		targets: [],
@@ -261,8 +263,10 @@ describe("ConfigApp", () => {
 			return first.startsWith("npm i");
 		});
 		expect(npmInstallCalls).toHaveLength(0);
-		// CodeGraph setup still runs in config mode (the agent npm install is
-		// skipped, but CodeGraph wiring is not).
+		// CodeGraph still runs in config mode: the CLI is installed right after
+		// login (the agent npm install is skipped, but CodeGraph's is not), then
+		// the MCP server is wired in finalize.
+		expect(codegraph.ensureCodegraphInstalled).toHaveBeenCalled();
 		expect(codegraph.setupCodegraph).toHaveBeenCalledWith(["claude-code"]);
 		// Configure still ran for the selected tool.
 		expect(configureSpy).toHaveBeenCalledTimes(1);

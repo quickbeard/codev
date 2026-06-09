@@ -1,4 +1,9 @@
 import { type TaskItem, TaskList } from "@/components/TaskList.js";
+import {
+	CODEGRAPH_TASK_KEY,
+	codegraphTargets,
+	ensureCodegraphInstalled,
+} from "@/lib/codegraph.js";
 import type { Tool } from "@/lib/configure.js";
 import {
 	CLAUDE_CODE_INTELLIJ_PLUGIN_ID,
@@ -91,6 +96,23 @@ export function Install({ tools, onDone }: InstallProps) {
 			},
 		};
 	});
+
+	// When any selected agent maps to a CodeGraph target, install the CodeGraph
+	// CLI alongside the agents (it runs in parallel with them). Best-effort: a
+	// failure is a soft ▲ warning, never a hard ✗ — CodeGraph is an enhancement
+	// and must never drop an agent or trip the all-failed gate. SetupApp splits
+	// CODEGRAPH_TASK_KEY out of the survivor set (it isn't a Tool).
+	if (codegraphTargets(tools).length > 0) {
+		tasks.push({
+			key: CODEGRAPH_TASK_KEY,
+			label: "CodeGraph CLI",
+			run: async () => {
+				const err = await ensureCodegraphInstalled();
+				return err ? { warning: `CodeGraph CLI not installed: ${err}` } : null;
+			},
+		});
+	}
+
 	return (
 		<TaskList
 			tasks={tasks}

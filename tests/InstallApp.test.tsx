@@ -70,9 +70,11 @@ beforeEach(() => {
 	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
 	// inline post-install refresh doesn't block tests on a real fetch.
 	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);
-	// The finalize Phase runs setupCodegraph, which shells out to npm /
-	// codegraph. Default it to a no-op so full-flow tests neither hang nor hit
-	// the network; specific tests override this to assert the wiring.
+	// The Install step runs ensureCodegraphInstalled (npm i -g) and the finalize
+	// Phase runs setupCodegraph (codegraph install). Default both to no-ops so
+	// full-flow tests neither hang nor hit the network; specific tests override
+	// them to assert the wiring.
+	vi.spyOn(codegraph, "ensureCodegraphInstalled").mockResolvedValue(null);
 	vi.spyOn(codegraph, "setupCodegraph").mockResolvedValue({
 		status: "skipped",
 		targets: [],
@@ -430,8 +432,11 @@ describe("InstallApp fail-stop invariant", () => {
 		await pickFirstModel(stdin, frames);
 		await waitForFrame(frames, "Happy coding");
 
-		// Survivors of the install step are handed to setupCodegraph verbatim;
-		// the mapping/dedupe to `--target` is covered in lib/codegraph.test.ts.
+		// The CodeGraph CLI is installed during the Installing step (alongside
+		// the agents), then the finalize step wires the MCP server. Survivors are
+		// handed to setupCodegraph verbatim; the mapping/dedupe to `--target` is
+		// covered in lib/codegraph.test.ts.
+		expect(codegraph.ensureCodegraphInstalled).toHaveBeenCalled();
 		expect(codegraph.setupCodegraph).toHaveBeenCalledWith(["claude-code"]);
 		expect(allFrames(frames)).toContain("Wired CodeGraph into claude");
 	});

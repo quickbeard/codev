@@ -6,6 +6,7 @@ import {
 	type CodegraphTarget,
 	codegraphRunner,
 	codegraphTargets,
+	ensureCodegraphInstalled,
 	forwardToCodegraph,
 	runCodegraphInstall,
 	setupCodegraph,
@@ -99,6 +100,39 @@ describe("runCodegraphInstall", () => {
 	});
 });
 
+describe("ensureCodegraphInstalled", () => {
+	let execSpy: MockInstance;
+
+	beforeEach(() => {
+		execSpy = vi
+			.spyOn(npm, "execAsync")
+			.mockResolvedValue({ stdout: "", stderr: "", error: null });
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	test("runs `npm i -g` for the CodeGraph package", async () => {
+		const err = await ensureCodegraphInstalled();
+		expect(err).toBeNull();
+		expect(execSpy).toHaveBeenCalledWith("npm", [
+			"i",
+			"-g",
+			"@colbymchenry/codegraph",
+		]);
+	});
+
+	test("returns the error string on failure", async () => {
+		execSpy.mockResolvedValue({
+			stdout: "",
+			stderr: "npm exploded",
+			error: new Error("exit 1"),
+		});
+		expect(await ensureCodegraphInstalled()).toBe("npm exploded");
+	});
+});
+
 describe("setupCodegraph", () => {
 	let execSpy: MockInstance;
 
@@ -119,17 +153,15 @@ describe("setupCodegraph", () => {
 		expect(execSpy).not.toHaveBeenCalled();
 	});
 
-	test("installs the CLI then runs install for the mapped targets", async () => {
+	test("wires mapped targets via `codegraph install` only (no npm install)", async () => {
 		const result = await setupCodegraph(["claude-code", "vscode-claude-code"]);
 		expect(result.status).toBe("ok");
 		expect(result.targets).toEqual(["claude"]);
-		// First call: npm i -g; second: codegraph install.
-		expect(execSpy).toHaveBeenNthCalledWith(1, "npm", [
-			"i",
-			"-g",
-			"@colbymchenry/codegraph",
-		]);
-		expect(execSpy).toHaveBeenNthCalledWith(2, "codegraph", [
+		// The CLI install happens earlier now; setupCodegraph only wires the MCP
+		// server, so it makes exactly one execAsync call (codegraph install) and
+		// never `npm i -g`.
+		expect(execSpy).toHaveBeenCalledTimes(1);
+		expect(execSpy).toHaveBeenCalledWith("codegraph", [
 			"install",
 			"--target",
 			"claude",
@@ -139,27 +171,12 @@ describe("setupCodegraph", () => {
 		]);
 	});
 
-	test("warns (does not throw) when the CLI install fails, and skips install", async () => {
-		execSpy.mockResolvedValueOnce({
+	test("warns when codegraph install fails", async () => {
+		execSpy.mockResolvedValue({
 			stdout: "",
-			stderr: "npm exploded",
+			stderr: "install exploded",
 			error: new Error("exit 1"),
 		});
-		const result = await setupCodegraph(["codex"]);
-		expect(result.status).toBe("warning");
-		expect(result.message).toContain("npm exploded");
-		// codegraph install must NOT run if the CLI couldn't be installed.
-		expect(execSpy).toHaveBeenCalledTimes(1);
-	});
-
-	test("warns when codegraph install fails after a successful CLI install", async () => {
-		execSpy
-			.mockResolvedValueOnce({ stdout: "", stderr: "", error: null })
-			.mockResolvedValueOnce({
-				stdout: "",
-				stderr: "install exploded",
-				error: new Error("exit 1"),
-			});
 		const result = await setupCodegraph(["opencode"]);
 		expect(result.status).toBe("warning");
 		expect(result.message).toContain("install exploded");
