@@ -42,9 +42,9 @@ interface InstallProps {
 	// the list to either park at install-failed (empty) or advance to
 	// Configure with just the survivors.
 	onDone: (succeededKeys: string[]) => void;
-	// When false, skip the agent install rows and only install the CodeGraph
-	// CLI. Used by config mode, where the agents are already installed but
-	// CodeGraph still needs its global CLI. Defaults to true (install mode).
+	// When false, skip the agent install rows and only install CodeGraph. Used
+	// by config mode, where the agents are already installed but CodeGraph
+	// isn't. Defaults to true (install mode).
 	includeAgents?: boolean;
 }
 
@@ -103,11 +103,10 @@ export function Install({ tools, onDone, includeAgents = true }: InstallProps) {
 	});
 
 	// When any selected agent maps to a CodeGraph target, install CodeGraph
-	// alongside the agents (it runs in parallel with them). Labeled with the npm
-	// package name to match the agent rows. Best-effort: a failure is a soft ▲
-	// warning, never a hard ✗ — CodeGraph is an enhancement and must never drop
-	// an agent or trip the all-failed gate. SetupApp splits CODEGRAPH_TASK_KEY
-	// out of the survivor set (it isn't a Tool).
+	// alongside the agents (it runs in parallel with them). Best-effort: a
+	// failure is a soft ▲ warning, never a hard ✗ — CodeGraph is an enhancement
+	// and must never drop an agent or trip the all-failed gate. SetupApp splits
+	// CODEGRAPH_TASK_KEY out of the survivor set (it isn't a Tool).
 	if (codegraphTargets(tools).length > 0) {
 		tasks.push({
 			key: CODEGRAPH_TASK_KEY,

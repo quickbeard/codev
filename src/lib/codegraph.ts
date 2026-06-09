@@ -110,8 +110,8 @@ export interface CodegraphSetupResult {
 	message?: string;
 }
 
-// Best-effort CodeGraph MCP wiring for a tool selection. Assumes the CodeGraph
-// CLI is already installed — the global `npm i -g` happens earlier (the
+// Best-effort CodeGraph MCP wiring for a tool selection. Assumes CodeGraph is
+// already installed — the global `npm i -g` happens earlier (the
 // "Installing packages" step in install mode, or right after login in config
 // mode), so this only runs `codegraph install` to wire the MCP server into each
 // agent. Never throws: any failure (including the binary being absent because

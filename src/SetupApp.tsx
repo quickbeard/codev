@@ -324,7 +324,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 			}
 			// Config mode skips the *agent* install (they're treated as already
 			// installed, so the survivor set equals `tools`), but still installs
-			// the CodeGraph. When any selected agent maps to a CodeGraph
+			// CodeGraph. When any selected agent maps to a CodeGraph
 			// target, show the CodeGraph-only Install step right after login;
 			// otherwise skip straight to the post-login side-effects via proxy-url.
 			if (codegraphTargets(tools).length > 0) {
