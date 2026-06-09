@@ -16,11 +16,11 @@ Then run:
 codev install
 ```
 
-After install, type `claude`, `codex`, or `opencode` to launch.
+After install, go to your project and type `claude`, `codex`, or `opencode` to launch.
 
 ## CodeGraph integration
 
-When you run `codev install` (or `codev config`), CoDev also installs [CodeGraph](https://github.com/colbymchenry/codegraph) — a local, MCP-based code-intelligence server — and wires it into each agent you selected (Claude Code, Codex, OpenCode), user-wide (`--location global`). This step is best-effort: if it can't complete, CoDev prints a warning and finishes anyway. You can drive CodeGraph through CoDev — `codev codegraph <args>` is equivalent to `codegraph <args>`.
+When you run `codev install` (or `codev config`), CoDev also installs [CodeGraph](https://github.com/colbymchenry/codegraph) — a local, MCP-based code-intelligence server — and wires it into each agent you selected (Claude Code, Codex, OpenCode), user-wide (`--location global`). You can drive CodeGraph through CoDev — `codev codegraph <args>` is equivalent to `codegraph <args>`.
 
 ### Initialize your project
 
