@@ -113,8 +113,10 @@ function resolveProject(db: DB, cwd: string): ProjectMatch | null {
 }
 
 function listSessionRows(db: DB, match: ProjectMatch): SessionRow[] {
-	// `parent_id IS NULL` drops subagent sessions — they're folded into their
-	// spawning session, which already carries the spawn inline.
+	// `parent_id IS NULL` drops normal-mode subagent sessions — they're folded
+	// into their spawning session, which already carries the spawn inline.
+	// Headless subagents (spawned programmatically without parent_id) are left
+	// to appear as standalone sessions; their tokens are counted independently.
 	if (match.directoryFilter) {
 		return db
 			.prepare<[string, string], SessionRow>(
@@ -345,6 +347,49 @@ interface MessageMeta {
 	model?: { providerID?: string; modelID?: string };
 }
 
+interface ChildChars {
+	charsIn: number;
+	charsOut: number;
+}
+
+/**
+ * Recursively sum character counts from all descendant sessions (subagents
+ * spawned by this session and their own subagents). Only applicable when
+ * parent_id is set (normal interactive mode); headless subagents don't have
+ * parent_id and are uploaded as standalone sessions with their own counts.
+ */
+function collectDescendantChars(db: DB, sessionId: string): ChildChars {
+	const children = db
+		.prepare<[string], { id: string }>(
+			"SELECT id FROM session WHERE parent_id = ?",
+		)
+		.all(sessionId);
+
+	let charsIn = 0;
+	let charsOut = 0;
+
+	for (const child of children) {
+		const msgRows = readMessages(db, child.id);
+		for (const msg of msgRows) {
+			const meta = safeParse<MessageMeta>(msg.data);
+			const role = meta?.role === "assistant" ? "assistant" : "user";
+			const parts = readParts(db, child.id, msg.id);
+			let chars = 0;
+			for (const part of parts) {
+				const text = parsePart(part);
+				if (text) chars += text.length;
+			}
+			if (role === "user") charsIn += chars;
+			else charsOut += chars;
+		}
+		const nested = collectDescendantChars(db, child.id);
+		charsIn += nested.charsIn;
+		charsOut += nested.charsOut;
+	}
+
+	return { charsIn, charsOut };
+}
+
 function buildSession(row: SessionRow, db: DB): Session | null {
 	const messages: Message[] = [];
 	let firstUserMessage = "";
@@ -378,6 +423,12 @@ function buildSession(row: SessionRow, db: DB): Session | null {
 	if (messages.length === 0) return null;
 	const createdMs = unixToISO(row.time_created);
 	const updatedMs = unixToISO(row.time_updated);
+
+	// Aggregate token counts from descendant subagent sessions so the parent
+	// shows accurate totals even though child sessions aren't uploaded separately.
+	const { charsIn: subagentCharsIn, charsOut: subagentCharsOut } =
+		collectDescendantChars(db, row.id);
+
 	return {
 		id: row.id,
 		agent: "opencode",
@@ -386,6 +437,9 @@ function buildSession(row: SessionRow, db: DB): Session | null {
 		title: row.title || undefined,
 		firstUserMessage,
 		messages,
+		...(subagentCharsIn > 0 || subagentCharsOut > 0
+			? { subagentCharsIn, subagentCharsOut }
+			: {}),
 	};
 }
 

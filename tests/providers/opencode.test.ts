@@ -323,6 +323,77 @@ describe("openCodeProvider.listSessions", () => {
 		expect(sessions.map((s) => s.id)).toEqual(["ses-1"]);
 	});
 
+	test("rolls up subagent descendant char counts into parent session", async () => {
+		seedProjectAndSession();
+		const db = new Database(dbPath);
+		// Child session with parent_id = ses-1.
+		run(
+			db,
+			"INSERT INTO session (id, project_id, parent_id, slug, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			[
+				"ses-child",
+				"proj-1",
+				"ses-1",
+				"explore",
+				"Find staging models (@explore subagent)",
+				projectCwd,
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				Math.floor(Date.UTC(2026, 3, 27, 18, 41, 0) / 1000),
+			],
+		);
+		// User message in child: 10 chars.
+		run(
+			db,
+			"INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+			[
+				"msg-child-u",
+				"ses-child",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				JSON.stringify({ role: "user" }),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-child-u",
+				"msg-child-u",
+				"ses-child",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				JSON.stringify({ type: "text", text: "1234567890" }), // 10 chars
+			],
+		);
+		// Assistant message in child: 20 chars.
+		run(
+			db,
+			"INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+			[
+				"msg-child-a",
+				"ses-child",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 5) / 1000),
+				JSON.stringify({ role: "assistant" }),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-child-a",
+				"msg-child-a",
+				"ses-child",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 5) / 1000),
+				JSON.stringify({ type: "text", text: "12345678901234567890" }), // 20 chars
+			],
+		);
+		db.close();
+
+		const sessions = await openCodeProvider.listSessions(projectCwd);
+		const parent = sessions.find((s) => s.id === "ses-1");
+		expect(parent).toBeDefined();
+		expect(parent?.subagentCharsIn).toBe(10);
+		expect(parent?.subagentCharsOut).toBe(20);
+	});
+
 	test("returns empty list when no project matches the cwd", async () => {
 		seedProjectAndSession();
 		const otherCwd = join(tempHome, "elsewhere");
