@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import open from "open";
 import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
-import { loggedFetch } from "@/lib/log.js";
+import { logDebug, logError, loggedFetch, logWarn } from "@/lib/log.js";
 import { fetchCodevConfig } from "@/lib/proxy.js";
 
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
@@ -329,7 +329,13 @@ export async function login(
 	onLog: (msg: string) => void,
 	onReady: OnLoginReady,
 ): Promise<AuthData> {
-	onLog("Starting SSO login...");
+	// Tee every status line into the diagnostic log so login problems can be
+	// reconstructed without the TUI transcript.
+	const log = (msg: string) => {
+		logDebug(msg, { extra: { flow: "login" } });
+		onLog(msg);
+	};
+	log("Starting SSO login...");
 
 	// Dev escape hatch: when CODEV_BYPASS_LOGIN=1 is set, skip the OAuth flow
 	// entirely and persist a stub session. Useful when the SSO wrapper is down
@@ -339,7 +345,7 @@ export async function login(
 	// the upload daemon also see a "logged in" state — clear it with
 	// `codev logout` or by unsetting the env var + `codev remove`.
 	if (process.env.CODEV_BYPASS_LOGIN === "1") {
-		onLog("CODEV_BYPASS_LOGIN=1 — skipping SSO, using stub session.");
+		log("CODEV_BYPASS_LOGIN=1 — skipping SSO, using stub session.");
 		const authData: AuthData = {
 			access_token: "codev-bypass-no-sso",
 			id_token: "codev-bypass-no-sso",
@@ -352,20 +358,20 @@ export async function login(
 		};
 		saveAuth(authData);
 		clearForceLogin();
-		onLog(`Logged in as ${authData.user.email}`);
+		log(`Logged in as ${authData.user.email}`);
 		return authData;
 	}
 
 	const existing = loadAuth();
 	if (existing) {
-		onLog(`Already logged in as ${existing.user.email}`);
+		log(`Already logged in as ${existing.user.email}`);
 		return existing;
 	}
 
 	const stale = readAuthFile();
 	if (stale?.refresh_token) {
 		try {
-			onLog("Refreshing session...");
+			log("Refreshing session...");
 			const refreshed = await refreshTokens(stale.refresh_token);
 			const user = await fetchUserInfo(refreshed.access_token);
 			const authData: AuthData = {
@@ -380,10 +386,11 @@ export async function login(
 				},
 			};
 			saveAuth(authData);
-			onLog(`Logged in as ${authData.user.email}`);
+			log(`Logged in as ${authData.user.email}`);
 			return authData;
-		} catch {
-			onLog("Refresh failed, starting full login...");
+		} catch (err) {
+			logWarn("silent token refresh failed; starting full login", { err });
+			log("Refresh failed, starting full login...");
 		}
 	}
 
@@ -403,6 +410,9 @@ export async function login(
 	// auth on this machine" and skip the forced credential form.
 	const forceLogin =
 		!existsSync(authFilePath()) || existsSync(forceLoginPath());
+	logDebug(`starting authorization code flow (force-login: ${forceLogin})`, {
+		extra: { flow: "login", force_login: forceLogin },
+	});
 
 	const verifier = generateCodeVerifier();
 	const challenge = await generateCodeChallenge(verifier);
@@ -410,7 +420,7 @@ export async function login(
 	const nonce = crypto.randomUUID();
 
 	const { code, redirectUri } = await getAuthCode(
-		onLog,
+		log,
 		onReady,
 		state,
 		challenge,
@@ -435,7 +445,7 @@ export async function login(
 
 	saveAuth(authData);
 	clearForceLogin();
-	onLog(`Logged in as ${authData.user.email}`);
+	log(`Logged in as ${authData.user.email}`);
 	return authData;
 }
 
@@ -461,6 +471,7 @@ export async function refreshCodevConfig(
 		saveCodevConfig(config);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
+		logWarn("could not refresh CoDev config", { err });
 		onLog(`Warning: could not refresh CoDev config: ${message}`);
 	}
 }
@@ -569,6 +580,7 @@ async function getAuthCode(
 		const failWith = (err: Error) => {
 			if (settled) return;
 			settled = true;
+			logError("login failed", { err, extra: { flow: "login" } });
 			finish();
 			server.close();
 			reject(err);

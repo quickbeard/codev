@@ -1,3 +1,5 @@
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import {
 	existsSync,
 	mkdirSync,
@@ -10,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { logTaskResult } from "@/components/TaskList.js";
 import {
 	currentTraceId,
 	initLogging,
@@ -21,6 +24,8 @@ import {
 	pruneLogs,
 	resetLogging,
 } from "@/lib/log.js";
+import { execAsync } from "@/lib/npm.js";
+import { runAgent, spawner as runSpawner } from "@/lib/run.js";
 
 let tempDir: string;
 let logDir: string;
@@ -421,5 +426,108 @@ describe("loggedFetch", () => {
 		} finally {
 			fetchSpy.mockRestore();
 		}
+	});
+});
+
+describe("execAsync logging", () => {
+	test("writes spawn and exit documents, with exit code and stderr tail on failure", async () => {
+		initLogging("install", [], { installProcessHooks: false });
+		const ok = await execAsync(process.execPath, ["-e", "process.exit(0)"]);
+		expect(ok.error).toBeNull();
+		const fail = await execAsync(process.execPath, [
+			"-e",
+			"process.stderr.write('boom-marker');process.exit(3)",
+		]);
+		expect(fail.error).not.toBeNull();
+
+		const docs = readDocs();
+		const starts = docs.filter(
+			(d) => (d.event as { action?: string })?.action === "process.spawn",
+		);
+		expect(starts).toHaveLength(2);
+		const exits = docs.filter(
+			(d) => (d.event as { action?: string })?.action === "process.exit",
+		) as {
+			log?: { level?: string };
+			event?: { outcome?: string; duration?: number };
+			codev?: { exit_code?: unknown; stderr_tail?: string };
+		}[];
+		expect(exits).toHaveLength(2);
+		expect(exits[0]?.event?.outcome).toBe("success");
+		expect(exits[1]?.event?.outcome).toBe("failure");
+		expect(exits[1]?.log?.level).toBe("warn");
+		expect(exits[1]?.codev?.exit_code).toBe(3);
+		expect(exits[1]?.codev?.stderr_tail).toContain("boom-marker");
+		expect(typeof exits[1]?.event?.duration).toBe("number");
+	});
+});
+
+describe("runAgent logging", () => {
+	test("logs launch and exit without recording agent arg contents", async () => {
+		initLogging("codex", [], { installProcessHooks: false });
+		const fakeChild = new EventEmitter() as unknown as ChildProcess;
+		const spawnSpy = vi.spyOn(runSpawner, "spawn").mockImplementation((() => {
+			queueMicrotask(() =>
+				(fakeChild as unknown as EventEmitter).emit("exit", 2, null),
+			);
+			return fakeChild;
+		}) as never);
+		const stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockImplementation(() => true);
+		try {
+			// Use codex: a non-zero `claude` exit additionally probes the native
+			// binary via a real `npm root -g`, which would interleave its own
+			// process documents into the assertion window.
+			const code = await runAgent("codex", ["-p", "SECRET-PROMPT-MARKER"]);
+			expect(code).toBe(2);
+
+			const docs = readDocs();
+			const spawn = docs.find(
+				(d) => (d.event as { action?: string })?.action === "process.spawn",
+			) as { codev?: { agent?: string; args_count?: number } };
+			expect(spawn?.codev?.agent).toBe("codex");
+			expect(spawn?.codev?.args_count).toBe(2);
+			const exit = docs.find(
+				(d) => (d.event as { action?: string })?.action === "process.exit",
+			) as {
+				log?: { level?: string };
+				event?: { outcome?: string };
+				codev?: { exit_code?: number };
+			};
+			expect(exit?.event?.outcome).toBe("failure");
+			expect(exit?.log?.level).toBe("warn");
+			expect(exit?.codev?.exit_code).toBe(2);
+			// Agent args can carry prompt text — contents must never reach disk.
+			expect(rawLog()).not.toContain("SECRET-PROMPT-MARKER");
+		} finally {
+			spawnSpy.mockRestore();
+			stderrSpy.mockRestore();
+		}
+	});
+});
+
+describe("logTaskResult", () => {
+	test("levels and outcomes mirror the task row state", () => {
+		initLogging("install", [], { installProcessHooks: false });
+		logTaskResult("a", "pkg-a", null);
+		logTaskResult("b", "pkg-b", "exploded");
+		logTaskResult("c", "pkg-c", { warning: "soft trouble" });
+
+		const docs = readDocs().filter(
+			(d) => (d.event as { action?: string })?.action === "task.result",
+		) as {
+			log?: { level?: string };
+			event?: { outcome?: string };
+			codev?: { key?: string; error?: string; warning?: string };
+		}[];
+		expect(docs).toHaveLength(3);
+		expect(docs[0]?.log?.level).toBe("info");
+		expect(docs[0]?.event?.outcome).toBe("success");
+		expect(docs[1]?.log?.level).toBe("error");
+		expect(docs[1]?.event?.outcome).toBe("failure");
+		expect(docs[1]?.codev?.error).toBe("exploded");
+		expect(docs[2]?.log?.level).toBe("warn");
+		expect(docs[2]?.codev?.warning).toBe("soft trouble");
 	});
 });

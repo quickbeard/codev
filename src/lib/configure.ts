@@ -17,6 +17,7 @@ import {
 	CLAUDE_AUTO_COMPACT_WINDOW,
 	CLAUDE_AUTOCOMPACT_PCT,
 } from "@/lib/const.js";
+import { logInfo } from "@/lib/log.js";
 
 export type Tool =
 	| "claude-code"
@@ -447,18 +448,26 @@ function restoreKind(kind: BackupKind): RestoreResult {
 	const sourcePath = sourcePathOf(kind);
 	const backupPath = `${sourcePath}.backup`;
 
+	const log = (result: RestoreResult): RestoreResult => {
+		logInfo(`restore ${kind}: ${result.status}`, {
+			action: "restore.kind",
+			extra: { kind, status: result.status, source_path: result.sourcePath },
+		});
+		return result;
+	};
+
 	if (existsSync(backupPath)) {
 		rmSync(sourcePath, { force: true });
 		renameSync(backupPath, sourcePath);
-		return { status: "restored", sourcePath, backupPath };
+		return log({ status: "restored", sourcePath, backupPath });
 	}
 
 	if (existsSync(sourcePath)) {
 		rmSync(sourcePath, { force: true });
-		return { status: "deleted-live", sourcePath, backupPath };
+		return log({ status: "deleted-live", sourcePath, backupPath });
 	}
 
-	return { status: "noop", sourcePath, backupPath };
+	return log({ status: "noop", sourcePath, backupPath });
 }
 
 // Claude tools own three files (settings.json, .claude.json,

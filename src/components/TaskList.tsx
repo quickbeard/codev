@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
+import { logError, logInfo, logWarn } from "@/lib/log.js";
 
 // Three terminal outcomes for a task:
 //   - `null` → succeeded silently (green ✓ "Installed pkg-x"). Key is
@@ -14,6 +15,33 @@ import { useEffect, useRef, useState } from "react";
 //     plugin installs so a transient marketplace/network issue doesn't drop
 //     the row from the survivor set.
 export type TaskRunResult = string | null | { warning: string };
+
+// Diagnostic-log mirror of a task row's terminal state, leveled to match the
+// icon (✓ info, ▲ warn, ✗ error). Exported for tests.
+export function logTaskResult(
+	key: string,
+	label: string,
+	result: TaskRunResult,
+): void {
+	if (result === null) {
+		logInfo(`task ok: ${label}`, {
+			action: "task.result",
+			outcome: "success",
+			extra: { key, label },
+		});
+	} else if (typeof result === "string") {
+		logError(`task failed: ${label}: ${result}`, {
+			action: "task.result",
+			outcome: "failure",
+			extra: { key, label, error: result },
+		});
+	} else {
+		logWarn(`task warning: ${label}: ${result.warning}`, {
+			action: "task.result",
+			extra: { key, label, warning: result.warning },
+		});
+	}
+}
 
 export interface TaskItem {
 	key: string;
@@ -61,6 +89,7 @@ export function TaskList({ tasks, verb, onDone }: TaskListProps) {
 		setRows((prev) => prev.map((r) => ({ ...r, status: "running" })));
 		for (const [i, task] of tasks.entries()) {
 			task.run().then((result) => {
+				logTaskResult(task.key, task.label, result);
 				setRows((prev) =>
 					prev.map((r, idx) => {
 						if (idx !== i) return r;

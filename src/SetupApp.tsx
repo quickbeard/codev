@@ -59,6 +59,7 @@ import {
 	resetClaudeAuth,
 	type Tool,
 } from "@/lib/configure.js";
+import { logDebug, logError } from "@/lib/log.js";
 import { validateApiKey } from "@/lib/proxy.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 import { disableClaudeCodeLoginPrompt } from "@/lib/vscode-settings.js";
@@ -213,6 +214,15 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// User's proxy-url pick, kept so the read-only history row above later
 	// steps shows which option was chosen and (for custom) the URL entered.
 	const [proxyChoice, setProxyChoice] = useState<ProxyUrlChoice | null>(null);
+
+	// Diagnostic trail of the wizard's progress — one document per phase
+	// transition, so a stuck or aborted run shows exactly where it stopped.
+	useEffect(() => {
+		logDebug(`setup step: ${step}`, {
+			action: "step.transition",
+			extra: { step, mode },
+		});
+	}, [step, mode]);
 
 	const handleToolSelectConfirm = (selected: ToolSelectValue[]) => {
 		const hasClaudeCodeExt = selected.includes(CLAUDE_CODE_EXT_SENTINEL);
@@ -507,8 +517,9 @@ export function SetupApp({ mode }: SetupAppProps) {
 						// it alone — the extension still needs its normal login there.
 						disableClaudeCodeLoginPrompt();
 					}
-				} catch {
+				} catch (err) {
 					// Swallow — the flow always advances.
+					logError("claude auth backup/reset failed during finalize", { err });
 				}
 			}
 			try {
@@ -517,9 +528,10 @@ export function SetupApp({ mode }: SetupAppProps) {
 					.filter((agent) => agent !== null);
 				if (shimAgents.length > 0) installShims(shimAgents);
 				setShimsInstalled(true);
-			} catch {
+			} catch (err) {
 				// Leave shimsInstalled=false so the terminal message degrades to
 				// plain "Done!".
+				logError("shim install failed during finalize", { err });
 			}
 			// Best-effort CodeGraph wiring. The CLI install already ran in the
 			// Install step (both install and config mode), so this only runs

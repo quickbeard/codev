@@ -24,7 +24,14 @@ import {
 	refreshCodevConfig,
 } from "@/lib/auth.js";
 import { runExport } from "@/lib/export.js";
-import { currentTraceId, loggedFetch } from "@/lib/log.js";
+import {
+	currentTraceId,
+	logDebug,
+	logError,
+	loggedFetch,
+	logInfo,
+	logWarn,
+} from "@/lib/log.js";
 import { projectLogsDir } from "@/lib/paths.js";
 import { fetchSupabaseSession } from "@/lib/proxy.js";
 import { getSupabaseConfig, type SupabaseConfig } from "@/lib/supabase.js";
@@ -83,8 +90,16 @@ export async function runUpload({
 	onLoginUrl,
 	onManualSubmit,
 }: UploadOptions = {}): Promise<UploadSummary> {
-	onStatus("Exporting local conversations...");
-	await runExport(onStatus);
+	// Tee every status line into the diagnostic log so a failed run can be
+	// reconstructed without the TUI transcript. ensureAuth gets the RAW
+	// onStatus — login() tees its own messages, and wrapping both would
+	// double-log the login flow.
+	const status = (message: string) => {
+		logDebug(message, { extra: { flow: "upload" } });
+		onStatus(message);
+	};
+	status("Exporting local conversations...");
+	await runExport(status);
 
 	const outDir = projectLogsDir(cwd);
 	const files = listMarkdownLogs(outDir);
@@ -107,12 +122,23 @@ export async function runUpload({
 	// guarantees auth.access_token is fresh, so refreshCodevConfig will
 	// authenticate against the proxy with a valid bearer.
 	try {
-		return await runSupabaseUpload(outDir, files, auth, onStatus);
+		return await runSupabaseUpload(outDir, files, auth, status);
 	} catch (err) {
-		if (!isRefreshableError(err)) throw err;
-		onStatus("Refreshing CoDev config and retrying...");
-		await refreshCodevConfig(auth.access_token, onStatus);
-		return await runSupabaseUpload(outDir, files, auth, onStatus);
+		if (!isRefreshableError(err)) {
+			logError("upload failed", { err });
+			throw err;
+		}
+		logWarn("refreshable upload error; refreshing config and retrying", {
+			err,
+		});
+		status("Refreshing CoDev config and retrying...");
+		await refreshCodevConfig(auth.access_token, status);
+		try {
+			return await runSupabaseUpload(outDir, files, auth, status);
+		} catch (retryErr) {
+			logError("upload failed after config refresh", { err: retryErr });
+			throw retryErr;
+		}
 	}
 }
 
@@ -145,11 +171,36 @@ async function runSupabaseUpload(
 		try {
 			await uploadFile(config, uploadToken, candidate);
 			summary.uploaded++;
+			logDebug(`uploaded ${basename(candidate.path)}`, {
+				action: "upload.file",
+				outcome: "success",
+				extra: { file: basename(candidate.path) },
+			});
 		} catch (err) {
 			summary.failed++;
 			summary.errors.push({ file: candidate.path, message: String(err) });
+			logWarn(`upload failed: ${basename(candidate.path)}`, {
+				action: "upload.file",
+				outcome: "failure",
+				err,
+				extra: { file: candidate.path },
+			});
 		}
 	}
+	logInfo(
+		`upload summary: ${summary.uploaded}/${summary.found} uploaded, ` +
+			`${summary.skipped} skipped, ${summary.failed} failed`,
+		{
+			action: "upload.summary",
+			outcome: summary.failed === 0 ? "success" : "failure",
+			extra: {
+				found: summary.found,
+				uploaded: summary.uploaded,
+				skipped: summary.skipped,
+				failed: summary.failed,
+			},
+		},
+	);
 	return summary;
 }
 
@@ -578,10 +629,15 @@ export function spawnUploadDaemon(): void {
 				},
 			);
 			child.unref();
+			logDebug("spawned upload daemon", {
+				action: "process.spawn",
+				extra: { pid: child.pid ?? null },
+			});
 		} finally {
 			closeSync(logFd);
 		}
-	} catch {
+	} catch (err) {
 		// Never block the agent on a failed daemon launch.
+		logWarn("could not spawn upload daemon", { err });
 	}
 }

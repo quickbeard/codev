@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Tool } from "@/lib/configure.js";
+import { logDebug, logWarn } from "@/lib/log.js";
 
 // Tools installed via npm-global. Extension/plugin variants (Claude Code +
 // Continue) are not npm packages — VS Code installs them via
@@ -59,12 +60,47 @@ export interface ExecResult {
 }
 
 export function execAsync(file: string, args: string[]): Promise<ExecResult> {
+	// Every child process codev shells out to funnels through here (npm, the
+	// agent --version probes, `code --install-extension`, JetBrains CLIs,
+	// codegraph), so this one seam gives the diagnostic log full child-process
+	// coverage: a start document, then an exit document with duration and — on
+	// failure — the exit code and a stderr tail.
+	logDebug(`exec: ${file} ${args.join(" ")}`, {
+		action: "process.spawn",
+		eventType: "start",
+		extra: { command: file, args },
+	});
+	const startedAt = Date.now();
 	return new Promise((resolve) => {
 		const done = (
 			error: NodeJS.ErrnoException | null,
 			stdout: string,
 			stderr: string,
 		) => {
+			const durationMs = Date.now() - startedAt;
+			if (error) {
+				logWarn(`exec failed: ${file} ${args.join(" ")}`, {
+					action: "process.exit",
+					eventType: "end",
+					outcome: "failure",
+					durationMs,
+					err: error,
+					extra: {
+						command: file,
+						args,
+						exit_code: error.code ?? null,
+						stderr_tail: (stderr ?? "").slice(-2048),
+					},
+				});
+			} else {
+				logDebug(`exec ok: ${file} ${args.join(" ")}`, {
+					action: "process.exit",
+					eventType: "end",
+					outcome: "success",
+					durationMs,
+					extra: { command: file, args },
+				});
+			}
 			resolve({
 				stdout: stdout ?? "",
 				stderr: stderr ?? "",

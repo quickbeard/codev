@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { initLogging, logFileName, resetLogging } from "@/lib/log.js";
 import { runUploadDaemon, spawner, spawnUploadDaemon } from "@/lib/upload.js";
 
 let tempHome: string;
@@ -213,6 +214,57 @@ describe("runUploadDaemon", () => {
 		expect(status.summary).toBeUndefined();
 		expect(readFileSync(logPath(), "utf-8")).toContain("Failed:");
 		expect(existsSync(lockPath())).toBe(false);
+	});
+
+	test("writes flow, upload.file, and upload.summary diagnostic documents", async () => {
+		const diagDir = join(tempHome, "diag");
+		vi.stubEnv("CODEV_LOG_DIR", diagDir);
+		initLogging("upload", ["--daemon"], { installProcessHooks: false });
+		try {
+			writeAuth();
+			writeLog();
+			mockUploadHappyPath();
+
+			const code = await runUploadDaemon();
+			expect(code).toBe(0);
+
+			const docs = readFileSync(join(diagDir, logFileName(new Date())), "utf-8")
+				.trim()
+				.split("\n")
+				.map(
+					(l) =>
+						JSON.parse(l) as {
+							event?: { action?: string; outcome?: string };
+							codev?: { flow?: string; endpoint?: string };
+						},
+				);
+			// Status tee from runUpload.
+			expect(docs.some((d) => d.codev?.flow === "upload")).toBe(true);
+			// Per-file outcome + run summary.
+			expect(
+				docs.some(
+					(d) =>
+						d.event?.action === "upload.file" && d.event?.outcome === "success",
+				),
+			).toBe(true);
+			expect(
+				docs.some(
+					(d) =>
+						d.event?.action === "upload.summary" &&
+						d.event?.outcome === "success",
+				),
+			).toBe(true);
+			// loggedFetch documents from the Supabase pipeline.
+			expect(
+				docs.some(
+					(d) =>
+						d.event?.action === "http.request" &&
+						d.codev?.endpoint === "supabase.presign",
+				),
+			).toBe(true);
+		} finally {
+			resetLogging();
+		}
 	});
 
 	test("per-file upload failure leaves ok=false with errors and releases lock", async () => {

@@ -7,6 +7,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { logDebug, logInfo, logWarn } from "@/lib/log.js";
 import { renderMarkdown } from "@/lib/markdown.js";
 import {
 	agentLogsDir,
@@ -69,6 +70,7 @@ export function migrateLegacyAgentLogs(): void {
 	} catch {
 		return; // No legacy dir — nothing to migrate.
 	}
+	let moved = 0;
 	for (const entry of entries) {
 		if (!entry.isDirectory()) continue;
 		const to = join(targetRoot, entry.name);
@@ -76,9 +78,15 @@ export function migrateLegacyAgentLogs(): void {
 			if (existsSync(to)) continue; // Re-exported already; keep the newer copy.
 			mkdirSync(targetRoot, { recursive: true });
 			renameSync(join(legacyRoot, entry.name), to);
+			moved++;
 		} catch {
 			// Best-effort.
 		}
+	}
+	if (moved > 0) {
+		logInfo(`migrated ${moved} legacy export folder(s) to agent-logs`, {
+			extra: { moved },
+		});
 	}
 }
 
@@ -106,6 +114,12 @@ export async function runExport(
 			provider = await load();
 		} catch (err) {
 			summary.errors.push({ agent, message: String(err) });
+			logWarn(`provider ${agent} failed to load`, {
+				action: "export.provider",
+				outcome: "failure",
+				err,
+				extra: { agent },
+			});
 			continue;
 		}
 		let active: boolean;
@@ -113,10 +127,20 @@ export async function runExport(
 			active = await provider.detect(cwd);
 		} catch (err) {
 			summary.errors.push({ agent: provider.agent, message: String(err) });
+			logWarn(`provider ${agent} detect failed`, {
+				action: "export.provider",
+				outcome: "failure",
+				err,
+				extra: { agent },
+			});
 			continue;
 		}
 		if (!active) {
 			summary.skipped.push(provider.agent);
+			logDebug(`provider ${agent} inactive for this project`, {
+				action: "export.provider",
+				extra: { agent, skipped: true },
+			});
 			continue;
 		}
 
@@ -126,11 +150,21 @@ export async function runExport(
 			sessions = await provider.listSessions(cwd);
 		} catch (err) {
 			summary.errors.push({ agent: provider.agent, message: String(err) });
+			logWarn(`provider ${agent} failed to read sessions`, {
+				action: "export.provider",
+				outcome: "failure",
+				err,
+				extra: { agent },
+			});
 			continue;
 		}
 
 		if (sessions.length === 0) {
 			summary.skipped.push(provider.agent);
+			logDebug(`provider ${agent} has no sessions for this project`, {
+				action: "export.provider",
+				extra: { agent, skipped: true },
+			});
 			continue;
 		}
 
@@ -147,6 +181,11 @@ export async function runExport(
 			summary.byAgent[provider.agent] =
 				(summary.byAgent[provider.agent] ?? 0) + 1;
 		}
+		logInfo(`exported ${sessions.length} ${provider.agent} session(s)`, {
+			action: "export.provider",
+			outcome: "success",
+			extra: { agent: provider.agent, sessions: sessions.length },
+		});
 	}
 
 	stats.flush(join(outDir, "statistics.json"));
