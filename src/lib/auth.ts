@@ -14,6 +14,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import open from "open";
 import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
+import { loggedFetch } from "@/lib/log.js";
 import { fetchCodevConfig } from "@/lib/proxy.js";
 
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
@@ -281,7 +282,7 @@ async function revokeToken(
 	tokenTypeHint: "access_token" | "refresh_token",
 ): Promise<void> {
 	try {
-		await fetch(endpoint, {
+		await loggedFetch("sso.revoke", endpoint, {
 			method: "POST",
 			headers: { "Content-Type": "application/x-www-form-urlencoded" },
 			body: new URLSearchParams({
@@ -710,7 +711,7 @@ async function exchangeCode(
 	redirectUri: string,
 	codeVerifier: string,
 ): Promise<TokenResponse> {
-	const res = await fetch(`${SSO_URL}/token`, {
+	const res = await loggedFetch("sso.token", `${SSO_URL}/token`, {
 		method: "POST",
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({
@@ -732,7 +733,7 @@ async function exchangeCode(
 }
 
 async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
-	const res = await fetch(`${SSO_URL}/token`, {
+	const res = await loggedFetch("sso.refresh", `${SSO_URL}/token`, {
 		method: "POST",
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({
@@ -751,7 +752,7 @@ async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
 }
 
 async function fetchUserInfo(accessToken: string) {
-	const res = await fetch(`${SSO_URL}/userinfo`, {
+	const res = await loggedFetch("sso.userinfo", `${SSO_URL}/userinfo`, {
 		headers: { Authorization: `Bearer ${accessToken}` },
 		signal: AbortSignal.timeout(SSO_FETCH_TIMEOUT_MS),
 	});

@@ -24,7 +24,7 @@ import {
 	refreshCodevConfig,
 } from "@/lib/auth.js";
 import { runExport } from "@/lib/export.js";
-import { currentTraceId } from "@/lib/log.js";
+import { currentTraceId, loggedFetch } from "@/lib/log.js";
 import { projectLogsDir } from "@/lib/paths.js";
 import { fetchSupabaseSession } from "@/lib/proxy.js";
 import { getSupabaseConfig, type SupabaseConfig } from "@/lib/supabase.js";
@@ -254,7 +254,7 @@ async function fetchExistingUploads(
 			"id,local_file_path,local_content_hash,uploaded_at",
 		);
 		url.searchParams.set("order", "uploaded_at.desc");
-		const res = await fetch(url, {
+		const res = await loggedFetch("supabase.conversations", url, {
 			headers: {
 				apikey: config.anonKey,
 				Authorization: `Bearer ${accessToken}`,
@@ -299,15 +299,19 @@ async function presignUpload(
 	accessToken: string,
 	filename: string,
 ): Promise<PresignResponse> {
-	const res = await fetch(`${config.url}/functions/v1/presign-upload`, {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${accessToken}`,
-			"Content-Type": "application/json",
+	const res = await loggedFetch(
+		"supabase.presign",
+		`${config.url}/functions/v1/presign-upload`,
+		{
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ filename }),
+			signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
 		},
-		body: JSON.stringify({ filename }),
-		signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
-	});
+	);
 	if (!res.ok) {
 		throw new Error(
 			`presign-upload failed (${res.status}): ${await res.text()}`,
@@ -318,7 +322,7 @@ async function presignUpload(
 
 async function putGzip(path: string, uploadUrl: string): Promise<void> {
 	const payload = gzipSync(readFileSync(path));
-	const res = await fetch(uploadUrl, {
+	const res = await loggedFetch("supabase.storage-put", uploadUrl, {
 		method: "PUT",
 		headers: {
 			"Content-Type": "text/markdown",
@@ -341,26 +345,30 @@ async function confirmUpload(
 	candidate: UploadCandidate,
 	stat: Stats,
 ): Promise<void> {
-	const res = await fetch(`${config.url}/functions/v1/confirm-upload`, {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${accessToken}`,
-			"Content-Type": "application/json",
+	const res = await loggedFetch(
+		"supabase.confirm",
+		`${config.url}/functions/v1/confirm-upload`,
+		{
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				conversationId: presign.conversationId,
+				storagePath: presign.storagePath,
+				filename: basename(candidate.path),
+				fileSizeBytes: stat.size,
+				fileFormat: "markdown",
+				fileLastModified: stat.mtime.toISOString(),
+				localFilePath: candidate.path,
+				localContentHash: candidate.hash,
+				previousVersionId: candidate.previousVersionId,
+				encoding: "gzip",
+			}),
+			signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
 		},
-		body: JSON.stringify({
-			conversationId: presign.conversationId,
-			storagePath: presign.storagePath,
-			filename: basename(candidate.path),
-			fileSizeBytes: stat.size,
-			fileFormat: "markdown",
-			fileLastModified: stat.mtime.toISOString(),
-			localFilePath: candidate.path,
-			localContentHash: candidate.hash,
-			previousVersionId: candidate.previousVersionId,
-			encoding: "gzip",
-		}),
-		signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
-	});
+	);
 	if (!res.ok) {
 		throw new Error(
 			`confirm-upload failed (${res.status}): ${await res.text()}`,

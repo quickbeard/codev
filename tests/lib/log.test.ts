@@ -16,6 +16,7 @@ import {
 	logDebug,
 	logError,
 	logFileName,
+	loggedFetch,
 	logInfo,
 	pruneLogs,
 	resetLogging,
@@ -289,5 +290,136 @@ describe("pruneLogs", () => {
 
 	test("is a no-op on a missing directory", () => {
 		expect(() => pruneLogs(join(tempDir, "absent"))).not.toThrow();
+	});
+});
+
+describe("loggedFetch", () => {
+	test("passes through and writes start + completion documents", async () => {
+		initLogging("upload", [], { installProcessHooks: false });
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response("ok", { status: 200 }));
+		try {
+			const res = await loggedFetch(
+				"proxy.config",
+				"https://proxy.example.com/codev-proxy/config?x=1",
+				{
+					method: "POST",
+					headers: { Authorization: "Bearer topsecrettokenvalue" },
+				},
+			);
+			expect(await res.text()).toBe("ok");
+
+			const docs = readDocs();
+			const start = docs.at(-2) as {
+				log?: { level?: string };
+				event?: { action?: string; type?: string[] };
+				codev?: { endpoint?: string };
+				url?: { domain?: string; path?: string };
+			};
+			const end = docs.at(-1) as {
+				event?: {
+					action?: string;
+					type?: string[];
+					outcome?: string;
+					duration?: number;
+				};
+				http?: {
+					request?: { method?: string };
+					response?: { status_code?: number };
+				};
+				codev?: { endpoint?: string };
+			};
+			expect(start.event?.action).toBe("http.request");
+			expect(start.event?.type).toEqual(["start"]);
+			expect(start.codev?.endpoint).toBe("proxy.config");
+			expect(start.url?.domain).toBe("proxy.example.com");
+			expect(start.url?.path).toBe("/codev-proxy/config");
+			expect(end.event?.type).toEqual(["end"]);
+			expect(end.event?.outcome).toBe("success");
+			expect(end.http?.request?.method).toBe("POST");
+			expect(end.http?.response?.status_code).toBe(200);
+			expect(typeof end.event?.duration).toBe("number");
+			// Request headers are never serialized — the bearer value must not
+			// appear anywhere in the file.
+			expect(rawLog()).not.toContain("topsecrettokenvalue");
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	test("logs non-2xx at warn with a scrubbed body and leaves the caller's stream readable", async () => {
+		initLogging("upload", [], { installProcessHooks: false });
+		const body = `denied: jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.c2ln expired. ${"x".repeat(3000)}`;
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response(body, { status: 401 }));
+		try {
+			const res = await loggedFetch(
+				"supabase.presign",
+				"https://s.example.com/functions/v1/presign-upload",
+			);
+			expect(res.status).toBe(401);
+			// The logged clone must not consume the caller's body.
+			expect(await res.text()).toBe(body);
+
+			const end = readDocs().at(-1) as {
+				log?: { level?: string };
+				event?: { outcome?: string };
+				http?: { response?: { status_code?: number } };
+				codev?: { response_body?: string };
+			};
+			expect(end.log?.level).toBe("warn");
+			expect(end.event?.outcome).toBe("failure");
+			expect(end.http?.response?.status_code).toBe(401);
+			expect(end.codev?.response_body).toContain("[REDACTED:jwt]");
+			expect(end.codev?.response_body).toContain("…[truncated]");
+			expect(rawLog()).not.toContain("eyJzdWIiOiJ1c2VyIn0");
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	test("logs thrown fetch errors at error level and rethrows", async () => {
+		initLogging("upload", [], { installProcessHooks: false });
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockRejectedValue(new TypeError("fetch failed"));
+		try {
+			await expect(
+				loggedFetch("sso.token", "https://sso.example.com/token", {
+					method: "POST",
+				}),
+			).rejects.toThrow("fetch failed");
+
+			const end = readDocs().at(-1) as {
+				log?: { level?: string };
+				event?: { outcome?: string };
+				error?: { message?: string; type?: string };
+			};
+			expect(end.log?.level).toBe("error");
+			expect(end.event?.outcome).toBe("failure");
+			expect(end.error?.message).toBe("fetch failed");
+			expect(end.error?.type).toBe("TypeError");
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	test("is a plain fetch passthrough when logging is uninitialized", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response("nope", { status: 500 }));
+		try {
+			const res = await loggedFetch(
+				"gateway.models",
+				"https://gw.example.com/v1/models",
+			);
+			expect(res.status).toBe(500);
+			expect(await res.text()).toBe("nope");
+			expect(existsSync(logDir)).toBe(false);
+		} finally {
+			fetchSpy.mockRestore();
+		}
 	});
 });

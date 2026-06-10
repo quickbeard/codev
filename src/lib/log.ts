@@ -52,6 +52,10 @@ export interface LogFields {
 	// http.request, process.spawn, process.exit, step.transition, task.result,
 	// export.provider, upload.file, crash.
 	action?: string;
+	// ECS event.type — distinguishes a begin document ("start") from its
+	// completion ("end") without forking event.action. Start documents are the
+	// evidence trail when an operation hangs and never completes.
+	eventType?: "start" | "end";
 	outcome?: "success" | "failure";
 	durationMs?: number;
 	// Anything Error-shaped; mapped to ECS error.message/type/stack_trace.
@@ -199,6 +203,93 @@ export function logError(message: string, fields: LogFields = {}): void {
 	writeDoc("error", message, fields);
 }
 
+const ERROR_BODY_MAX_CHARS = 2048;
+
+// Read an error response's body from a CLONE so the caller's own
+// res.text()/res.json() still sees the original stream untouched.
+async function errorBody(res: Response): Promise<string> {
+	try {
+		if (typeof res.clone !== "function") return "";
+		const text = await res.clone().text();
+		return text.length > ERROR_BODY_MAX_CHARS
+			? `${text.slice(0, ERROR_BODY_MAX_CHARS)}…[truncated]`
+			: text;
+	} catch {
+		return "";
+	}
+}
+
+// Instrumented fetch for codev's direct network calls (SSO, codev-proxy,
+// gateway, Supabase). `endpoint` is a stable label (e.g. "proxy.config",
+// "supabase.presign") persisted as codev.endpoint so failures group cleanly.
+//
+// Writes a start document (the evidence trail when a request hangs and never
+// completes), then a completion document with status + duration — success at
+// debug, non-2xx at warn (the caller decides whether that status is fatal and
+// throws its own error), thrown fetch errors (network/timeout/abort) at error
+// before rethrowing. Request headers and bodies are never logged — they carry
+// bearer tokens; error response bodies are captured from a clone, truncated,
+// and pass through the same line scrubbing as every other document. With
+// logging disabled this is a plain fetch passthrough.
+export async function loggedFetch(
+	endpoint: string,
+	input: string | URL,
+	init?: RequestInit,
+): Promise<Response> {
+	const url = String(input);
+	const method = init?.method ?? "GET";
+	logDebug(`http ${method} ${endpoint}`, {
+		action: "http.request",
+		eventType: "start",
+		url,
+		method,
+		extra: { endpoint },
+	});
+	const startedAt = Date.now();
+	try {
+		const res = await fetch(input, init);
+		const durationMs = Date.now() - startedAt;
+		if (res.ok) {
+			logDebug(`http ${method} ${endpoint} → ${res.status}`, {
+				action: "http.request",
+				eventType: "end",
+				outcome: "success",
+				url,
+				method,
+				status: res.status,
+				durationMs,
+				extra: { endpoint },
+			});
+		} else {
+			// Only pay for the body clone when the document will be written.
+			const body = state?.enabled ? await errorBody(res) : "";
+			logWarn(`http ${method} ${endpoint} → ${res.status}`, {
+				action: "http.request",
+				eventType: "end",
+				outcome: "failure",
+				url,
+				method,
+				status: res.status,
+				durationMs,
+				extra: { endpoint, response_body: body },
+			});
+		}
+		return res;
+	} catch (err) {
+		logError(`http ${method} ${endpoint} failed`, {
+			action: "http.request",
+			eventType: "end",
+			outcome: "failure",
+			url,
+			method,
+			durationMs: Date.now() - startedAt,
+			err,
+			extra: { endpoint },
+		});
+		throw err;
+	}
+}
+
 export function logFileName(date: Date): string {
 	const pad = (n: number) => String(n).padStart(2, "0");
 	const y = date.getUTCFullYear();
@@ -245,6 +336,7 @@ function buildDoc(
 
 	const event: Record<string, unknown> = {};
 	if (f.action) event.action = f.action;
+	if (f.eventType) event.type = [f.eventType];
 	if (f.outcome) event.outcome = f.outcome;
 	// ECS event.duration is nanoseconds.
 	if (f.durationMs !== undefined) {
