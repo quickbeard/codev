@@ -1,6 +1,7 @@
 import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
+import { PasteBackPrompt, usePasteBack } from "@/components/PasteBack.js";
 import { runUpload, type UploadSummary } from "@/lib/upload.js";
 
 type Phase = "running" | "done" | "error";
@@ -9,14 +10,26 @@ export function UploadApp() {
 	const { exit } = useApp();
 	const [phase, setPhase] = useState<Phase>("running");
 	const [status, setStatus] = useState("Uploading logs...");
+	const [loginUrl, setLoginUrl] = useState<string | null>(null);
 	const [summary, setSummary] = useState<UploadSummary | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const hasRun = useRef(false);
 
+	// The manual paste-back field is live only while a fresh interactive SSO
+	// login is pending (loginUrl set). Mirrors the field in <Login> for
+	// no-browser users.
+	const paste = usePasteBack(phase === "running" && loginUrl !== null);
+
 	useEffect(() => {
 		if (hasRun.current) return;
 		hasRun.current = true;
-		runUpload({ onStatus: setStatus })
+		runUpload({
+			onStatus: setStatus,
+			onLoginUrl: setLoginUrl,
+			onManualSubmit: (submit) => {
+				paste.submitRef.current = submit;
+			},
+		})
 			.then((result) => {
 				setSummary(result);
 				setPhase("done");
@@ -25,7 +38,7 @@ export function UploadApp() {
 				setError(String(err));
 				setPhase("error");
 			});
-	}, []);
+	}, [paste.submitRef]);
 
 	useEffect(() => {
 		if (phase === "done" || phase === "error") {
@@ -35,11 +48,26 @@ export function UploadApp() {
 
 	if (phase === "running") {
 		return (
-			<Box>
-				<Text color="cyan">
-					<Spinner />
-				</Text>
-				<Text> {status}</Text>
+			<Box flexDirection="column">
+				<Box>
+					<Text color="cyan">
+						<Spinner />
+					</Text>
+					<Text> {status}</Text>
+				</Box>
+				{loginUrl && !paste.submitting && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text dimColor>
+							{"If the browser didn't open, visit this URL manually:"}
+						</Text>
+						<Text>{loginUrl}</Text>
+						<PasteBackPrompt
+							pasteValue={paste.pasteValue}
+							pasteError={paste.pasteError}
+							submitting={paste.submitting}
+						/>
+					</Box>
+				)}
 			</Box>
 		);
 	}

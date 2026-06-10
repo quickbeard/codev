@@ -1,10 +1,36 @@
+import { Box } from "ink";
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { Login } from "@/components/Login.js";
+import { Frame } from "@/components/Frame.js";
+import { Login, loginTitle } from "@/components/Login.js";
+import { Step } from "@/components/Step.js";
 import * as auth from "@/lib/auth.js";
+import { clipboard } from "@/lib/clipboard.js";
+
+const ESC = String.fromCharCode(27);
+const stripAnsi = (s: string) =>
+	s.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
+
+// Mirrors how LoginApp/SetupApp/ModelApp mount <Login> — inside a Step's
+// bordered, padded box. The manual URL relies on that geometry to break itself
+// back out to column 0, so URL-rendering assertions must use this wrapper.
+// `delay` overrides the fallback reveal so URL/paste assertions don't have to
+// wait the real 3 s.
+function renderInFrame(onDone: () => void, delay = 0) {
+	return render(
+		<Box padding={1}>
+			<Frame tag="CoDev">
+				<Step active title={loginTitle()}>
+					<Login onDone={onDone} fallbackDelayMs={delay} />
+				</Step>
+			</Frame>
+		</Box>,
+	);
+}
 
 afterEach(() => {
 	cleanup();
+	vi.restoreAllMocks();
 });
 
 function fakeAuth(): auth.AuthData {
@@ -16,10 +42,42 @@ function fakeAuth(): auth.AuthData {
 	};
 }
 
+// Poll until `predicate` holds, instead of a fixed sleep. The fallback (URL +
+// paste field) appears one chained tick after the URL is ready
+// (setAuthUrl → re-render → setTimeout → setShowFallback → re-render), and that
+// lag balloons under Windows CI load — a fixed 50 ms wait races it.
+async function waitFor(predicate: () => boolean, tries = 100): Promise<void> {
+	for (let i = 0; i < tries; i++) {
+		if (predicate()) return;
+		await new Promise((r) => setTimeout(r, 20));
+	}
+	throw new Error("waitFor: condition not met within timeout");
+}
+
+// Paste `value` then press Enter until `predicate` holds. Keystrokes written
+// before Ink attaches its input listener (a useEffect gated on the paste field
+// being active) are silently dropped, so retrying makes the test independent of
+// that activation timing — the source of the Windows-only race.
+async function pasteAndSubmitUntil(
+	stdin: { write: (data: string) => void },
+	value: string,
+	predicate: () => boolean,
+	tries = 100,
+): Promise<void> {
+	for (let i = 0; i < tries; i++) {
+		if (predicate()) return;
+		stdin.write(value);
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 20));
+	}
+	throw new Error("pasteAndSubmitUntil: condition not met within timeout");
+}
+
 describe("Login", () => {
-	test("shows 'Press Enter' when onReady is called", async () => {
+	test("auto-opens the browser as soon as the URL is ready (no Enter gate)", async () => {
+		const openBrowserFn = vi.fn();
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(() => {});
+			onReady(openBrowserFn, "https://sso.test/authorize?x=1", () => null);
 			return new Promise(() => {});
 		});
 
@@ -28,11 +86,13 @@ describe("Login", () => {
 
 		await new Promise((r) => setTimeout(r, 50));
 
-		const output = lastFrame() ?? "";
-		expect(output).toContain("Press Enter to open the browser and login");
+		// Opened without any keystroke, and the screen is a clean spinner — no
+		// wall of instructions until the fallback delay elapses.
+		expect(openBrowserFn).toHaveBeenCalledTimes(1);
+		expect(lastFrame() ?? "").toContain("Waiting for sign-in to complete");
 	});
 
-	test("shows log messages from login", async () => {
+	test("shows pre-URL log messages from login", async () => {
 		vi.spyOn(auth, "login").mockImplementation((onLog) => {
 			onLog("Starting SSO login...");
 			onLog("Already logged in as test@example.com");
@@ -85,37 +145,106 @@ describe("Login", () => {
 		);
 	});
 
-	test("opens browser when Enter is pressed", async () => {
-		const openBrowserFn = vi.fn();
+	test("keeps the happy path to a one-line spinner until the fallback delay elapses", async () => {
+		const url = "https://sso.test/authorize?x=1";
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(openBrowserFn);
+			onReady(
+				() => {},
+				url,
+				() => null,
+			);
 			return new Promise(() => {});
 		});
 
 		const onDone = vi.fn();
-		const { stdin } = render(<Login onDone={onDone} />);
+		// A long delay that won't fire within the test window.
+		const { lastFrame } = render(
+			<Login onDone={onDone} fallbackDelayMs={100_000} />,
+		);
 
 		await new Promise((r) => setTimeout(r, 50));
 
-		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 50));
-
-		expect(openBrowserFn).toHaveBeenCalled();
+		const output = lastFrame() ?? "";
+		expect(output).toContain("Waiting for sign-in to complete");
+		// The URL and paste field stay hidden — no clutter for the common case.
+		expect(output).not.toContain(url);
+		expect(output).not.toContain("copy the code shown");
 	});
 
-	test("does not open browser before Enter is pressed", async () => {
-		const openBrowserFn = vi.fn();
+	test("reveals the sign-in URL fallback after the delay", async () => {
+		const url = "https://sso.test/authorize?x=1";
 		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
-			onReady(openBrowserFn);
+			onReady(
+				() => {},
+				url,
+				() => null,
+			);
 			return new Promise(() => {});
 		});
 
 		const onDone = vi.fn();
-		render(<Login onDone={onDone} />);
+		const { lastFrame } = renderInFrame(onDone);
+
+		await waitFor(() =>
+			(lastFrame() ?? "").includes("Browser didn't open? Sign in here"),
+		);
+
+		const output = lastFrame() ?? "";
+		expect(output).toContain("Browser didn't open? Sign in here");
+		expect(output).toContain("press c to copy");
+		expect(output).toContain(url);
+	});
+
+	test("holds a stable frame once the URL is shown (no spinner flicker)", async () => {
+		// Regression: an animated spinner kept redrawing the frame while the URL
+		// was on screen, clearing the user's terminal selection mid-copy. Once
+		// the fallback is up the frame must not change on its own — otherwise a
+		// selection can't survive long enough to copy.
+		const url = "https://sso.test/authorize?x=1";
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			onReady(
+				() => {},
+				url,
+				() => null,
+			);
+			return new Promise(() => {});
+		});
+
+		const onDone = vi.fn();
+		const { lastFrame } = renderInFrame(onDone);
+
+		await waitFor(() => (lastFrame() ?? "").includes(url));
+		const first = lastFrame() ?? "";
+		expect(first).toContain(url);
+		// Wait well past the spinner's ~80 ms tick; the frame must be byte-identical.
+		await new Promise((r) => setTimeout(r, 250));
+		expect(lastFrame() ?? "").toBe(first);
+	});
+
+	test("copies the sign-in URL to the clipboard when 'c' is pressed", async () => {
+		const url = "https://sso.test/authorize?x=1";
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			onReady(
+				() => {},
+				url,
+				() => null,
+			);
+			return new Promise(() => {});
+		});
+		const copySpy = vi.spyOn(clipboard, "copy").mockImplementation(() => {});
+
+		const onDone = vi.fn();
+		const { stdin, lastFrame } = renderInFrame(onDone);
 
 		await new Promise((r) => setTimeout(r, 50));
+		// Re-write until the listener attaches, mirroring the paste tests.
+		for (let i = 0; i < 50 && copySpy.mock.calls.length === 0; i++) {
+			stdin.write("c");
+			await new Promise((r) => setTimeout(r, 20));
+		}
 
-		expect(openBrowserFn).not.toHaveBeenCalled();
+		expect(copySpy).toHaveBeenCalledWith(url);
+		expect(lastFrame() ?? "").toContain("(copied!)");
 	});
 
 	test("calls onDone with the auth data after a successful login", async () => {
@@ -148,9 +277,35 @@ describe("Login", () => {
 
 		const output = lastFrame() ?? "";
 		expect(output).toContain("Already logged in as test@example.com");
-		expect(output).not.toContain("Press Enter to open the browser");
+		// No URL ever became ready, so the manual fallback (a live branch in the
+		// URL-ready state) must not appear.
+		expect(output).not.toContain("copy the code shown");
 		expect(onDone).toHaveBeenCalledTimes(1);
 		expect(onDone).toHaveBeenCalledWith(authData);
+	});
+
+	test("already-logged-in: no live spinner, frame stays static (no flicker)", async () => {
+		// Regression: when login() resolves without calling onReady (cached
+		// session), the parent keeps this Step mounted. The pre-URL spinner used
+		// to keep animating — flickering and falsely showing "Starting sign-in..."
+		// after login was already done.
+		const authData = fakeAuth();
+		vi.spyOn(auth, "login").mockImplementation((onLog) => {
+			onLog(`Already logged in as ${authData.user.email}`);
+			return Promise.resolve(authData);
+		});
+
+		const onDone = vi.fn();
+		const { lastFrame } = render(<Login onDone={onDone} />);
+
+		await new Promise((r) => setTimeout(r, 50));
+		const first = lastFrame() ?? "";
+		// The spinner line is gone once login has resolved.
+		expect(first).not.toContain("Starting sign-in");
+		// And the frame no longer redraws on its own (the spinner was the only
+		// animating source) — well past the ~80 ms spinner tick.
+		await new Promise((r) => setTimeout(r, 250));
+		expect(lastFrame() ?? "").toBe(first);
 	});
 
 	test("retries on Enter after a failure and succeeds on the second attempt", async () => {
@@ -175,14 +330,15 @@ describe("Login", () => {
 		expect(onDone).toHaveBeenCalledWith(authData);
 	});
 
-	test("clears the previous error and logs when retrying", async () => {
+	test("clears the previous error when retrying", async () => {
 		vi.spyOn(auth, "login")
-			.mockImplementationOnce((onLog) => {
-				onLog("first attempt log");
-				return Promise.reject(new Error("boom"));
-			})
+			.mockImplementationOnce(() => Promise.reject(new Error("boom")))
 			.mockImplementationOnce((_onLog, onReady) => {
-				onReady(() => {});
+				onReady(
+					() => {},
+					"https://sso.test/authorize?x=1",
+					() => null,
+				);
 				return new Promise(() => {});
 			});
 
@@ -190,15 +346,139 @@ describe("Login", () => {
 		const { stdin, lastFrame } = render(<Login onDone={onDone} />);
 
 		await new Promise((r) => setTimeout(r, 50));
-		expect(lastFrame() ?? "").toContain("first attempt log");
 		expect(lastFrame() ?? "").toContain("Login failed: boom");
 
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 50));
 
 		const after = lastFrame() ?? "";
-		expect(after).not.toContain("first attempt log");
 		expect(after).not.toContain("Login failed: boom");
-		expect(after).not.toContain("Press Enter to retry");
+		// Now waiting on the second attempt's interactive flow.
+		expect(after).toContain("Waiting for sign-in to complete");
+	});
+
+	test("shows the paste-back fallback once the URL is ready", async () => {
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			onReady(
+				() => {},
+				"https://sso.test/authorize?x=1",
+				() => null,
+			);
+			return new Promise(() => {});
+		});
+
+		const onDone = vi.fn();
+		const { lastFrame } = renderInFrame(onDone);
+
+		await waitFor(() => (lastFrame() ?? "").includes("copy the code shown"));
+
+		const output = lastFrame() ?? "";
+		expect(output).toContain("copy the code shown");
+		expect(output).toContain("Press Enter to submit");
+	});
+
+	test("completes via manual paste-back of the callback URL", async () => {
+		const authData = fakeAuth();
+		const submit = vi.fn((_pasted: string) => null);
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			return new Promise<auth.AuthData>((resolve) => {
+				onReady(
+					() => {},
+					"https://sso.test/authorize?x=1",
+					(pasted) => {
+						const err = submit(pasted);
+						if (!err) resolve(authData);
+						return err;
+					},
+				);
+			});
+		});
+
+		const onDone = vi.fn();
+		const { stdin, lastFrame } = renderInFrame(onDone);
+
+		await new Promise((r) => setTimeout(r, 50));
+		// Paste straight into the revealed field. Re-write until it registers,
+		// in case Ink's input listener attaches a beat late.
+		const pasted = "http://127.0.0.1:5000/callback?code=abc&state=xyz";
+		for (let i = 0; i < 50 && !(lastFrame() ?? "").includes("code=abc"); i++) {
+			stdin.write(pasted);
+			await new Promise((r) => setTimeout(r, 20));
+		}
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(submit).toHaveBeenCalledWith(
+			expect.stringContaining("code=abc&state=xyz"),
+		);
+		expect(onDone).toHaveBeenCalledWith(authData);
+	});
+
+	test("shows an inline paste error and recovers on re-submit", async () => {
+		const authData = fakeAuth();
+		// Phase-gated rather than call-counted: every submit errors while
+		// phase===1 and succeeds once the test flips to phase 2. That keeps the
+		// retrying pasteAndSubmitUntil from accidentally tripping a count-based
+		// success on a Windows-CI double-submit.
+		const ctrl = { phase: 1 };
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			return new Promise<auth.AuthData>((resolve) => {
+				onReady(
+					() => {},
+					"https://sso.test/authorize?x=1",
+					() => {
+						if (ctrl.phase === 1) return "State mismatch — use the latest URL.";
+						resolve(authData);
+						return null;
+					},
+				);
+			});
+		});
+
+		const onDone = vi.fn();
+		const { stdin, lastFrame } = renderInFrame(onDone);
+
+		await waitFor(() => (lastFrame() ?? "").includes("copy the code shown"));
+		await pasteAndSubmitUntil(stdin, "oops", () =>
+			(lastFrame() ?? "").includes("State mismatch"),
+		);
+		expect(lastFrame() ?? "").toContain("State mismatch");
+		expect(onDone).not.toHaveBeenCalled();
+
+		ctrl.phase = 2;
+		await pasteAndSubmitUntil(
+			stdin,
+			"oops",
+			() => onDone.mock.calls.length > 0,
+		);
+		expect(onDone).toHaveBeenCalledWith(authData);
+	});
+
+	test("renders the manual URL copy-clean when it wraps (no frame border injected)", async () => {
+		const url =
+			"https://netmind.viettel.vn/sso-wrapper/authorize?response_type=code&client_id=litellm-test&redirect_uri=http%3A%2F%2F127.0.0.1%3A55806%2Fcallback&scope=openid%20profile%20email%20offline_access&state=279322a5-453f-45ca-ab8a-491acb3c30ea&nonce=23604863-5332-47a6-bc4d-ebd0aba04f55&code_challenge=u8h6Fpso4_e7__Hk7gu_MMF3ymKt--014a02UHxXq30&code_challenge_method=S256";
+		vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+			onReady(
+				() => {},
+				url,
+				() => null,
+			);
+			return new Promise(() => {});
+		});
+
+		const onDone = vi.fn();
+		const { lastFrame } = renderInFrame(onDone);
+
+		// Poll on a stable marker rather than the URL itself — the URL wraps, so
+		// it never appears un-broken in a raw frame.
+		await waitFor(() => (lastFrame() ?? "").includes("Browser didn't open?"));
+
+		// The long URL wraps across several lines. Dropping ANSI codes and the
+		// wrap newlines must leave it intact — i.e. no "│  " gutter (or padding)
+		// was injected mid-URL, which is what corrupts a copy-paste. A bare
+		// newline at wrap points is fine: new URL() and browser address bars
+		// both strip it.
+		const joined = stripAnsi(lastFrame() ?? "").replace(/\n/g, "");
+		expect(joined).toContain(url);
 	});
 });

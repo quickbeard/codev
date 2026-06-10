@@ -1,6 +1,6 @@
 import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AuthMethodChoice } from "@/components/AuthMethod.js";
 import {
 	AuthMethod,
@@ -47,6 +47,13 @@ import {
 	saveProxyUrl,
 } from "@/lib/auth.js";
 import {
+	CODEGRAPH_TASK_KEY,
+	type CodegraphSetupResult,
+	codegraphTargets,
+	formatCodegraphTargets,
+	setupCodegraph,
+} from "@/lib/codegraph.js";
+import {
 	backupClaudeAuth,
 	type Credentials,
 	resetClaudeAuth,
@@ -54,6 +61,7 @@ import {
 } from "@/lib/configure.js";
 import { validateApiKey } from "@/lib/proxy.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
+import { disableClaudeCodeLoginPrompt } from "@/lib/vscode-settings.js";
 
 type Phase =
 	| "select"
@@ -142,6 +150,14 @@ const POST_MODEL_CHOICE: Phase[] = [
 	"done",
 ];
 
+// Temporarily hide the "Choose proxy URL" step. When false, the step never
+// renders and the flow advances past it using the default proxy URL — without
+// persisting anything (~/.codev/auth.json is left untouched, so PROXY_URL()
+// resolves to the baked-in default). Flip to true to bring back the
+// interactive picker + its persistence with no other changes. Typed `boolean`
+// (not the literal `false`) so the gated render stays type-reachable.
+const SHOW_PROXY_URL_STEP: boolean = false;
+
 export type SetupMode = "install" | "config";
 
 interface SetupAppProps {
@@ -178,6 +194,12 @@ export function SetupApp({ mode }: SetupAppProps) {
 	const [existingValid, setExistingValid] = useState(false);
 	const [existingMessage, setExistingMessage] = useState<string | null>(null);
 	const [shimsInstalled, setShimsInstalled] = useState(false);
+	// Result of the best-effort CodeGraph setup that runs during the finalize
+	// Phase. null while it's still running (drives the spinner); set once
+	// setupCodegraph resolves. "skipped" when the selection had no
+	// CodeGraph-eligible tools, so the row never renders.
+	const [codegraphResult, setCodegraphResult] =
+		useState<CodegraphSetupResult | null>(null);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
 	// Set only when refreshCodevConfig fails. Drives a yellow ▲ row that
 	// appears between the install Step and the next visible Step. Stays null
@@ -301,13 +323,17 @@ export function SetupApp({ mode }: SetupAppProps) {
 				setStep("installing");
 				return;
 			}
-			// Config mode skips the Install step entirely: every selected tool
-			// is treated as already installed (the survivor set equals `tools`).
-			// Route through the proxy-url Step before the post-install
-			// side-effects so the user's chosen URL is in effect for the
-			// refreshCodevConfig call inside runPostInstallSideEffects.
-			setPendingSurvivors(tools);
-			setStep("proxy-url");
+			// Config mode skips the *agent* install (they're treated as already
+			// installed, so the survivor set equals `tools`), but still installs
+			// CodeGraph. When any selected agent maps to a CodeGraph
+			// target, show the CodeGraph-only Install step right after login;
+			// otherwise skip straight to the post-login side-effects via proxy-url.
+			if (codegraphTargets(tools).length > 0) {
+				setStep("installing");
+			} else {
+				setPendingSurvivors(tools);
+				setStep("proxy-url");
+			}
 		},
 		[mode, tools],
 	);
@@ -323,18 +349,37 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// Soft warnings (Continue extension/plugin install couldn't run cleanly)
 	// are rendered as yellow ▲ rows by TaskList and are included in the
 	// survivor set.
-	const handleInstallDone = useCallback((succeededKeys: string[]) => {
-		if (succeededKeys.length === 0) {
-			setStep("install-failed");
-			return;
-		}
-		// Park survivors and hand off to the proxy-url Step. Post-install
-		// side-effects (resetClaudeAuth, installShims, refreshCodevConfig)
-		// run after handleProxyUrlConfirm so the chosen proxy URL is in
-		// effect for the very first refresh call.
-		setPendingSurvivors(succeededKeys as Tool[]);
-		setStep("proxy-url");
-	}, []);
+	const handleInstallDone = useCallback(
+		(succeededKeys: string[]) => {
+			// Config mode's Install step only ran the CodeGraph row (agents
+			// are assumed already installed), so the survivor set is the full
+			// selection regardless of the CodeGraph row's outcome — it's
+			// best-effort and must never drop an agent or park the flow.
+			if (mode === "config") {
+				setPendingSurvivors(tools);
+				setStep("proxy-url");
+				return;
+			}
+			// The CodeGraph task shares this TaskList but isn't an agent: split
+			// its sentinel key out so it never flows into the survivor set (Configure
+			// / shims would choke on a non-Tool key) and never masks a total agent
+			// failure in the fail-stop check below.
+			const toolSurvivors = succeededKeys.filter(
+				(k): k is Tool => k !== CODEGRAPH_TASK_KEY,
+			);
+			if (toolSurvivors.length === 0) {
+				setStep("install-failed");
+				return;
+			}
+			// Park survivors and hand off to the proxy-url Step. Post-install
+			// side-effects (resetClaudeAuth, installShims, refreshCodevConfig)
+			// run after handleProxyUrlConfirm so the chosen proxy URL is in
+			// effect for the very first refresh call.
+			setPendingSurvivors(toolSurvivors);
+			setStep("proxy-url");
+		},
+		[mode, tools],
+	);
 
 	const handleProxyUrlConfirm = useCallback(
 		(choice: ProxyUrlChoice) => {
@@ -357,6 +402,17 @@ export function SetupApp({ mode }: SetupAppProps) {
 		},
 		[auth, pendingSurvivors, runPostInstallSideEffects],
 	);
+
+	// When the proxy-url step is hidden, advance straight past it. We bypass
+	// handleProxyUrlConfirm on purpose: no saveProxyUrl, so ~/.codev/auth.json is
+	// left untouched and PROXY_URL() resolves to the default. Fires once when the
+	// flow parks on "proxy-url"; runPostInstallSideEffects moves step forward so
+	// the guard below is false on every later render.
+	useEffect(() => {
+		if (SHOW_PROXY_URL_STEP) return;
+		if (step !== "proxy-url" || !auth) return;
+		runPostInstallSideEffects(pendingSurvivors, auth);
+	}, [step, auth, pendingSurvivors, runPostInstallSideEffects]);
 
 	const handleAuthMethod = useCallback(
 		(choice: AuthMethodChoice) => {
@@ -444,6 +500,12 @@ export function SetupApp({ mode }: SetupAppProps) {
 						backupClaudeAuth();
 					} else {
 						resetClaudeAuth();
+						// codev now owns Claude's gateway auth via settings.json, so
+						// suppress the Claude Code VS Code extension's redundant login
+						// prompt. Gated internally on VS Code being installed. The
+						// Skip-configuration path (creds === null) deliberately leaves
+						// it alone — the extension still needs its normal login there.
+						disableClaudeCodeLoginPrompt();
 					}
 				} catch {
 					// Swallow — the flow always advances.
@@ -459,12 +521,31 @@ export function SetupApp({ mode }: SetupAppProps) {
 				// Leave shimsInstalled=false so the terminal message degrades to
 				// plain "Done!".
 			}
-			setStep("done");
-			// Hold the terminal frame for ~1s so the user can read "Done! Run
-			// exec $SHELL" and "Happy coding!" before Ink tears down. Without
-			// this, React's render of the "done" Phase wouldn't flush to the
-			// terminal before exit() unmounts the app.
-			setTimeout(() => exit(), 1000);
+			// Best-effort CodeGraph wiring. The CLI install already ran in the
+			// Install step (both install and config mode), so this only runs
+			// `codegraph install` to wire the MCP server into each selected agent.
+			// The flow holds on "finalizing" (spinner) until this resolves; a
+			// failure surfaces as a warning row but never blocks completion.
+			// setupCodegraph never throws, but the catch is defensive.
+			setupCodegraph(installedTools)
+				.then(setCodegraphResult)
+				.catch((err: unknown) =>
+					setCodegraphResult({
+						status: "warning",
+						targets: codegraphTargets(installedTools),
+						message: `CodeGraph setup could not run: ${
+							err instanceof Error ? err.message : String(err)
+						}`,
+					}),
+				)
+				.finally(() => {
+					setStep("done");
+					// Hold the terminal frame for ~1s so the user can read "Done! Run
+					// exec $SHELL" and "Happy coding!" before Ink tears down. Without
+					// this, React's render of the "done" Phase wouldn't flush to the
+					// terminal before exit() unmounts the app.
+					setTimeout(() => exit(), 1000);
+				});
 		},
 		[installedTools, exit],
 	);
@@ -521,15 +602,27 @@ export function SetupApp({ mode }: SetupAppProps) {
 							<Login onDone={handleLoginDone} />
 						</Step>
 					)}
-				{mode === "install" && POST_LOGIN.includes(step) && (
-					<Step
-						active={step === "installing"}
-						title={<Text bold>Installing packages</Text>}
-					>
-						<Install tools={tools} onDone={handleInstallDone} />
-					</Step>
-				)}
-				{POST_INSTALL.includes(step) && (
+				{(mode === "install" ||
+					(mode === "config" && codegraphTargets(tools).length > 0)) &&
+					POST_LOGIN.includes(step) && (
+						<Step
+							active={step === "installing"}
+							title={
+								<Text bold>
+									{mode === "install"
+										? "Installing packages"
+										: "Installing CodeGraph"}
+								</Text>
+							}
+						>
+							<Install
+								tools={tools}
+								includeAgents={mode === "install"}
+								onDone={handleInstallDone}
+							/>
+						</Step>
+					)}
+				{SHOW_PROXY_URL_STEP && POST_INSTALL.includes(step) && (
 					<Step
 						active={step === "proxy-url"}
 						title={proxyUrlTitle(step !== "proxy-url")}
@@ -644,6 +737,34 @@ export function SetupApp({ mode }: SetupAppProps) {
 							/>
 						</Step>
 					))}
+				{(step === "finalizing" || step === "done") &&
+					codegraphTargets(installedTools).length > 0 &&
+					codegraphResult?.status !== "skipped" && (
+						<Step
+							active={step === "finalizing"}
+							title={<Text bold>Set up CodeGraph</Text>}
+						>
+							{codegraphResult === null ? (
+								<Box>
+									<Text color="cyan">
+										<Spinner />
+									</Text>
+									<Text> Setting up CodeGraph…</Text>
+								</Box>
+							) : codegraphResult.status === "warning" ? (
+								<Box>
+									<Text color="yellow">▲</Text>
+									<Text color="yellow">
+										{` ${codegraphResult.message ?? "CodeGraph setup did not complete."}`}
+									</Text>
+								</Box>
+							) : (
+								<Text dimColor>
+									{`Wired CodeGraph into ${formatCodegraphTargets(codegraphResult.targets)}.`}
+								</Text>
+							)}
+						</Step>
+					)}
 				{step === "done" && (
 					<SetupComplete
 						tools={installedTools}

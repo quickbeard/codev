@@ -114,7 +114,7 @@ describe("Update", () => {
 		stubContinueDetected(false);
 		stubExecFile((file, args) => {
 			if (file === "npm" && args[0] === "root") return { stdout: "/fake/root" };
-			if (file === "npm" && args[0] === "install") return { stdout: "ok" };
+			if (file === "npm" && args[0] === "i") return { stdout: "ok" };
 			if (file === "opencode") return { stdout: "1.0.0" };
 			return { stdout: "" };
 		});
@@ -141,7 +141,7 @@ describe("Update", () => {
 		stubContinueDetected(false);
 		stubExecFile((file, args) => {
 			if (file === "npm" && args[0] === "root") return { stdout: "/fake/root" };
-			if (file === "npm" && args[0] === "install") {
+			if (file === "npm" && args[0] === "i") {
 				return { error: new Error("x"), stderr: "permission denied" };
 			}
 			return { stdout: "" };

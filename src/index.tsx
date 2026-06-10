@@ -3,6 +3,7 @@ import { ConfigApp } from "@/ConfigApp.js";
 import { InstallApp } from "@/InstallApp.js";
 import { LoginApp } from "@/LoginApp.js";
 import { logout } from "@/lib/auth.js";
+import { forwardToCodegraph } from "@/lib/codegraph.js";
 import { printHelp, printVersion } from "@/lib/help.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
 import {
@@ -222,6 +223,12 @@ switch (command) {
 	case "opencode":
 		spawnUploadDaemon();
 		process.exit(await runAgent("opencode", args));
+		break;
+	// Transparent passthrough to CodeGraph: `codev codegraph <args>` ≡
+	// `codegraph <args>` (e.g. `codev codegraph init -y`). No upload daemon and
+	// no shim handling — CodeGraph isn't a chat agent and isn't shimmed.
+	case "codegraph":
+		process.exit(await forwardToCodegraph(args));
 		break;
 	default:
 		console.error(`Unknown command: ${command}\n`);

@@ -16,31 +16,46 @@ Then run:
 codev install
 ```
 
-After install, type `claude`, `codex`, or `opencode` to launch.
+After install, go to your project and type `claude`, `codex`, or `opencode` to launch.
 
-## Restoring a previous configuration
+## CodeGraph integration
 
-CoDev will replace `~/.claude/settings.json`, `~/.codex/config.toml`, and `~/.config/opencode/opencode.json` with new configs. For Claude Code, CoDev also resets the CLI's auth state so the new gateway credentials aren't shadowed: it rewrites `~/.claude.json` to skip the onboarding wizard, and removes `~/.claude/.credentials.json` so stale session auth can't take precedence. Before writing or removing any file, CoDev backs it up. If a backup already exists from a prior CoDev run (`*.backup`), CoDev leaves it untouched and proceeds. The existing backup is assumed to be your pre-CoDev original and is never clobbered by later runs.
+When you run `codev install` (or `codev config`), CoDev also installs [CodeGraph](https://github.com/colbymchenry/codegraph) — a local, MCP-based code-intelligence server — and wires it into each agent you selected (Claude Code, Codex, OpenCode), user-wide (`--location global`). You can drive CodeGraph through CoDev — `codev codegraph <args>` is equivalent to `codegraph <args>`.
 
-| Selection   | Backed up                                                                                           |
-| ----------- | --------------------------------------------------------------------------------------------------- |
-| Claude Code | `~/.claude/settings.json.backup`<br>`~/.claude.json.backup`<br>`~/.claude/.credentials.json.backup` |
-| Codex       | `~/.codex/config.toml.backup`                                                                       |
-| OpenCode    | `~/.config/opencode/opencode.json.backup`                                                           |
-
-`settings.json`, `config.toml`, and `opencode.json` are **replaced** (not merged), so any keys you had before live only in the file backup.
-
-### Restore
-
-Use the built-in `restore` subcommand:
+### Initialize your project
 
 ```bash
-codev restore claude
-codev restore codex
-codev restore opencode
+cd your-project
+codev codegraph init -y     # initialize + index the current project (one time)
+codev codegraph status      # show index status
 ```
 
-If you have a session running, you might need to restart it with `claude -c`, `codex resume`, or `opencode -c` to resume your progress.
+## Switching between self-hosted and proprietary models
+
+CoDev points your agents at a self-hosted AI gateway, but you can flip any agent back to its own provider (Anthropic for Claude Code, OpenAI for Codex, and so on) — and back to the gateway again — whenever you like. Because CoDev backs up your original config before it changes anything, the round-trip is safe and repeatable.
+
+### Go back to the proprietary models
+
+Restore each agent's pre-CoDev config:
+
+```bash
+codev restore claude     # one agent
+codev restore codex
+codev restore opencode
+codev restore            # every agent at once
+```
+
+`codev restore <agent>` swaps the backup back over the live config, so the agent talks to its own provider again. With no argument, `codev restore` reverts every agent at once.
+
+### Use the self-hosted models
+
+Re-point your already-installed agents at the gateway and pick a model:
+
+```bash
+codev config
+```
+
+After each switching, if you have a session running, you might need to restart it with `claude -c`, `codex resume`, or `opencode -c` to resume your progress.
 
 ## Removing CoDev entirely
 
@@ -48,7 +63,7 @@ If you have a session running, you might need to restart it with `claude -c`, `c
 codev remove
 ```
 
-After confirmation, this reverts your machine to its pre-CoDev state. Add `--yes` (or `-y`) to skip the confirmation prompt.
+After confirmation, this reverts your machine to its pre-CoDev state — including running `codegraph uninstall` to remove CodeGraph's MCP wiring from your agents. Add `--yes` (or `-y`) to skip the confirmation prompt.
 
 CoDev itself is still installed globally — finish with:
 

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Tool } from "@/lib/configure.js";
 
@@ -48,13 +48,6 @@ export const DIST_TAG: Partial<Record<NpmTool, string>> = {
 	"claude-code": "stable",
 };
 
-// The `npm install -g` target for a tool: `<pkg>@<tag>` when a dist-tag is
-// pinned, otherwise the bare package name (npm defaults to `latest`).
-export function installSpec(tool: NpmTool): string {
-	const tag = DIST_TAG[tool];
-	return tag ? `${PKG[tool]}@${tag}` : PKG[tool];
-}
-
 // On Windows, `npm` is a `.cmd` shim that `execFile` can't resolve without a
 // shell. Enabling the shell on win32 lets the OS find `npm.cmd`/`npx.cmd`.
 export const USE_SHELL = process.platform === "win32";
@@ -100,19 +93,29 @@ export function execAsync(file: string, args: string[]): Promise<ExecResult> {
 	});
 }
 
+// The `npm install -g` target for a tool: `<pkg>@<tag>` when a dist-tag is
+// pinned, otherwise the bare package name (npm defaults to `latest`).
+function installSpec(tool: NpmTool): string {
+	const tag = DIST_TAG[tool];
+	return tag ? `${PKG[tool]}@${tag}` : PKG[tool];
+}
+
+// Flags appended to every global agent install. They counter hostile global
+// `.npmrc` settings that would otherwise carry into codev's install and leave
+// an agent unrunnable:
+//   --include=optional      re-includes the platform-native optionalDependency
+//                           a global `omit=optional` would drop. Claude Code
+//                           and Codex both ship their native binary this way.
+//   --ignore-scripts=false  re-enables lifecycle scripts a global
+//                           `ignore-scripts=true` would suppress, so Claude
+//                           Code's postinstall (install.cjs) runs and copies
+//                           the native binary over its placeholder stub.
+// CLI flags win over `.npmrc`. Without these the install "succeeds" but
+// `claude` fails at runtime with "claude native binary not installed".
+const HARDENING_FLAGS = ["--include=optional", "--ignore-scripts=false"];
+
 export async function installPackage(pkg: string): Promise<string | null> {
-	// `--include=optional` defends against a global `--omit=optional` config
-	// that would skip Claude Code's platform-native binary.
-	// `--foreground-scripts` makes the postinstall log visible if it fails.
-	// Both are per-invocation flags; nothing on disk outside the package's
-	// own install location is touched.
-	const r = await execAsync("npm", [
-		"install",
-		"-g",
-		pkg,
-		"--include=optional",
-		"--foreground-scripts",
-	]);
+	const r = await execAsync("npm", ["i", "-g", pkg, ...HARDENING_FLAGS]);
 	if (!r.error) return null;
 	return r.stderr.trim() || r.error.message;
 }
@@ -140,6 +143,57 @@ export async function runClaudePostinstall(): Promise<string | null> {
 	return r.stderr.trim() || r.error.message;
 }
 
+// Claude Code ships a tiny (~4 KB) placeholder at bin/claude.exe and downloads
+// the real (hundreds of MB) native binary as a platform-specific
+// optionalDependency, which its postinstall copies over the placeholder. When
+// the placeholder is still in place, `claude` exits with "claude native binary
+// not installed". This is a best-effort runtime probe: it stats the
+// npm-global placeholder and reports it missing only when it can positively
+// confirm the stub is still there. Anything it can't resolve (npm root fails,
+// the file isn't npm-managed) returns false so callers stay quiet rather than
+// print a misleading hint. The .exe name is used on every platform (Unix
+// ignores the extension) — matching the package's own bin field.
+export async function claudeNativeBinaryMissing(): Promise<boolean> {
+	const root = await npmGlobalRoot();
+	if (!root) return false;
+	const bin = join(root, "@anthropic-ai", "claude-code", "bin", "claude.exe");
+	try {
+		return statSync(bin).size < 4096;
+	} catch {
+		return false;
+	}
+}
+
+// Recovery for a Claude Code install whose native binary never got placed (so
+// `claude --version` fails). Two root causes, two fixes, cheapest first:
+//   1. postinstall was suppressed (ignore-scripts) but the optional dep is on
+//      disk — re-running install.cjs copies the binary into place.
+//   2. the optional dep was never downloaded (omit=optional) — install.cjs
+//      can't help (it exits 0 without placing anything), so we force a full
+//      reinstall, which re-fetches the optional dep (installPackage carries
+//      --include=optional) and runs the postinstall again.
+// Each fix is followed by a re-verify, so a postinstall that exits 0 without
+// actually placing the binary still falls through to the reinstall.
+async function recoverClaudeNativeBinary(
+	firstVerify: string,
+): Promise<string | null> {
+	const cli = CLI["claude-code"];
+
+	const postErr = await runClaudePostinstall();
+	if (!postErr) {
+		const afterPost = await verifyInstall("claude-code");
+		if (!afterPost) return null;
+	}
+
+	const reinstallErr = await installPackage(installSpec("claude-code"));
+	if (!reinstallErr) {
+		const afterReinstall = await verifyInstall("claude-code");
+		if (!afterReinstall) return null;
+		return `installed but '${cli}' still fails after recovery (postinstall + reinstall): ${afterReinstall}`;
+	}
+	return `installed but '${cli}' fails (${firstVerify}); recovery reinstall failed: ${reinstallErr}`;
+}
+
 // Codex's npm package resolves its native binary via an `optionalDependencies`
 // entry that uses an `npm:` alias against a dist-tagged version of the same
 // package (e.g. `@openai/codex-win32-x64@npm:@openai/codex@<v>-win32-x64`).
@@ -159,7 +213,7 @@ export async function runCodexWindowsRecovery(): Promise<string | null> {
 	const platformPkg = `@openai/codex-win32-${arch}@npm:${PKG.codex}@${version}-win32-${arch}`;
 
 	const r = await execAsync("npm", [
-		"install",
+		"i",
 		"-g",
 		`${PKG.codex}@${version}`,
 		platformPkg,
@@ -176,17 +230,10 @@ export async function installAndVerify(tool: NpmTool): Promise<string | null> {
 	if (!firstVerify) return null;
 
 	// Claude Code's package downloads its native binary in a postinstall.
-	// If verification fails, the most common cause is that the postinstall
-	// was suppressed (e.g. a global --ignore-scripts). Re-run install.cjs
-	// directly — it only writes inside the package's own install directory.
+	// If verification fails, the binary wasn't placed — recover by re-running
+	// the postinstall and, if that doesn't help, forcing a reinstall.
 	if (tool === "claude-code") {
-		const postErr = await runClaudePostinstall();
-		if (!postErr) {
-			const second = await verifyInstall(tool);
-			if (!second) return null;
-			return `installed but '${CLI[tool]}' still fails after postinstall: ${second}`;
-		}
-		return `installed but '${CLI[tool]}' fails (${firstVerify}); postinstall recovery failed: ${postErr}`;
+		return recoverClaudeNativeBinary(firstVerify);
 	}
 
 	if (tool === "codex" && process.platform === "win32") {

@@ -13,7 +13,7 @@ import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import open from "open";
-import { SSO_URL } from "@/lib/const.js";
+import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
 import { fetchCodevConfig } from "@/lib/proxy.js";
 
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
@@ -21,6 +21,10 @@ const REVOKE_TIMEOUT_MS = 3_000;
 // Token/userinfo endpoints are quick handshakes — cap them so a hung IdP
 // surfaces as an error instead of wedging the install flow indefinitely.
 const SSO_FETCH_TIMEOUT_MS = 10_000;
+// How long we wait for the authorization code to arrive — via the loopback
+// callback or a manual paste-back. Generous because a no-browser user may be
+// hopping to another device to authenticate and copy the URL back by hand.
+const AUTH_CALLBACK_TIMEOUT_MS = 300_000;
 
 function authFilePath() {
 	return join(homedir(), ".codev", "auth.json");
@@ -98,6 +102,25 @@ interface TokenResponse {
 	refresh_token?: string;
 	expires_in: number;
 }
+
+// How login() hands the interactive step back to its caller. Beyond opening
+// the browser and exposing the authorize URL, `submitManualCode` lets a
+// no-browser caller complete the flow by pasting the redirected callback URL
+// (or a bare authorization code) back in. It returns an inline error string to
+// re-prompt without restarting, or null once the code is accepted — after
+// which the login() promise resolves on its own.
+//
+// `authUrl` is ALWAYS the directly-pasteable /authorize URL — even on the
+// force-login path. `openBrowserFn` may instead route a *local* browser through
+// the wrapper /logout bounce (to clear the IdP session cookie), but that bounce
+// redirects to a loopback-only /logout-done page a remote browser can't reach.
+// A no-browser user authenticates on another device, so handing them the
+// /authorize URL is the only form that can actually produce a code to paste.
+export type OnLoginReady = (
+	openBrowserFn: () => void,
+	authUrl: string,
+	submitManualCode: (pasted: string) => string | null,
+) => void;
 
 function readAuthFile(): AuthFileContents | null {
 	try {
@@ -303,7 +326,7 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
  */
 export async function login(
 	onLog: (msg: string) => void,
-	onReady: (openBrowserFn: () => void) => void,
+	onReady: OnLoginReady,
 ): Promise<AuthData> {
 	onLog("Starting SSO login...");
 
@@ -371,6 +394,16 @@ export async function login(
 	//      app on the same SSO realm.
 	//   2. The force-login sentinel is set — `codev logout` writes it because
 	//      revoking tokens does not terminate the IdP's session cookie.
+	//
+	// KNOWN LIMITATION: condition #1 is unreliable when login is preceded by
+	// code that incidentally creates ~/.codev/. The clearest case is
+	// `codev upload`: runUpload() calls runExport() before ensureAuth(), and
+	// runExport mkdirs ~/.codev/logs/ (recursive: true → side-effect-creates
+	// ~/.codev/). So a fresh-install `codev upload` sees forceLogin === false
+	// and goes straight to /authorize, defeating the stale-cookie protection
+	// the dir check is meant to provide. Hardening this would mean keying off
+	// ~/.codev/auth.json instead of the dir, or running the dir probe in a
+	// dedicated init step before any other code touches the home dir.
 	const forceLogin =
 		!existsSync(join(homedir(), ".codev")) || existsSync(forceLoginPath());
 
@@ -435,9 +468,35 @@ export async function refreshCodevConfig(
 	}
 }
 
+// Extracts OAuth callback params from text the user pasted back during a
+// no-browser login. Handles a full callback URL (the unreachable
+// http://127.0.0.1:<port>/callback?... their browser landed on), a scheme-less
+// "127.0.0.1:<port>/callback?..." (some browsers hide/drop the scheme), a bare
+// query string, or a leading "?". Returns null when the paste carries no
+// recognizable params — the caller then treats it as a bare authorization code.
+function parseCallbackParams(pasted: string): URLSearchParams | null {
+	try {
+		return new URL(pasted).searchParams;
+	} catch {
+		// Not a full URL — fall through.
+	}
+	// Not a parseable URL — e.g. a scheme-less "127.0.0.1:PORT/callback?..."
+	// (a digit-led authority isn't a valid URL scheme, so new URL() rejected
+	// it) or a bare query string. Slice off everything up to the first "?" so a
+	// host/path prefix doesn't get swallowed into the first param's name, then
+	// parse just the query.
+	const query = pasted.includes("?")
+		? pasted.slice(pasted.indexOf("?") + 1)
+		: pasted;
+	if (/(?:^|&)(?:code|state|error)=/.test(query)) {
+		return new URLSearchParams(query);
+	}
+	return null;
+}
+
 async function getAuthCode(
 	onLog: (msg: string) => void,
-	onReady: (openBrowserFn: () => void) => void,
+	onReady: OnLoginReady,
 	expectedState: string,
 	codeChallenge: string,
 	nonce: string,
@@ -445,6 +504,9 @@ async function getAuthCode(
 ): Promise<{ code: string; redirectUri: string }> {
 	return new Promise((resolve, reject) => {
 		let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+		// Set once the flow resolves or rejects — by the loopback callback or by
+		// a manual paste — so the two paths can't both fire.
+		let settled = false;
 		const finish = () => {
 			if (timeoutHandle) {
 				clearTimeout(timeoutHandle);
@@ -459,16 +521,92 @@ async function getAuthCode(
 		// throw "Cannot destructure property 'port' of 'server.address(...)'".
 		let boundPort = 0;
 
-		const buildAuthorizeUrl = (port: number) =>
+		// Build the wrapper /authorize URL for a chosen redirect target. We use two
+		// targets — mirroring how standard loopback OAuth CLIs (gh, gcloud, Claude
+		// Code) avoid the browser's "local network access" prompt:
+		//   • the *local* browser is sent to the loopback callback directly, so the
+		//     IdP navigates the browser to 127.0.0.1 (a top-level navigation, never
+		//     gated) and our local server captures the code — no public page ever
+		//     reaches into localhost;
+		//   • the manual paste-back URL points at the public success page, which
+		//     simply *shows* the code to copy when the terminal is on another machine.
+		// The wrapper keys the code to PKCE (not an exact redirect_uri match), so the
+		// token exchange in succeed() can use the loopback redirect_uri for either.
+		const buildAuthorizeUrl = (redirectUri: string) =>
 			`${SSO_URL}/authorize?` +
 			`response_type=code` +
 			`&client_id=${encodeURIComponent(CLIENT_ID)}` +
-			`&redirect_uri=${encodeURIComponent(`http://127.0.0.1:${port}/callback`)}` +
+			`&redirect_uri=${encodeURIComponent(redirectUri)}` +
 			`&scope=openid%20profile%20email%20offline_access` +
 			`&state=${expectedState}` +
 			`&nonce=${nonce}` +
 			`&code_challenge=${codeChallenge}` +
 			`&code_challenge_method=S256`;
+
+		const loopbackRedirectUri = (port: number) =>
+			`http://127.0.0.1:${port}/callback`;
+		// Opened in the user's local browser: the IdP redirects straight to the
+		// loopback callback (a top-level navigation — no prompt) and login completes
+		// on its own.
+		const loopbackAuthorizeUrl = (port: number) =>
+			buildAuthorizeUrl(loopbackRedirectUri(port));
+		// Handed to the manual paste-back channel for remote/headless logins: the IdP
+		// lands on the public success page, which displays the code to copy back.
+		const manualAuthorizeUrl = buildAuthorizeUrl(LOGIN_SUCCESS_URL);
+
+		// Resolve exactly once. The loopback callback and the manual paste-back
+		// path both funnel through here, so whichever lands first wins and the
+		// other is a no-op (e.g. a slow paste arriving just after the browser
+		// completed the round trip).
+		const succeed = (code: string) => {
+			if (settled) return;
+			settled = true;
+			finish();
+			server.close();
+			resolve({
+				code,
+				redirectUri: `http://127.0.0.1:${boundPort}/callback`,
+			});
+		};
+
+		const failWith = (err: Error) => {
+			if (settled) return;
+			settled = true;
+			finish();
+			server.close();
+			reject(err);
+		};
+
+		// Manual paste-back for no-browser environments (remote SSH, headless):
+		// the user finishes login on another device, lands on the public success
+		// page, and copies the code it shows (or the page URL) back here. Accepts a
+		// full URL, a bare query string, or a bare code. Returns an inline error
+		// string to re-prompt without restarting, or null once the code is accepted
+		// (login() then resolves on its own).
+		const submitManualCode = (pasted: string): string | null => {
+			if (settled) return null;
+			const trimmed = pasted.trim();
+			if (!trimmed) return "Paste the callback URL (or code) first.";
+
+			const params = parseCallbackParams(trimmed);
+			const errParam = params?.get("error");
+			if (errParam) {
+				const desc = params?.get("error_description") || errParam;
+				return `SSO returned an error: ${desc}`;
+			}
+			// No params → treat the whole paste as a bare authorization code.
+			// There's no state to cross-check, but PKCE still binds it to our
+			// verifier at the token exchange.
+			const code = params ? params.get("code") : trimmed;
+			if (!code) return "No authorization code found in the pasted URL.";
+			const returnedState = params?.get("state") ?? null;
+			if (returnedState !== null && returnedState !== expectedState) {
+				return "That URL is from a different login attempt (state mismatch). Use the most recent URL.";
+			}
+
+			succeed(code);
+			return null;
+		};
 
 		const server = createServer((req, res) => {
 			const host = req.headers.host ?? "127.0.0.1";
@@ -479,7 +617,7 @@ async function getAuthCode(
 			// so the wrapper can start a fresh login — this time CAS will show
 			// the credential form because there's no session cookie.
 			if (url.pathname === "/logout-done") {
-				res.writeHead(302, { Location: buildAuthorizeUrl(boundPort) });
+				res.writeHead(302, { Location: loopbackAuthorizeUrl(boundPort) });
 				res.end();
 				return;
 			}
@@ -495,64 +633,78 @@ async function getAuthCode(
 			const returnedState = url.searchParams.get("state");
 
 			const respond = (ok: boolean, msg?: string) => {
-				res.writeHead(ok ? 200 : 400, { "Content-Type": "text/html" });
-				res.end(loginResultHtml(ok, msg));
+				// In the loopback flow the wrapper navigates the browser *here* with the
+				// code. Once we've captured it, hand the browser on to the hosted
+				// success page as the final, user-facing confirmation (failures carry
+				// ?error=... so the page can render its own error state).
+				const base = LOGIN_SUCCESS_URL;
+				let location = base;
+				if (!ok) {
+					const sep = base.includes("?") ? "&" : "?";
+					const desc = encodeURIComponent(msg ?? "Unknown error");
+					location = `${base}${sep}error=login_failed&error_description=${desc}`;
+				}
+				res.writeHead(302, { Location: location });
+				res.end();
 			};
 
 			if (error) {
 				const desc = url.searchParams.get("error_description") || error;
 				respond(false, desc);
-				finish();
-				server.close();
-				reject(new Error(`SSO login failed: ${desc}`));
+				failWith(new Error(`SSO login failed: ${desc}`));
 				return;
 			}
 
 			if (!code) {
 				respond(false, "No authorization code received");
-				finish();
-				server.close();
-				reject(new Error("No authorization code received"));
+				failWith(new Error("No authorization code received"));
 				return;
 			}
 
 			if (returnedState !== expectedState) {
 				respond(false, "State mismatch");
-				finish();
-				server.close();
-				reject(new Error("State mismatch (possible CSRF attack)"));
+				failWith(new Error("State mismatch (possible CSRF attack)"));
 				return;
 			}
 
 			respond(true);
-			finish();
-			server.close();
-			resolve({
-				code,
-				redirectUri: `http://127.0.0.1:${boundPort}/callback`,
-			});
+			succeed(code);
 		});
 
 		server.listen(0, "127.0.0.1", () => {
 			boundPort = (server.address() as AddressInfo).port;
+			// The *local* browser opens the loopback authorize URL (on force-login,
+			// via the /logout bounce that clears the IdP cookie first, then lands on
+			// the loopback /logout-done → loopback /authorize). The manual paste-back
+			// channel instead gets the public-success-page authorize URL: a remote
+			// browser can complete it and copy the code back, whereas the loopback URL
+			// would only yield an unreachable 127.0.0.1 page on another machine.
 			const initialUrl = forceLogin
 				? `${SSO_URL}/logout?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${boundPort}/logout-done`)}`
-				: buildAuthorizeUrl(boundPort);
+				: loopbackAuthorizeUrl(boundPort);
+			const authorizeUrl = manualAuthorizeUrl;
 
-			onReady(() => {
-				onLog(
-					forceLogin
-						? "Opening browser to end existing SSO session and re-login..."
-						: "Opening browser for SSO login...",
-				);
-				openBrowser(initialUrl);
-			});
-
+			// Arm the timeout before handing control to the caller, so a caller
+			// that settles synchronously (an immediate manual paste, or a very
+			// fast UI) clears a real timer instead of leaking one armed a tick
+			// later.
 			timeoutHandle = setTimeout(() => {
 				timeoutHandle = null;
-				server.close();
-				reject(new Error("Login timed out after 120 seconds"));
-			}, 120_000);
+				failWith(new Error("Login timed out after 5 minutes"));
+			}, AUTH_CALLBACK_TIMEOUT_MS);
+
+			onReady(
+				() => {
+					onLog(
+						forceLogin
+							? "Opening browser to end existing SSO session and re-login..."
+							: "Opening browser for SSO login...",
+					);
+					openBrowser(initialUrl);
+				},
+				authorizeUrl,
+				submitManualCode,
+			);
 		});
 	});
 }
@@ -633,36 +785,8 @@ export const browserOpener = {
 
 function openBrowser(url: string) {
 	// Fire-and-forget: the loopback callback server resolves the login flow
-	// regardless of whether the browser actually launched, and the URL is
-	// already printed so the user can paste it as a fallback.
+	// regardless of whether the browser actually launched. The interactive
+	// <Login> flow also surfaces this URL (handed to onReady) so the user can
+	// paste it manually if the browser never opened.
 	browserOpener.open(url).catch(() => {});
-}
-
-function escapeHtml(str: string): string {
-	return str
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#039;");
-}
-
-function loginResultHtml(success: boolean, error?: string): string {
-	const title = success ? "Login Successful" : "Login Failed";
-	const safeError = error ? escapeHtml(error) : "Unknown error";
-	const message = success
-		? "You have been logged in. You can close this tab and return to the terminal."
-		: `Login failed: ${safeError}. Please try again.`;
-	const color = success ? "#22c55e" : "#ef4444";
-
-	return `<!DOCTYPE html>
-<html>
-<head><title>${title}</title></head>
-<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0a0a0a;color:#fafafa">
-<div style="text-align:center">
-<h1 style="color:${color}">${title}</h1>
-<p>${message}</p>
-</div>
-</body>
-</html>`;
 }

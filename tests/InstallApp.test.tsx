@@ -13,9 +13,14 @@ import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { InstallApp } from "@/InstallApp.js";
 import * as auth from "@/lib/auth.js";
+import * as codegraph from "@/lib/codegraph.js";
 import * as configure from "@/lib/configure.js";
 import * as npm from "@/lib/npm.js";
 import * as proxy from "@/lib/proxy.js";
+import {
+	vscodeSettingsPath,
+	vscodeUserDataDir,
+} from "@/lib/vscode-settings.js";
 
 function stubModels() {
 	return vi
@@ -56,9 +61,24 @@ beforeEach(() => {
 	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
 	// hit the temp home on every platform.
 	vi.stubEnv("USERPROFILE", installAppTempHome);
+	// Keep the VS Code user-data dir resolution (vscode-settings.ts, invoked by
+	// the finalize Phase on the configure path) inside the temp home on every
+	// platform — otherwise a Linux/Windows runner could resolve to its real VS
+	// Code config. Unseeded here, so disableClaudeCodeLoginPrompt() just skips.
+	vi.stubEnv("APPDATA", join(installAppTempHome, "AppData", "Roaming"));
+	vi.stubEnv("XDG_CONFIG_HOME", join(installAppTempHome, ".config"));
 	// refreshCodevConfig hits the network. Mock it as a fast resolve so the
 	// inline post-install refresh doesn't block tests on a real fetch.
 	vi.spyOn(auth, "refreshCodevConfig").mockResolvedValue(undefined);
+	// The Install step runs ensureCodegraphInstalled (npm i -g) and the finalize
+	// Phase runs setupCodegraph (codegraph install). Default both to no-ops so
+	// full-flow tests neither hang nor hit the network; specific tests override
+	// them to assert the wiring.
+	vi.spyOn(codegraph, "ensureCodegraphInstalled").mockResolvedValue(null);
+	vi.spyOn(codegraph, "setupCodegraph").mockResolvedValue({
+		status: "skipped",
+		targets: [],
+	});
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
@@ -175,15 +195,13 @@ async function settleAfterInstall(
 	await waitForFrame(frames, "Choose configuration method");
 }
 
-// Picks "Use the default proxy URL" — the first option, so just Enter.
+// The "Choose proxy URL" step is currently hidden (SHOW_PROXY_URL_STEP=false):
+// the flow auto-advances past it using the default URL, so there's nothing to
+// drive here. Kept as a seam so re-enabling the step only needs this body back.
 async function advanceThroughProxyUrl(
-	stdin: { write: (s: string) => void },
-	frames: string[],
-) {
-	await waitForFrame(frames, "Choose proxy URL");
-	stdin.write("\r");
-	await new Promise((r) => setTimeout(r, 30));
-}
+	_stdin: { write: (s: string) => void },
+	_frames: string[],
+) {}
 
 async function pickNewKey(
 	stdin: { write: (s: string) => void },
@@ -299,7 +317,7 @@ describe("InstallApp fail-stop invariant", () => {
 	test("install failure does not advance to key-choice", async () => {
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		stubExecFile((file, args) => {
-			if (file === "npm" && args[0] === "install") {
+			if (file === "npm" && args[0] === "i") {
 				const err = Object.assign(new Error("spawn npm ENOENT"), {
 					code: "ENOENT",
 				});
@@ -388,6 +406,98 @@ describe("InstallApp fail-stop invariant", () => {
 			model: "m-alpha",
 			models: ["m-alpha", "m-beta"],
 		});
+	});
+
+	test("wires CodeGraph for the selected agent after a successful install", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.b",
+				created: true,
+			},
+		]);
+		vi.mocked(codegraph.setupCodegraph).mockResolvedValue({
+			status: "ok",
+			targets: ["claude"],
+		});
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		// CodeGraph is installed during the Installing step (alongside
+		// the agents), then the finalize step wires the MCP server. Survivors are
+		// handed to setupCodegraph verbatim; the mapping/dedupe to `--target` is
+		// covered in lib/codegraph.test.ts.
+		expect(codegraph.ensureCodegraphInstalled).toHaveBeenCalled();
+		expect(codegraph.setupCodegraph).toHaveBeenCalledWith(["claude-code"]);
+		expect(allFrames(frames)).toContain("Wired CodeGraph into Claude Code");
+	});
+
+	test("a CodeGraph setup failure warns but does not block completion", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.b",
+				created: true,
+			},
+		]);
+		vi.mocked(codegraph.setupCodegraph).mockResolvedValue({
+			status: "warning",
+			targets: ["claude"],
+			message: "CodeGraph install failed: boom",
+		});
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		const history = allFrames(frames);
+		expect(history).toContain("CodeGraph install failed: boom");
+		// Best-effort: the warning never aborts the CoDev flow.
+		expect(history).toContain("Happy coding");
+	});
+
+	test("proxy-url step is hidden and never persists a proxy URL", async () => {
+		// SHOW_PROXY_URL_STEP is false: the flow must complete without ever
+		// showing the picker, and must not write proxy_url to ~/.codev/auth.json
+		// (the default URL is used implicitly via PROXY_URL()).
+		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		const saveProxyUrlSpy = vi.spyOn(auth, "saveProxyUrl");
+		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.b",
+				created: true,
+			},
+		]);
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickNewKey(stdin, frames);
+		await pickFirstModel(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		expect(allFrames(frames)).not.toContain("Choose proxy URL");
+		expect(saveProxyUrlSpy).not.toHaveBeenCalled();
 	});
 
 	test("Codex selection routes to configureCodex and reaches done", async () => {
@@ -1344,5 +1454,80 @@ describe("InstallApp finalize: Claude file fate by auth choice", () => {
 		});
 		// Live ~/.claude/.credentials.json was removed.
 		expect(existsSync(credPath)).toBe(false);
+	});
+});
+
+// The finalize Phase also disables the Claude Code VS Code extension's login
+// prompt — but only on the configure path (creds≠null) and only when VS Code
+// is installed. These touch the real (stubbed-HOME) settings.json to catch
+// wiring regressions a mocked test would miss. APPDATA / XDG_CONFIG_HOME are
+// stubbed under the temp home in beforeEach, so the seeded dir is the only one
+// in play on every platform.
+describe("InstallApp finalize: VS Code login prompt", () => {
+	// Create the user-data dir (and User/) so the install-gate passes and we can
+	// write settings.json into it.
+	function seedVscodeInstalled() {
+		mkdirSync(join(vscodeUserDataDir(), "User"), { recursive: true });
+	}
+
+	test("configure path adds claudeCode.disableLoginPrompt, preserving other settings", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+		// Stub the ~/.claude/settings.json writer so the real configure doesn't
+		// race the assertions; finalize (which owns the VS Code edit) still runs.
+		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
+			{
+				kind: "claude-settings",
+				sourcePath: "/tmp/x",
+				backupPath: "/tmp/x.backup",
+				created: true,
+			},
+		]);
+
+		seedVscodeInstalled();
+		const settingsPath = vscodeSettingsPath();
+		writeFileSync(settingsPath, '{\n  "editor.fontSize": 14\n}\n');
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickManual(stdin, frames);
+		await typeManualCreds(
+			stdin,
+			frames,
+			"https://gateway.example.com/v1",
+			"sk-vscode-123",
+		);
+		await pickFirstModel(stdin, frames, "m-alpha");
+		await waitForFrame(frames, "Happy coding");
+
+		const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+		expect(settings["claudeCode.disableLoginPrompt"]).toBe(true);
+		// The user's pre-existing setting survived the surgical edit.
+		expect(settings["editor.fontSize"]).toBe(14);
+	});
+
+	test("Skip configuration leaves VS Code settings untouched", async () => {
+		stubExecFile(() => ({ stdout: "ok" }));
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+			() => new Promise(() => {}),
+		);
+
+		seedVscodeInstalled();
+		const settingsPath = vscodeSettingsPath();
+		const original = '{\n  "editor.fontSize": 14\n}\n';
+		writeFileSync(settingsPath, original);
+
+		const { stdin, frames } = render(<InstallApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickSkip(stdin, frames);
+		await waitForFrame(frames, "Happy coding");
+
+		// Skip runs backupClaudeAuth, not the VS Code edit — file is unchanged.
+		expect(readFileSync(settingsPath, "utf-8")).toBe(original);
 	});
 });

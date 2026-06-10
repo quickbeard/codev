@@ -17,6 +17,9 @@ importers:
       ink-spinner:
         specifier: ^5.0.0
         version: 5.0.0(ink@7.0.4(@types/react@19.2.15)(react@19.2.6))(react@19.2.6)
+      jsonc-parser:
+        specifier: ^3.3.1
+        version: 3.3.1
       open:
         specifier: ^11.0.0
         version: 11.0.0
@@ -642,6 +645,9 @@ packages:
   is-wsl@3.1.1:
     resolution: {integrity: sha512-e6rvdUCiQCAuumZslxRJWR/Doq4VpPR82kqclvcS0efgt430SlGIk05vdCN58+VrzgtIcfNODjozVielycD4Sw==}
     engines: {node: '>=16'}
+
+  jsonc-parser@3.3.1:
+    resolution: {integrity: sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==}
 
   lightningcss-android-arm64@1.32.0:
     resolution: {integrity: sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg==}
@@ -1485,6 +1491,8 @@ snapshots:
   is-wsl@3.1.1:
     dependencies:
       is-inside-container: 1.0.0
+
+  jsonc-parser@3.3.1: {}
 
   lightningcss-android-arm64@1.32.0:
     optional: true

@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+	claudeNativeBinaryMissing,
 	detectInstalledViaNpm,
 	installAndVerify,
 	installPackage,
@@ -20,7 +21,11 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 vi.mock("node:fs", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:fs")>();
-	return { ...actual, existsSync: vi.fn(actual.existsSync) };
+	return {
+		...actual,
+		existsSync: vi.fn(actual.existsSync),
+		statSync: vi.fn(actual.statSync),
+	};
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
@@ -78,22 +83,25 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	vi.mocked(child_process.execFile).mockReset();
 	vi.mocked(fs.existsSync).mockReset();
+	vi.mocked(fs.statSync).mockReset();
 });
 
 describe("npm.ts", () => {
 	describe("installPackage", () => {
-		test("runs npm install -g with expected flags", async () => {
+		test("runs npm i -g with hardening flags", async () => {
 			const calls = stubExecFile({ handler: () => ({ stdout: "ok" }) });
 			const err = await installPackage("some-pkg");
 			expect(err).toBeNull();
 			expect(calls.length).toBe(1);
 			expect(calls[0]?.file).toBe("npm");
+			// --include=optional / --ignore-scripts=false override hostile global
+			// .npmrc settings so the native binary's optional dep + postinstall run.
 			expect(calls[0]?.args).toEqual([
-				"install",
+				"i",
 				"-g",
 				"some-pkg",
 				"--include=optional",
-				"--foreground-scripts",
+				"--ignore-scripts=false",
 			]);
 		});
 
@@ -178,7 +186,7 @@ describe("npm.ts", () => {
 			const err = await installAndVerify("claude-code");
 			expect(err).toBeNull();
 			const installCall = calls.find(
-				(c) => c.file === "npm" && c.args[0] === "install",
+				(c) => c.file === "npm" && c.args[0] === "i",
 			);
 			expect(installCall?.args).toContain("@anthropic-ai/claude-code@stable");
 		});
@@ -187,7 +195,7 @@ describe("npm.ts", () => {
 			const calls = stubExecFile({ handler: () => ({ stdout: "1.0.0" }) });
 			await installAndVerify("opencode");
 			const installCall = calls.find(
-				(c) => c.file === "npm" && c.args[0] === "install",
+				(c) => c.file === "npm" && c.args[0] === "i",
 			);
 			expect(installCall?.args).toContain("opencode-ai");
 			expect(installCall?.args.some((a) => a.includes("@stable"))).toBe(false);
@@ -196,7 +204,7 @@ describe("npm.ts", () => {
 		test("returns install error when npm install fails", async () => {
 			stubExecFile({
 				handler: (file, args) => {
-					if (file === "npm" && args[0] === "install") {
+					if (file === "npm" && args[0] === "i") {
 						return { error: new Error("x"), stderr: "disk full" };
 					}
 					return { stdout: "1.0.0" };
@@ -224,7 +232,7 @@ describe("npm.ts", () => {
 			const existsSpy = vi.mocked(fs.existsSync).mockImplementation(() => true);
 			stubExecFile({
 				handler: (file, args) => {
-					if (file === "npm" && args[0] === "install") return { stdout: "ok" };
+					if (file === "npm" && args[0] === "i") return { stdout: "ok" };
 					if (file === "npm" && args[0] === "root") {
 						return { stdout: "/fake/root" };
 					}
@@ -246,11 +254,55 @@ describe("npm.ts", () => {
 			existsSpy.mockRestore();
 		});
 
-		test("claude-code: reports postinstall-recovery failure", async () => {
+		test("claude-code: recovers via reinstall when postinstall can't place the binary", async () => {
+			// Models the omit=optional case: install.cjs exits 0 without placing
+			// the binary (the optional dep isn't on disk), so the post-postinstall
+			// verify still fails; the forced reinstall re-fetches the optional dep
+			// and the next verify succeeds.
+			let claudeCalls = 0;
+			let npmInstalls = 0;
+			const existsSpy = vi.mocked(fs.existsSync).mockImplementation(() => true);
+			const calls = stubExecFile({
+				handler: (file, args) => {
+					if (file === "npm" && args[0] === "i") {
+						npmInstalls += 1;
+						return { stdout: "ok" };
+					}
+					if (file === "npm" && args[0] === "root") {
+						return { stdout: "/fake/root" };
+					}
+					if (file === "node") return { stdout: "install.cjs exited 0" };
+					if (file === "claude") {
+						claudeCalls += 1;
+						// firstVerify + after-postinstall both fail; after the
+						// reinstall (3rd call) it succeeds.
+						if (claudeCalls <= 2) {
+							return { error: new Error("missing binary"), stderr: "oops" };
+						}
+						return { stdout: "1.0.0" };
+					}
+					return { stdout: "" };
+				},
+			});
+			const err = await installAndVerify("claude-code");
+			expect(err).toBeNull();
+			expect(claudeCalls).toBe(3);
+			// Two global installs: the primary one + the recovery reinstall.
+			expect(npmInstalls).toBe(2);
+			// The recovery reinstall ran after the install.cjs postinstall attempt.
+			const nodeIdx = calls.findIndex((c) => c.file === "node");
+			const reinstallIdx = calls.findIndex(
+				(c, i) => i > nodeIdx && c.file === "npm" && c.args[0] === "i",
+			);
+			expect(reinstallIdx).toBeGreaterThan(nodeIdx);
+			existsSpy.mockRestore();
+		});
+
+		test("claude-code: reports failure when postinstall and reinstall both fail to fix", async () => {
 			const existsSpy = vi.mocked(fs.existsSync).mockImplementation(() => true);
 			stubExecFile({
 				handler: (file, args) => {
-					if (file === "npm" && args[0] === "install") return { stdout: "ok" };
+					if (file === "npm" && args[0] === "i") return { stdout: "ok" };
 					if (file === "npm" && args[0] === "root") {
 						return { stdout: "/fake/root" };
 					}
@@ -264,7 +316,39 @@ describe("npm.ts", () => {
 				},
 			});
 			const err = await installAndVerify("claude-code");
-			expect(err).toContain("postinstall recovery failed: postinstall failed");
+			expect(err).toContain(
+				"still fails after recovery (postinstall + reinstall)",
+			);
+			existsSpy.mockRestore();
+		});
+
+		test("claude-code: surfaces a failed recovery reinstall", async () => {
+			// install.cjs fails AND the forced reinstall fails — the error should
+			// name the reinstall failure rather than claim success.
+			let npmInstalls = 0;
+			const existsSpy = vi.mocked(fs.existsSync).mockImplementation(() => true);
+			stubExecFile({
+				handler: (file, args) => {
+					if (file === "npm" && args[0] === "i") {
+						npmInstalls += 1;
+						// Primary install succeeds; the recovery reinstall fails.
+						if (npmInstalls === 1) return { stdout: "ok" };
+						return { error: new Error("x"), stderr: "registry offline" };
+					}
+					if (file === "npm" && args[0] === "root") {
+						return { stdout: "/fake/root" };
+					}
+					if (file === "claude") {
+						return { error: new Error("missing binary"), stderr: "oops" };
+					}
+					if (file === "node") {
+						return { error: new Error("x"), stderr: "postinstall failed" };
+					}
+					return { stdout: "" };
+				},
+			});
+			const err = await installAndVerify("claude-code");
+			expect(err).toContain("recovery reinstall failed: registry offline");
 			existsSpy.mockRestore();
 		});
 
@@ -315,7 +399,7 @@ describe("npm.ts", () => {
 						handler: (file, args) => {
 							if (
 								file === "npm" &&
-								args[0] === "install" &&
+								args[0] === "i" &&
 								args[2] === "@openai/codex"
 							) {
 								return { stdout: "ok" };
@@ -325,7 +409,7 @@ describe("npm.ts", () => {
 							}
 							if (
 								file === "npm" &&
-								args[0] === "install" &&
+								args[0] === "i" &&
 								args.some((a) => a.startsWith("@openai/codex@"))
 							) {
 								return { stdout: "ok" };
@@ -351,12 +435,12 @@ describe("npm.ts", () => {
 					const recoveryCall = calls.find(
 						(c) =>
 							c.file === "npm" &&
-							c.args[0] === "install" &&
+							c.args[0] === "i" &&
 							c.args.some((a) => a.startsWith("@openai/codex@")),
 					);
 					expect(recoveryCall).toBeDefined();
 					expect(recoveryCall?.args).toEqual([
-						"install",
+						"i",
 						"-g",
 						"@openai/codex@0.125.0",
 						"@openai/codex-win32-x64@npm:@openai/codex@0.125.0-win32-x64",
@@ -389,7 +473,7 @@ describe("npm.ts", () => {
 					const recoveryCall = calls.find(
 						(c) =>
 							c.file === "npm" &&
-							c.args[0] === "install" &&
+							c.args[0] === "i" &&
 							c.args.some((a) => a.includes("win32-arm64")),
 					);
 					expect(recoveryCall?.args).toContain(
@@ -402,7 +486,7 @@ describe("npm.ts", () => {
 				await withWin32("x64", async () => {
 					stubExecFile({
 						handler: (file, args) => {
-							if (file === "npm" && args[0] === "install") {
+							if (file === "npm" && args[0] === "i") {
 								return { stdout: "ok" };
 							}
 							if (file === "npm" && args[0] === "view") {
@@ -470,6 +554,51 @@ describe("npm.ts", () => {
 					});
 				}
 			});
+		});
+	});
+
+	describe("claudeNativeBinaryMissing", () => {
+		const binPath = join(
+			"/fake/root",
+			"@anthropic-ai",
+			"claude-code",
+			"bin",
+			"claude.exe",
+		);
+
+		test("true when the placeholder stub (<4KB) is still in place", async () => {
+			stubExecFile({ handler: () => ({ stdout: "/fake/root" }) });
+			const statSpy = vi
+				.mocked(fs.statSync)
+				.mockImplementation(
+					(p: fs.PathLike) =>
+						(String(p) === binPath ? { size: 1234 } : { size: 0 }) as fs.Stats,
+				);
+			expect(await claudeNativeBinaryMissing()).toBe(true);
+			statSpy.mockRestore();
+		});
+
+		test("false when the real native binary is in place", async () => {
+			stubExecFile({ handler: () => ({ stdout: "/fake/root" }) });
+			const statSpy = vi
+				.mocked(fs.statSync)
+				.mockImplementation(() => ({ size: 213_000_000 }) as fs.Stats);
+			expect(await claudeNativeBinaryMissing()).toBe(false);
+			statSpy.mockRestore();
+		});
+
+		test("false (stay quiet) when the binary path can't be stat'd", async () => {
+			stubExecFile({ handler: () => ({ stdout: "/fake/root" }) });
+			const statSpy = vi.mocked(fs.statSync).mockImplementation(() => {
+				throw new Error("ENOENT");
+			});
+			expect(await claudeNativeBinaryMissing()).toBe(false);
+			statSpy.mockRestore();
+		});
+
+		test("false (stay quiet) when npm root -g fails", async () => {
+			stubExecFile({ handler: () => ({ error: new Error("boom") }) });
+			expect(await claudeNativeBinaryMissing()).toBe(false);
 		});
 	});
 
