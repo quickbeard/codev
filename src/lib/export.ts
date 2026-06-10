@@ -1,7 +1,19 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import {
+	type Dirent,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { renderMarkdown } from "@/lib/markdown.js";
-import { buildFilename, projectLogsDir } from "@/lib/paths.js";
+import {
+	agentLogsDir,
+	buildFilename,
+	cliLogsDir,
+	projectLogsDir,
+} from "@/lib/paths.js";
 import {
 	computeSessionStatistics,
 	StatisticsCollector,
@@ -39,10 +51,42 @@ const PROVIDER_LOADERS: { agent: Agent; load: () => Promise<Provider> }[] = [
 	},
 ];
 
+// Conversation exports used to live in ~/.codev/logs/<project>/; that root now
+// belongs to the CLI's own diagnostic logs (lib/log.ts) and exports moved to
+// ~/.codev/agent-logs/<project>/. Relocate any legacy project folders once so
+// prior exports don't sit orphaned inside the diagnostics dir. Only
+// directories are moved — files at the legacy root (codev-*.ndjson diagnostics
+// written by a newer run) are not export data. Best-effort throughout: a
+// folder that fails to move (or already exists at the destination) is left
+// behind, and the next export simply regenerates its sessions at the new
+// location from the agents' own data.
+export function migrateLegacyAgentLogs(): void {
+	const legacyRoot = cliLogsDir();
+	const targetRoot = agentLogsDir();
+	let entries: Dirent[];
+	try {
+		entries = readdirSync(legacyRoot, { withFileTypes: true });
+	} catch {
+		return; // No legacy dir — nothing to migrate.
+	}
+	for (const entry of entries) {
+		if (!entry.isDirectory()) continue;
+		const to = join(targetRoot, entry.name);
+		try {
+			if (existsSync(to)) continue; // Re-exported already; keep the newer copy.
+			mkdirSync(targetRoot, { recursive: true });
+			renameSync(join(legacyRoot, entry.name), to);
+		} catch {
+			// Best-effort.
+		}
+	}
+}
+
 export async function runExport(
 	onStatus: StatusReporter = () => {},
 ): Promise<ExportSummary> {
 	const cwd = process.cwd();
+	migrateLegacyAgentLogs();
 	const outDir = projectLogsDir(cwd);
 	mkdirSync(outDir, { recursive: true });
 

@@ -54,7 +54,7 @@ function writeAuth() {
 }
 
 function writeLog(name = "a.md", content = "hello") {
-	const dir = join(tempHome, ".codev", "logs", "project", "codex");
+	const dir = join(tempHome, ".codev", "agent-logs", "project", "codex");
 	mkdirSync(dir, { recursive: true });
 	const path = join(dir, name);
 	writeFileSync(path, content);
@@ -65,11 +65,11 @@ describe("upload helpers", () => {
 	test("lists markdown logs under agent directories only", () => {
 		const path = writeLog();
 		writeFileSync(
-			join(tempHome, ".codev", "logs", "project", "statistics.json"),
+			join(tempHome, ".codev", "agent-logs", "project", "statistics.json"),
 			"{}",
 		);
 		expect(
-			listMarkdownLogs(join(tempHome, ".codev", "logs", "project")),
+			listMarkdownLogs(join(tempHome, ".codev", "agent-logs", "project")),
 		).toEqual([path]);
 	});
 

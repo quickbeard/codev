@@ -387,25 +387,21 @@ export async function login(
 	}
 
 	// Force re-auth via the IdP login form (prompt=login) when:
-	//   1. ~/.codev/ doesn't exist — typically the user just ran `codev remove`
-	//      (which wipes the dir), or this is a truly fresh install. We have no
-	//      record of prior consent on this machine, so don't silently ride any
-	//      IdP browser-session cookie that might still be valid from another
-	//      app on the same SSO realm.
+	//   1. ~/.codev/auth.json doesn't exist — typically the user just ran
+	//      `codev remove` (which wipes the dir), or this is a truly fresh
+	//      install. We have no record of prior auth on this machine, so don't
+	//      silently ride any IdP browser-session cookie that might still be
+	//      valid from another app on the same SSO realm.
 	//   2. The force-login sentinel is set — `codev logout` writes it because
 	//      revoking tokens does not terminate the IdP's session cookie.
 	//
-	// KNOWN LIMITATION: condition #1 is unreliable when login is preceded by
-	// code that incidentally creates ~/.codev/. The clearest case is
-	// `codev upload`: runUpload() calls runExport() before ensureAuth(), and
-	// runExport mkdirs ~/.codev/logs/ (recursive: true → side-effect-creates
-	// ~/.codev/). So a fresh-install `codev upload` sees forceLogin === false
-	// and goes straight to /authorize, defeating the stale-cookie protection
-	// the dir check is meant to provide. Hardening this would mean keying off
-	// ~/.codev/auth.json instead of the dir, or running the dir probe in a
-	// dedicated init step before any other code touches the home dir.
+	// Keyed off auth.json rather than the ~/.codev/ dir: unrelated code creates
+	// the dir as a side effect before login can run — diagnostic logging
+	// (lib/log.ts) at the entry of every command, runExport during
+	// `codev upload` — and a dir-existence probe would misread those as "prior
+	// auth on this machine" and skip the forced credential form.
 	const forceLogin =
-		!existsSync(join(homedir(), ".codev")) || existsSync(forceLoginPath());
+		!existsSync(authFilePath()) || existsSync(forceLoginPath());
 
 	const verifier = generateCodeVerifier();
 	const challenge = await generateCodeChallenge(verifier);

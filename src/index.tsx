@@ -5,6 +5,7 @@ import { LoginApp } from "@/LoginApp.js";
 import { logout } from "@/lib/auth.js";
 import { forwardToCodegraph } from "@/lib/codegraph.js";
 import { printHelp, printVersion } from "@/lib/help.js";
+import { initLogging } from "@/lib/log.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
 import {
 	RESTORE_AGENTS,
@@ -55,6 +56,11 @@ async function gateSqlite(): Promise<void> {
 }
 
 const [command, ...args] = process.argv.slice(2);
+
+// Diagnostic logging (~/.codev/logs/codev-YYYYMMDD.ndjson, ECS NDJSON) starts
+// before dispatch so every command logs its start/end and crashes. File-only —
+// never stdout/stderr, which the Ink apps own.
+initLogging(command ?? "help", args);
 
 switch (command) {
 	case undefined:

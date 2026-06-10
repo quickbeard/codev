@@ -24,6 +24,7 @@ import {
 	refreshCodevConfig,
 } from "@/lib/auth.js";
 import { runExport } from "@/lib/export.js";
+import { currentTraceId } from "@/lib/log.js";
 import { projectLogsDir } from "@/lib/paths.js";
 import { fetchSupabaseSession } from "@/lib/proxy.js";
 import { getSupabaseConfig, type SupabaseConfig } from "@/lib/supabase.js";
@@ -552,10 +553,21 @@ export function spawnUploadDaemon(): void {
 		mkdirSync(codevHomeDir(), { recursive: true, mode: 0o700 });
 		const logFd = openSync(uploadLogPath(), "a");
 		try {
+			const traceId = currentTraceId();
 			const child = spawner.spawn(
 				process.execPath,
 				[selfPath, "upload", "--daemon"],
-				{ detached: true, stdio: ["ignore", logFd, logFd] },
+				{
+					detached: true,
+					stdio: ["ignore", logFd, logFd],
+					// The daemon initLoggings with its own trace id; carrying ours as
+					// CODEV_TRACE_PARENT ties its diagnostic docs to the agent launch
+					// that spawned it.
+					env: {
+						...process.env,
+						...(traceId ? { CODEV_TRACE_PARENT: traceId } : {}),
+					},
+				},
 			);
 			child.unref();
 		} finally {

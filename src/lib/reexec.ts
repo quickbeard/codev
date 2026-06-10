@@ -1,4 +1,5 @@
 import { spawnSync as nodeSpawnSync } from "node:child_process";
+import { currentTraceId, logError, logInfo } from "@/lib/log.js";
 
 // Indirection so tests can stub the spawn call (mirrors `spawner` in upload.ts
 // and `browserOpener` in auth.ts).
@@ -60,22 +61,25 @@ export async function ensureNodeSqliteOrReexec(): Promise<ReexecResult> {
 	}
 
 	if (process.execArgv.includes("--experimental-sqlite")) {
-		return {
-			action: "error",
-			error:
-				`OpenCode export needs node:sqlite, but it isn't loadable on Node ${process.versions.node} ` +
-				"even with --experimental-sqlite. Upgrade to Node 22.5+.",
-		};
+		const error =
+			`OpenCode export needs node:sqlite, but it isn't loadable on Node ${process.versions.node} ` +
+			"even with --experimental-sqlite. Upgrade to Node 22.5+.";
+		logError(error, { action: "sqlite.probe", outcome: "failure" });
+		return { action: "error", error };
 	}
 
 	const selfPath = process.argv[1];
 	if (!selfPath) {
-		return {
-			action: "error",
-			error: "cannot determine CLI entry path for re-exec",
-		};
+		const error = "cannot determine CLI entry path for re-exec";
+		logError(error, { action: "process.spawn", outcome: "failure" });
+		return { action: "error", error };
 	}
 
+	logInfo("node:sqlite unavailable; re-executing with --experimental-sqlite", {
+		action: "process.spawn",
+		extra: { reason: "node:sqlite", flag: "--experimental-sqlite" },
+	});
+	const traceId = currentTraceId();
 	const result = spawner.spawnSync(
 		process.execPath,
 		[
@@ -89,7 +93,21 @@ export async function ensureNodeSqliteOrReexec(): Promise<ReexecResult> {
 			selfPath,
 			...process.argv.slice(2),
 		],
-		{ stdio: "inherit" },
+		{
+			stdio: "inherit",
+			// The child runs initLogging again with its own trace id; hand it ours
+			// so its documents carry codev.parent_trace_id and the whole user
+			// action reads as one chain.
+			env: {
+				...process.env,
+				...(traceId ? { CODEV_TRACE_PARENT: traceId } : {}),
+			},
+		},
 	);
+	logInfo(`re-exec child exited (code ${result.status ?? 1})`, {
+		action: "process.exit",
+		outcome: (result.status ?? 1) === 0 ? "success" : "failure",
+		extra: { exit_code: result.status ?? 1 },
+	});
 	return { action: "reexec", exitCode: result.status ?? 1 };
 }

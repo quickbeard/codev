@@ -52,7 +52,7 @@ function writeAuth() {
 }
 
 function writeLog(name = "a.md", content = "hello") {
-	const dir = join(tempHome, ".codev", "logs", "project", "codex");
+	const dir = join(tempHome, ".codev", "agent-logs", "project", "codex");
 	mkdirSync(dir, { recursive: true });
 	const path = join(dir, name);
 	writeFileSync(path, content);
