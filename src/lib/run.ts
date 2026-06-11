@@ -1,5 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { constants } from "node:os";
+import { logError, logInfo, logWarn } from "@/lib/log.js";
 import { claudeNativeBinaryMissing } from "@/lib/npm.js";
 import { stripShimDirFromPath } from "@/lib/shims.js";
 
@@ -20,6 +21,13 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 	return new Promise((resolve) => {
 		const label = AGENT_LABEL[cmd] ?? cmd;
 		process.stderr.write(`Starting ${label}...\n`);
+		// Agent args can carry prompt text (`codev claude -p "..."`) — log only
+		// the count, never the contents.
+		logInfo(`launching ${label}`, {
+			action: "process.spawn",
+			eventType: "start",
+			extra: { agent: cmd, args_count: args.length },
+		});
 		// Strip ~/.codev/bin from the child's PATH so spawning `claude` resolves
 		// the real npm-installed binary, not our shim — otherwise the shim would
 		// re-exec `codev claude` and infinite-loop.
@@ -62,6 +70,13 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 
 		child.once("error", (err: NodeJS.ErrnoException) => {
 			cleanup();
+			logError(`failed to launch ${label}`, {
+				action: "process.exit",
+				eventType: "end",
+				outcome: "failure",
+				err,
+				extra: { agent: cmd, code: err.code ?? null },
+			});
 			if (err.code === "ENOENT") {
 				console.error(
 					`'${cmd}' could not be launched. If it isn't installed, run 'codev install'.`,
@@ -91,10 +106,22 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 							"(reinstalls Claude Code with the platform binary included).\n",
 					);
 				}
+				(code === 0 ? logInfo : logWarn)(`${label} exited (code ${code})`, {
+					action: "process.exit",
+					eventType: "end",
+					outcome: code === 0 ? "success" : "failure",
+					extra: { agent: cmd, exit_code: code },
+				});
 				resolve(code);
 				return;
 			}
 			const signo = signal ? (constants.signals[signal] ?? 0) : 0;
+			logWarn(`${label} exited (signal ${signal})`, {
+				action: "process.exit",
+				eventType: "end",
+				outcome: "failure",
+				extra: { agent: cmd, exit_code: 128 + signo, signal },
+			});
 			resolve(128 + signo);
 		});
 	});

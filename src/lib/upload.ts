@@ -1,7 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-	appendFileSync,
 	closeSync,
 	existsSync,
 	mkdirSync,
@@ -24,6 +23,14 @@ import {
 	refreshCodevConfig,
 } from "@/lib/auth.js";
 import { runExport } from "@/lib/export.js";
+import {
+	currentTraceId,
+	logDebug,
+	logError,
+	loggedFetch,
+	logInfo,
+	logWarn,
+} from "@/lib/log.js";
 import { projectLogsDir } from "@/lib/paths.js";
 import { fetchSupabaseSession } from "@/lib/proxy.js";
 import { getSupabaseConfig, type SupabaseConfig } from "@/lib/supabase.js";
@@ -88,8 +95,16 @@ export async function runUpload({
 	onLoginUrl,
 	onManualSubmit,
 }: UploadOptions = {}): Promise<UploadSummary> {
-	onStatus("Exporting local conversations...");
-	await runExport(onStatus);
+	// Tee every status line into the diagnostic log so a failed run can be
+	// reconstructed without the TUI transcript. ensureAuth gets the RAW
+	// onStatus — login() tees its own messages, and wrapping both would
+	// double-log the login flow.
+	const status = (message: string) => {
+		logDebug(message, { extra: { flow: "upload" } });
+		onStatus(message);
+	};
+	status("Exporting local conversations...");
+	await runExport(status);
 
 	const outDir = projectLogsDir(cwd);
 	const files = listMarkdownLogs(outDir);
@@ -114,10 +129,21 @@ export async function runUpload({
 	try {
 		return await runSupabaseUpload(outDir, files, auth, onStatus, force);
 	} catch (err) {
-		if (!isRefreshableError(err)) throw err;
+		if (!isRefreshableError(err)) {
+			logError("upload failed", { err });
+			throw err;
+		}
+		logWarn("refreshable upload error; refreshing config and retrying", {
+			err,
+		});
 		onStatus("Refreshing CoDev config and retrying...");
 		await refreshCodevConfig(auth.access_token, onStatus);
-		return await runSupabaseUpload(outDir, files, auth, onStatus, force);
+		try {
+			return await runSupabaseUpload(outDir, files, auth, onStatus, force);
+		} catch (retryErr) {
+			logError("upload failed after config refresh", { err: retryErr });
+			throw retryErr;
+		}
 	}
 }
 
@@ -151,11 +177,36 @@ async function runSupabaseUpload(
 		try {
 			await uploadFile(config, uploadToken, candidate);
 			summary.uploaded++;
+			logDebug(`uploaded ${basename(candidate.path)}`, {
+				action: "upload.file",
+				outcome: "success",
+				extra: { file: basename(candidate.path) },
+			});
 		} catch (err) {
 			summary.failed++;
 			summary.errors.push({ file: candidate.path, message: String(err) });
+			logWarn(`upload failed: ${basename(candidate.path)}`, {
+				action: "upload.file",
+				outcome: "failure",
+				err,
+				extra: { file: candidate.path },
+			});
 		}
 	}
+	logInfo(
+		`upload summary: ${summary.uploaded}/${summary.found} uploaded, ` +
+			`${summary.skipped} skipped, ${summary.failed} failed`,
+		{
+			action: "upload.summary",
+			outcome: summary.failed === 0 ? "success" : "failure",
+			extra: {
+				found: summary.found,
+				uploaded: summary.uploaded,
+				skipped: summary.skipped,
+				failed: summary.failed,
+			},
+		},
+	);
 	return summary;
 }
 
@@ -264,7 +315,7 @@ async function fetchExistingUploads(
 			"id,local_file_path,local_content_hash,uploaded_at",
 		);
 		url.searchParams.set("order", "uploaded_at.desc");
-		const res = await fetch(url, {
+		const res = await loggedFetch("supabase.conversations", url, {
 			headers: {
 				apikey: config.anonKey,
 				Authorization: `Bearer ${accessToken}`,
@@ -313,15 +364,19 @@ async function presignUpload(
 	accessToken: string,
 	filename: string,
 ): Promise<PresignResponse> {
-	const res = await fetch(`${config.url}/functions/v1/presign-upload`, {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${accessToken}`,
-			"Content-Type": "application/json",
+	const res = await loggedFetch(
+		"supabase.presign",
+		`${config.url}/functions/v1/presign-upload`,
+		{
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ filename }),
+			signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
 		},
-		body: JSON.stringify({ filename }),
-		signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
-	});
+	);
 	if (!res.ok) {
 		throw new Error(
 			`presign-upload failed (${res.status}): ${await res.text()}`,
@@ -332,7 +387,7 @@ async function presignUpload(
 
 async function putGzip(path: string, uploadUrl: string): Promise<void> {
 	const payload = gzipSync(readFileSync(path));
-	const res = await fetch(uploadUrl, {
+	const res = await loggedFetch("supabase.storage-put", uploadUrl, {
 		method: "PUT",
 		headers: {
 			"Content-Type": "text/markdown",
@@ -355,26 +410,30 @@ async function confirmUpload(
 	candidate: UploadCandidate,
 	stat: Stats,
 ): Promise<void> {
-	const res = await fetch(`${config.url}/functions/v1/confirm-upload`, {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${accessToken}`,
-			"Content-Type": "application/json",
+	const res = await loggedFetch(
+		"supabase.confirm",
+		`${config.url}/functions/v1/confirm-upload`,
+		{
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				conversationId: presign.conversationId,
+				storagePath: presign.storagePath,
+				filename: basename(candidate.path),
+				fileSizeBytes: stat.size,
+				fileFormat: "markdown",
+				fileLastModified: stat.mtime.toISOString(),
+				localFilePath: candidate.path,
+				localContentHash: candidate.hash,
+				previousVersionId: candidate.previousVersionId,
+				encoding: "gzip",
+			}),
+			signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
 		},
-		body: JSON.stringify({
-			conversationId: presign.conversationId,
-			storagePath: presign.storagePath,
-			filename: basename(candidate.path),
-			fileSizeBytes: stat.size,
-			fileFormat: "markdown",
-			fileLastModified: stat.mtime.toISOString(),
-			localFilePath: candidate.path,
-			localContentHash: candidate.hash,
-			previousVersionId: candidate.previousVersionId,
-			encoding: "gzip",
-		}),
-		signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
-	});
+	);
 	if (!res.ok) {
 		throw new Error(
 			`confirm-upload failed (${res.status}): ${await res.text()}`,
@@ -385,9 +444,15 @@ async function confirmUpload(
 // Background-upload daemon: triggered before every `codev claude/codex/opencode`
 // invocation so prior sessions keep flowing to the backend without blocking the
 // user's workflow. The parent fire-and-forgets a detached `codev upload --daemon`
-// child whose stdio is wired to ~/.codev/upload.log; the child takes a lockfile
-// to prevent concurrent uploads and writes ~/.codev/last-upload.json with the
-// outcome so future runs can surface failures.
+// child; the child takes a lockfile to prevent concurrent uploads and writes
+// ~/.codev/last-upload.json with the outcome so future runs can surface
+// failures.
+//
+// Daemon diagnostics go to the standard NDJSON log (lib/log.ts) like every
+// other command — the child runs through index.tsx, so initLogging is active.
+// ~/.codev/upload.log is NOT a log sink anymore: it only captures the detached
+// child's raw stdio (spawnUploadDaemon wires it), as last-resort evidence for
+// a crash that happens before the logger can.
 
 const STALE_LOCK_MS = 60 * 60 * 1000;
 
@@ -425,16 +490,6 @@ function uploadLockPath(): string {
 
 function lastUploadStatusPath(): string {
 	return join(codevHomeDir(), "last-upload.json");
-}
-
-function logLine(message: string): void {
-	try {
-		const path = uploadLogPath();
-		mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-		appendFileSync(path, `[${new Date().toISOString()}] ${message}\n`);
-	} catch {
-		// Best-effort.
-	}
 }
 
 function isPidAlive(pid: number): boolean {
@@ -509,16 +564,25 @@ function writeStatusFile(status: UploadStatus): void {
 export async function runUploadDaemon(): Promise<number> {
 	const startedAt = new Date().toISOString();
 	if (!loadAuth()) {
-		logLine("Skipped: not logged in.");
+		logInfo("auto-upload skipped: not logged in", {
+			action: "daemon.skip",
+			extra: { reason: "not-logged-in" },
+		});
 		return 0;
 	}
 	if (!tryAcquireLock()) {
-		logLine("Skipped: another upload is in progress.");
+		logInfo("auto-upload skipped: another upload is in progress", {
+			action: "daemon.skip",
+			extra: { reason: "lock-held" },
+		});
 		return 0;
 	}
 	try {
-		logLine("Starting auto-upload.");
-		const summary = await runUpload({ onStatus: (m) => logLine(m) });
+		logInfo("starting auto-upload", {
+			action: "daemon.run",
+			eventType: "start",
+		});
+		const summary = await runUpload();
 		writeStatusFile({
 			ok: summary.failed === 0,
 			startedAt,
@@ -532,13 +596,28 @@ export async function runUploadDaemon(): Promise<number> {
 			},
 			errors: summary.errors.length > 0 ? summary.errors : undefined,
 		});
-		logLine(
-			`Done: uploaded=${summary.uploaded} skipped=${summary.skipped} failed=${summary.failed}`,
+		logInfo(
+			`auto-upload done: uploaded=${summary.uploaded} skipped=${summary.skipped} failed=${summary.failed}`,
+			{
+				action: "daemon.run",
+				eventType: "end",
+				outcome: summary.failed > 0 ? "failure" : "success",
+				extra: {
+					uploaded: summary.uploaded,
+					skipped: summary.skipped,
+					failed: summary.failed,
+				},
+			},
 		);
 		return summary.failed > 0 ? 1 : 0;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		logLine(`Failed: ${message}`);
+		logError("auto-upload failed", {
+			action: "daemon.run",
+			eventType: "end",
+			outcome: "failure",
+			err,
+		});
 		writeStatusFile({
 			ok: false,
 			startedAt,
@@ -565,18 +644,36 @@ export function spawnUploadDaemon(): void {
 	if (!selfPath) return;
 	try {
 		mkdirSync(codevHomeDir(), { recursive: true, mode: 0o700 });
+		// upload.log only receives the child's raw stdio — a crash before the
+		// child's own logger initializes still leaves evidence somewhere.
 		const logFd = openSync(uploadLogPath(), "a");
 		try {
+			const traceId = currentTraceId();
 			const child = spawner.spawn(
 				process.execPath,
 				[selfPath, "upload", "--daemon"],
-				{ detached: true, stdio: ["ignore", logFd, logFd] },
+				{
+					detached: true,
+					stdio: ["ignore", logFd, logFd],
+					// The daemon initLoggings with its own trace id; carrying ours as
+					// CODEV_TRACE_PARENT ties its diagnostic docs to the agent launch
+					// that spawned it.
+					env: {
+						...process.env,
+						...(traceId ? { CODEV_TRACE_PARENT: traceId } : {}),
+					},
+				},
 			);
 			child.unref();
+			logDebug("spawned upload daemon", {
+				action: "process.spawn",
+				extra: { pid: child.pid ?? null },
+			});
 		} finally {
 			closeSync(logFd);
 		}
-	} catch {
+	} catch (err) {
 		// Never block the agent on a failed daemon launch.
+		logWarn("could not spawn upload daemon", { err });
 	}
 }

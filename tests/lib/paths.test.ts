@@ -9,8 +9,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+	agentLogsDir,
 	buildFilename,
-	codevLogsDir,
+	cliLogsDir,
 	formatUtcTimestamp,
 	generateSlug,
 	projectFolderName,
@@ -33,9 +34,15 @@ afterEach(() => {
 	rmSync(tempHome, { recursive: true, force: true });
 });
 
-describe("codevLogsDir", () => {
+describe("agentLogsDir", () => {
+	test("returns ~/.codev/agent-logs", () => {
+		expect(agentLogsDir()).toBe(join(tempHome, ".codev", "agent-logs"));
+	});
+});
+
+describe("cliLogsDir", () => {
 	test("returns ~/.codev/logs", () => {
-		expect(codevLogsDir()).toBe(join(tempHome, ".codev", "logs"));
+		expect(cliLogsDir()).toBe(join(tempHome, ".codev", "logs"));
 	});
 });
 
@@ -77,11 +84,11 @@ describe("projectFolderName", () => {
 });
 
 describe("projectLogsDir", () => {
-	test("joins logs root with the per-project folder name", () => {
+	test("joins the agent-logs root with the per-project folder name", () => {
 		const cwd = join(tempHome, "works", "codev");
 		mkdirSync(cwd, { recursive: true });
 		expect(projectLogsDir(cwd)).toBe(
-			join(tempHome, ".codev", "logs", "works-codev"),
+			join(tempHome, ".codev", "agent-logs", "works-codev"),
 		);
 	});
 });

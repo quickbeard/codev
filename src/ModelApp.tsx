@@ -23,6 +23,7 @@ import {
 	type Tool,
 } from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
+import { logError, logInfo, logWarn } from "@/lib/log.js";
 import { isInvalidKeyError } from "@/lib/proxy.js";
 import { formatToolList } from "@/lib/text.js";
 
@@ -104,6 +105,7 @@ export function ModelApp() {
 	const handleModelsError = useCallback(
 		(err: Error) => {
 			if (!isInvalidKeyError(err)) return;
+			logWarn("saved API key rejected by gateway; re-authenticating", { err });
 			if (reAuthed.current) {
 				setError(
 					`${err.message}\nRe-authentication did not produce a valid key. Run 'codev install' to refresh credentials.`,
@@ -211,8 +213,19 @@ export function ModelApp() {
 				baseUrl: creds.baseUrl,
 				model: creds.model,
 			});
+			logInfo(`default model updated to ${creds.model}`, {
+				action: "configure.tool",
+				outcome: "success",
+				extra: { model: creds.model, tools },
+			});
 			setPhase("done");
 		} catch (err) {
+			logError("model configure failed", {
+				action: "configure.tool",
+				outcome: "failure",
+				err,
+				extra: { tools },
+			});
 			setError((err as Error).message);
 			setPhase("failed");
 		}

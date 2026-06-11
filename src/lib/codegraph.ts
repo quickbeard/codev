@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { constants } from "node:os";
 import type { Tool } from "@/lib/configure.js";
+import { logError, logInfo, logWarn } from "@/lib/log.js";
 import { execAsync } from "@/lib/npm.js";
 import { formatToolList } from "@/lib/text.js";
 
@@ -166,6 +167,11 @@ export const codegraphRunner = {
 // minus the shim-dir stripping (CodeGraph isn't shimmed) and upload daemon.
 export function forwardToCodegraph(args: string[]): Promise<number> {
 	return new Promise((resolve) => {
+		logInfo(`launching ${CODEGRAPH_BIN}`, {
+			action: "process.spawn",
+			eventType: "start",
+			extra: { command: CODEGRAPH_BIN, args },
+		});
 		// On Windows the npm-installed `codegraph` is a `.cmd` shim that Node's
 		// spawn can't resolve without a shell. Use the single-string form to
 		// dodge Node 22's DEP0190 (shell:true + args array). Our args come from
@@ -188,6 +194,13 @@ export function forwardToCodegraph(args: string[]): Promise<number> {
 
 		child.once("error", (err: NodeJS.ErrnoException) => {
 			cleanup();
+			logError(`failed to launch ${CODEGRAPH_BIN}`, {
+				action: "process.exit",
+				eventType: "end",
+				outcome: "failure",
+				err,
+				extra: { command: CODEGRAPH_BIN, code: err.code ?? null },
+			});
 			if (err.code === "ENOENT") {
 				console.error(
 					`'${CODEGRAPH_BIN}' could not be launched. Install it with 'codev install' ` +
@@ -202,10 +215,25 @@ export function forwardToCodegraph(args: string[]): Promise<number> {
 		child.once("exit", (code, signal) => {
 			cleanup();
 			if (code !== null) {
+				(code === 0 ? logInfo : logWarn)(
+					`${CODEGRAPH_BIN} exited (code ${code})`,
+					{
+						action: "process.exit",
+						eventType: "end",
+						outcome: code === 0 ? "success" : "failure",
+						extra: { command: CODEGRAPH_BIN, exit_code: code },
+					},
+				);
 				resolve(code);
 				return;
 			}
 			const signo = signal ? (constants.signals[signal] ?? 0) : 0;
+			logWarn(`${CODEGRAPH_BIN} exited (signal ${signal})`, {
+				action: "process.exit",
+				eventType: "end",
+				outcome: "failure",
+				extra: { command: CODEGRAPH_BIN, exit_code: 128 + signo, signal },
+			});
 			resolve(128 + signo);
 		});
 	});

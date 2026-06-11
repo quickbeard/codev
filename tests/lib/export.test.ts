@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { runExport } from "@/lib/export.js";
+import { migrateLegacyAgentLogs, runExport } from "@/lib/export.js";
 
 let tempHome: string;
 let projectCwd: string;
@@ -95,10 +95,10 @@ afterEach(() => {
 });
 
 describe("runExport", () => {
-	test("writes markdown to ~/.codev/logs/<project>/ and returns a summary", async () => {
+	test("writes markdown to ~/.codev/agent-logs/<project>/ and returns a summary", async () => {
 		seedClaudeSession();
 		const summary = await runExport();
-		const expectedDir = join(tempHome, ".codev", "logs", "works-myapp");
+		const expectedDir = join(tempHome, ".codev", "agent-logs", "works-myapp");
 		expect(summary.outDir).toBe(expectedDir);
 		expect(summary.exported).toBe(1);
 		expect(summary.byAgent["claude-code"]).toBe(1);
@@ -122,7 +122,7 @@ describe("runExport", () => {
 		const statsPath = join(
 			tempHome,
 			".codev",
-			"logs",
+			"agent-logs",
 			"works-myapp",
 			"statistics.json",
 		);
@@ -175,5 +175,65 @@ describe("runExport", () => {
 		expect(existsSync(join(summary.outDir, "claude-code"))).toBe(true);
 		expect(existsSync(join(summary.outDir, "codex"))).toBe(false);
 		expect(existsSync(join(summary.outDir, "opencode"))).toBe(false);
+	});
+});
+
+describe("migrateLegacyAgentLogs", () => {
+	const legacyRoot = () => join(tempHome, ".codev", "logs");
+	const targetRoot = () => join(tempHome, ".codev", "agent-logs");
+
+	test("moves legacy project folders into ~/.codev/agent-logs/", () => {
+		const legacyFile = join(legacyRoot(), "works-myapp", "codex", "a.md");
+		mkdirSync(join(legacyRoot(), "works-myapp", "codex"), { recursive: true });
+		writeFileSync(legacyFile, "hello");
+
+		migrateLegacyAgentLogs();
+
+		expect(existsSync(join(targetRoot(), "works-myapp", "codex", "a.md"))).toBe(
+			true,
+		);
+		expect(existsSync(join(legacyRoot(), "works-myapp"))).toBe(false);
+	});
+
+	test("leaves diagnostic ndjson files at the legacy root in place", () => {
+		mkdirSync(join(legacyRoot(), "works-myapp"), { recursive: true });
+		const diagFile = join(legacyRoot(), "codev-20260610.ndjson");
+		writeFileSync(diagFile, "{}\n");
+
+		migrateLegacyAgentLogs();
+
+		expect(existsSync(diagFile)).toBe(true);
+		expect(existsSync(join(targetRoot(), "works-myapp"))).toBe(true);
+	});
+
+	test("keeps the destination copy when a project folder exists at both roots", () => {
+		mkdirSync(join(legacyRoot(), "works-myapp"), { recursive: true });
+		writeFileSync(join(legacyRoot(), "works-myapp", "old.md"), "old");
+		mkdirSync(join(targetRoot(), "works-myapp"), { recursive: true });
+		writeFileSync(join(targetRoot(), "works-myapp", "new.md"), "new");
+
+		migrateLegacyAgentLogs();
+
+		expect(existsSync(join(targetRoot(), "works-myapp", "new.md"))).toBe(true);
+		expect(existsSync(join(targetRoot(), "works-myapp", "old.md"))).toBe(false);
+		expect(existsSync(join(legacyRoot(), "works-myapp", "old.md"))).toBe(true);
+	});
+
+	test("is a no-op when no legacy dir exists", () => {
+		expect(() => migrateLegacyAgentLogs()).not.toThrow();
+		expect(existsSync(targetRoot())).toBe(false);
+	});
+
+	test("runExport relocates legacy exports before writing new ones", async () => {
+		mkdirSync(join(legacyRoot(), "old-project", "codex"), { recursive: true });
+		writeFileSync(join(legacyRoot(), "old-project", "codex", "a.md"), "x");
+		seedClaudeSession();
+
+		const summary = await runExport();
+
+		expect(summary.outDir).toBe(join(targetRoot(), "works-myapp"));
+		expect(existsSync(join(targetRoot(), "old-project", "codex", "a.md"))).toBe(
+			true,
+		);
 	});
 });

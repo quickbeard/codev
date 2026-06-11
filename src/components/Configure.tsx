@@ -12,6 +12,7 @@ import {
 	kindForTool,
 	type Tool,
 } from "@/lib/configure.js";
+import { logError, logInfo } from "@/lib/log.js";
 
 interface ConfigureProps {
 	tools: Tool[];
@@ -73,6 +74,15 @@ export function Configure({ tools, creds, onDone }: ConfigureProps) {
 					results.push(...configureContinue(creds));
 				}
 			}
+			logInfo(`configured ${results.length} config file(s)`, {
+				action: "configure.tool",
+				outcome: "success",
+				extra: {
+					backup_only: creds === null,
+					kinds: results.map((r) => r.kind),
+					backups_created: results.filter((r) => r.created).length,
+				},
+			});
 			// Skip-configuration (creds === null) still runs backupOnly above for
 			// its side-effects, but renders no rows — SetupApp hides the whole
 			// Step on that path. Only the configure path emits visible output.
@@ -85,6 +95,12 @@ export function Configure({ tools, creds, onDone }: ConfigureProps) {
 			// render together rather than in two staggered beats.
 			onDone(true);
 		} catch (err) {
+			logError("configure failed", {
+				action: "configure.tool",
+				outcome: "failure",
+				err,
+				extra: { tools },
+			});
 			setError((err as Error).message);
 			setPhase("error");
 			onDone(false);

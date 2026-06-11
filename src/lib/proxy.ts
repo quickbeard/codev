@@ -4,6 +4,7 @@ import {
 	AI_GATEWAY_URL,
 	PROXY_URL,
 } from "@/lib/const.js";
+import { loggedFetch } from "@/lib/log.js";
 
 interface ExchangeResponse {
 	api_key: string;
@@ -41,11 +42,15 @@ export interface SupabaseSession {
 }
 
 export async function fetchApiKey(accessToken: string): Promise<string> {
-	const res = await fetch(`${PROXY_URL()}/auth/exchange`, {
-		method: "POST",
-		headers: { Authorization: `Bearer ${accessToken}` },
-		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
-	});
+	const res = await loggedFetch(
+		"proxy.auth-exchange",
+		`${PROXY_URL()}/auth/exchange`,
+		{
+			method: "POST",
+			headers: { Authorization: `Bearer ${accessToken}` },
+			signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+		},
+	);
 
 	if (!res.ok) {
 		const body = (await res.json().catch(() => ({}))) as ErrorResponse;
@@ -64,7 +69,7 @@ export async function fetchApiKey(accessToken: string): Promise<string> {
 export async function fetchCodevConfig(
 	accessToken: string,
 ): Promise<CodevConfig> {
-	const res = await fetch(`${PROXY_URL()}/config`, {
+	const res = await loggedFetch("proxy.config", `${PROXY_URL()}/config`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
 		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
@@ -107,7 +112,7 @@ export async function validateApiKey(
 	apiKey: string,
 	baseUrl?: string,
 ): Promise<boolean> {
-	const res = await fetch(keyInfoUrl(baseUrl), {
+	const res = await loggedFetch("gateway.key-info", keyInfoUrl(baseUrl), {
 		method: "GET",
 		headers: { Authorization: `Bearer ${apiKey}` },
 		signal: AbortSignal.timeout(VALIDATE_TIMEOUT_MS),
@@ -145,7 +150,7 @@ export async function fetchModels(
 	apiKey: string,
 	baseUrl?: string,
 ): Promise<string[]> {
-	const res = await fetch(modelsUrl(baseUrl), {
+	const res = await loggedFetch("gateway.models", modelsUrl(baseUrl), {
 		method: "GET",
 		headers: {
 			accept: "application/json",
@@ -169,11 +174,15 @@ export async function fetchModels(
 export async function fetchSupabaseSession(
 	accessToken: string,
 ): Promise<SupabaseSession> {
-	const res = await fetch(`${PROXY_URL()}/supabase/exchange`, {
-		method: "POST",
-		headers: { Authorization: `Bearer ${accessToken}` },
-		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
-	});
+	const res = await loggedFetch(
+		"proxy.supabase-exchange",
+		`${PROXY_URL()}/supabase/exchange`,
+		{
+			method: "POST",
+			headers: { Authorization: `Bearer ${accessToken}` },
+			signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+		},
+	);
 
 	if (!res.ok) {
 		const body = (await res.json().catch(() => ({}))) as ErrorResponse;
