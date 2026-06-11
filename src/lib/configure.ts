@@ -178,8 +178,8 @@ function readClaudeCodeConfig(): AgentConfigResult {
 		return {
 			baseUrl: (env[CLAUDE_K.baseUrl] as string) || undefined,
 		};
-	} catch {
-		return {};
+	} catch (e) {
+		throw new Error(`Failed to parse Claude Code config at ${path}: ${e}`);
 	}
 }
 
@@ -200,8 +200,8 @@ function readCodexConfig(): AgentConfigResult {
 		return {
 			baseUrl: (aigateway[CODEX_K.baseUrl as string] as string) || undefined,
 		};
-	} catch {
-		return {};
+	} catch (e) {
+		throw new Error(`Failed to parse Codex config at ${path}: ${e}`);
 	}
 }
 
@@ -224,8 +224,8 @@ function readOpenCodeConfig(): AgentConfigResult {
 		return {
 			baseUrl: (options[OPENCODE_K.baseURL as string] as string) || undefined,
 		};
-	} catch {
-		return {};
+	} catch (e) {
+		throw new Error(`Failed to parse OpenCode config at ${path}: ${e}`);
 	}
 }
 
