@@ -189,7 +189,8 @@ switch (command) {
 		if (args.includes("--daemon")) {
 			process.exit(await runUploadDaemon());
 		}
-		const { waitUntilExit } = render(<UploadApp />);
+		const force = args.includes("--force") || args.includes("-f");
+		const { waitUntilExit } = render(<UploadApp force={force} />);
 		try {
 			await waitUntilExit();
 			process.exit(0);

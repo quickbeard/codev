@@ -14,6 +14,7 @@ Commands:
   config              Configure existing AI coding agents
   update              Update installed AI coding agents
   upload              Export and upload logs to the monitor module
+                      (--force, -f re-uploads every conversation)
   model               Switch the default model
   restore [agent]     Restore an agent's pre-CoDev config from its *.backup
                       (no arg processes every agent)

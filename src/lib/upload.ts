@@ -31,6 +31,11 @@ import { AGENTS } from "@/providers/types.js";
 
 export interface UploadOptions {
 	cwd?: string;
+	// Re-upload every exported log even when its content hash matches a prior
+	// upload. The previous-version link is still sent, so a forced re-upload
+	// supersedes the existing conversation instead of creating a duplicate.
+	// Wired to `codev upload --force`; the background daemon never sets it.
+	force?: boolean;
 	onStatus?: (message: string) => void;
 	// Surfaces the SSO authorize URL when ensureAuth has to open a browser.
 	// Lets the caller render the URL on its own line (e.g. UploadApp keeps it
@@ -78,6 +83,7 @@ const UPLOAD_TIMEOUT_MS = 60_000;
 
 export async function runUpload({
 	cwd = process.cwd(),
+	force = false,
 	onStatus = () => {},
 	onLoginUrl,
 	onManualSubmit,
@@ -106,12 +112,12 @@ export async function runUpload({
 	// guarantees auth.access_token is fresh, so refreshCodevConfig will
 	// authenticate against the proxy with a valid bearer.
 	try {
-		return await runSupabaseUpload(outDir, files, auth, onStatus);
+		return await runSupabaseUpload(outDir, files, auth, onStatus, force);
 	} catch (err) {
 		if (!isRefreshableError(err)) throw err;
 		onStatus("Refreshing CoDev config and retrying...");
 		await refreshCodevConfig(auth.access_token, onStatus);
-		return await runSupabaseUpload(outDir, files, auth, onStatus);
+		return await runSupabaseUpload(outDir, files, auth, onStatus, force);
 	}
 }
 
@@ -120,6 +126,7 @@ async function runSupabaseUpload(
 	files: string[],
 	auth: AuthData,
 	onStatus: (message: string) => void,
+	force: boolean,
 ): Promise<UploadSummary> {
 	const summary: UploadSummary = {
 		outDir,
@@ -136,7 +143,7 @@ async function runSupabaseUpload(
 	const uploadToken = supabaseSession.access_token;
 	onStatus("Checking existing uploads...");
 	const existing = await fetchExistingUploads(config, uploadToken);
-	const candidates = filterNewFiles(files, existing);
+	const candidates = filterNewFiles(files, existing, force);
 	summary.skipped = files.length - candidates.length;
 
 	for (const candidate of candidates) {
@@ -191,13 +198,17 @@ export function fileSha256(path: string): string {
 export function filterNewFiles(
 	paths: string[],
 	existing: Map<string, ExistingConversation>,
+	force = false,
 ): UploadCandidate[] {
 	const out: UploadCandidate[] = [];
 	for (const path of paths) {
 		const abs = realpathSync(path);
 		const hash = fileSha256(abs);
 		const previous = existing.get(abs);
-		if (previous?.local_content_hash === hash) continue;
+		// `codev upload --force` re-uploads everything; otherwise an unchanged
+		// file (hash matches the stored row) is skipped. Either way we keep the
+		// previous version id so a re-upload supersedes rather than duplicates.
+		if (!force && previous?.local_content_hash === hash) continue;
 		out.push({ path: abs, hash, previousVersionId: previous?.id ?? "" });
 	}
 	return out;
@@ -263,6 +274,10 @@ async function fetchExistingUploads(
 				Prefer: "count=none",
 				Range: `${from}-${to}`,
 			},
+			// Per-page timeout, matching presign/put/confirm. Without it a hung
+			// conversations endpoint stalls the whole upload indefinitely — and in
+			// the daemon holds the lockfile until the 1h stale reclaim.
+			signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
 		});
 		if (!res.ok) {
 			throw new Error(
