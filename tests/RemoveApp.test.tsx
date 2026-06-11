@@ -8,10 +8,6 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-function tick(ms = 30): Promise<void> {
-	return new Promise((r) => setTimeout(r, ms));
-}
-
 async function waitForFrame(
 	frames: string[],
 	needle: string,
