@@ -139,6 +139,8 @@ Instrumented seams — extend these rather than adding ad-hoc writes: `loggedFet
 
 Daemon specifics: `runUploadDaemon` logs `daemon.skip` / `daemon.run` documents to the NDJSON log; `~/.codev/upload.log` is NOT a log sink — it only captures the detached child's raw stdio (wired in `spawnUploadDaemon`) as last-resort crash evidence. `~/.codev/last-upload.json` is status, not logging, and stays.
 
+The reader side is `src/lib/logs.ts` (`codev logs`): bare mode prints the most recent run, excluding this very invocation's trace and prior `logs` runs; `--trace <id>` accepts a prefix; child runs are linked via `codev.parent_trace_id`. Plain console output, no Ink.
+
 Testing: logging is a silent no-op until `initLogging` runs, so ordinary tests need no setup and never write files. Tests that assert documents stub `CODEV_LOG_DIR`, call `initLogging(cmd, [], { installProcessHooks: false })` (so vitest's process stays free of our exit/crash listeners), and `resetLogging()` in `afterEach`. Related: `login()`'s force-login probe is keyed off `~/.codev/auth.json` — not the `~/.codev` dir — precisely because the logger creates `~/.codev/logs` at the entry of every command.
 
 ## CodeGraph integration

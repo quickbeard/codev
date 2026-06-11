@@ -78,8 +78,12 @@ Then restart your terminal.
 Every codev command appends a structured diagnostic log to `~/.codev/logs/codev-YYYYMMDD.ndjson` — one [Elastic Common Schema](https://www.elastic.co/guide/en/ecs/current/index.html) JSON document per line. If a command misbehaves, this file shows what actually happened: each network request with its status and duration, every child process with its exit code and stderr tail, step-by-step flow progress, and any crash with a stack trace.
 
 ```bash
-# Everything from today's failed runs:
-jq 'select(.log.level == "error" or .log.level == "warn")' ~/.codev/logs/codev-$(date -u +%Y%m%d).ndjson
+codev logs               # pretty-print the most recent run
+codev logs --trace <id>  # drill into one run (child runs are listed by the output above)
+codev logs --path        # print the newest log file's path
+
+# Or query the raw NDJSON directly — everything from today's failed runs:
+jq 'select(.log.level == "error" or .log.level == "warn")' "$(codev logs --path)"
 ```
 
 Details worth knowing:

@@ -6,6 +6,7 @@ import { logout } from "@/lib/auth.js";
 import { forwardToCodegraph } from "@/lib/codegraph.js";
 import { printHelp, printVersion } from "@/lib/help.js";
 import { initLogging } from "@/lib/log.js";
+import { runLogs } from "@/lib/logs.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
 import {
 	RESTORE_AGENTS,
@@ -202,6 +203,10 @@ switch (command) {
 		} catch {
 			process.exit(1);
 		}
+		break;
+	}
+	case "logs": {
+		process.exit(runLogs(args));
 		break;
 	}
 	case "restore": {

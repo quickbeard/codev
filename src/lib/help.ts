@@ -19,6 +19,8 @@ Commands:
                       (no arg processes every agent)
   codegraph [args]    Forward commands to CodeGraph
                       (e.g. codev codegraph init -y)
+  logs                Show the last run from the diagnostic log
+                      (--path prints the newest file, --trace <id> shows one run)
   login               Sign in to SSO (--force to bypass cached session)
   logout              Sign out of SSO
   remove              Revert this machine to its pre-CoDev state (--yes to skip prompt)
