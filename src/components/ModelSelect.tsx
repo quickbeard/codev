@@ -1,7 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
-import { fetchModels } from "@/lib/proxy.js";
+import { fetchModels, isInvalidKeyError } from "@/lib/proxy.js";
 
 interface ModelSelectProps {
 	apiKey: string;
@@ -15,17 +15,29 @@ interface ModelSelectProps {
 	// don't navigate away can omit this — ModelSelect renders its own error
 	// frame + retry prompt regardless.
 	onError?: (err: Error) => void;
+	// When set, a non-auth fetch failure (network / gateway 5xx / timeout /
+	// empty list) is treated as recoverable: instead of the errored-with-retry
+	// frame, ModelSelect auto-selects this model (via onSelect) so the flow can
+	// proceed. Auth failures (401/403) still go through onError untouched, so
+	// callers like ModelApp can re-authenticate — a fallback model is useless
+	// with a rejected key. Omit to keep retry-on-every-failure.
+	fallbackModel?: string;
+	// Fires once when ModelSelect falls back to `fallbackModel`. Parents use it
+	// to render a persistent warning; the model itself arrives via onSelect.
+	onFallback?: (err: Error) => void;
 	readOnly?: boolean;
 	selected?: string | null;
 }
 
-type Phase = "loading" | "ready" | "errored";
+type Phase = "loading" | "ready" | "errored" | "fallback";
 
 export function ModelSelect({
 	apiKey,
 	baseUrl,
 	onSelect,
 	onError,
+	fallbackModel,
+	onFallback,
 	readOnly = false,
 	selected = null,
 }: ModelSelectProps) {
@@ -54,6 +66,21 @@ export function ModelSelect({
 			})
 			.catch((err: Error) => {
 				if (cancelled) return;
+				// Recoverable failure with a fallback configured: warn once, then
+				// auto-select the fallback so the flow proceeds. Auth failures
+				// (401/403) skip this and fall through to the errored/onError path
+				// so callers can re-authenticate instead of papering over a bad key.
+				if (fallbackModel && !isInvalidKeyError(err)) {
+					setModels([fallbackModel]);
+					setError(err.message);
+					setPhase("fallback");
+					if (!errorReported.current) {
+						errorReported.current = true;
+						onFallback?.(err);
+					}
+					onSelect(fallbackModel, [fallbackModel]);
+					return;
+				}
 				setPhase("errored");
 				setError(err.message);
 				if (!errorReported.current) {
@@ -102,6 +129,23 @@ export function ModelSelect({
 			<Box flexDirection="column">
 				<Text color="red">{`Failed to fetch models: ${error ?? "unknown error"}`}</Text>
 				<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
+			</Box>
+		);
+	}
+
+	if (phase === "fallback") {
+		// The fallback model has already been handed to onSelect; the parent
+		// renders the explanatory warning. Show the model as the selected row so
+		// it reads consistently in the (read-only) step history.
+		return (
+			<Box flexDirection="column">
+				{models.map((id) => (
+					<Box key={id}>
+						<Text color="green">●</Text>
+						<Text> </Text>
+						<Text>{id}</Text>
+					</Box>
+				))}
 			</Box>
 		);
 	}

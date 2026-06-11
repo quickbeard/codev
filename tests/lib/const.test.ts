@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	DEFAULT_PROXY_URL,
+	FALLBACK_MODEL,
 	PROXY_URL,
 	SUPABASE_ANON_KEY,
 	SUPABASE_URL,
@@ -120,5 +121,11 @@ describe("PROXY_URL", () => {
 			supabase_url: "should-not-matter",
 		});
 		expect(PROXY_URL()).toBe("https://only-this.example.com");
+	});
+});
+
+describe("FALLBACK_MODEL", () => {
+	test("decodes to the expected model id", () => {
+		expect(FALLBACK_MODEL).toBe("MiniMax/MiniMax-M2.7");
 	});
 });

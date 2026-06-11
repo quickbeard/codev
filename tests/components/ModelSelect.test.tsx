@@ -171,4 +171,53 @@ describe("ModelSelect", () => {
 		expect(onError.mock.calls[0]?.[0]?.message).toContain("502");
 		expect(onError.mock.calls[1]?.[0]?.message).toContain("401");
 	});
+
+	test("with fallbackModel, a non-auth failure auto-selects the fallback and warns", async () => {
+		vi.spyOn(proxy, "fetchModels").mockRejectedValue(
+			new Error("Models fetch failed (503): Service Unavailable"),
+		);
+		const onSelect = vi.fn();
+		const onFallback = vi.fn();
+		const onError = vi.fn();
+		const { lastFrame } = render(
+			<ModelSelect
+				apiKey="sk-x"
+				fallbackModel="fb/model-1"
+				onSelect={onSelect}
+				onFallback={onFallback}
+				onError={onError}
+			/>,
+		);
+		await vi.waitFor(() => expect(onSelect).toHaveBeenCalled());
+		expect(onSelect).toHaveBeenCalledWith("fb/model-1", ["fb/model-1"]);
+		expect(onFallback).toHaveBeenCalledTimes(1);
+		// Non-auth failure routes to the fallback, not the onError/re-auth path.
+		expect(onError).not.toHaveBeenCalled();
+		const out = lastFrame() ?? "";
+		expect(out).toContain("fb/model-1");
+		expect(out).not.toContain("Press Enter to retry");
+	});
+
+	test("with fallbackModel, a 401 still routes to onError (no fallback)", async () => {
+		vi.spyOn(proxy, "fetchModels").mockRejectedValue(
+			new Error("Models fetch failed (401): invalid key"),
+		);
+		const onSelect = vi.fn();
+		const onFallback = vi.fn();
+		const onError = vi.fn();
+		const { lastFrame } = render(
+			<ModelSelect
+				apiKey="sk-bad"
+				fallbackModel="fb/model-1"
+				onSelect={onSelect}
+				onFallback={onFallback}
+				onError={onError}
+			/>,
+		);
+		await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+		// Auth failures must not silently fall back — the caller re-authenticates.
+		expect(onSelect).not.toHaveBeenCalled();
+		expect(onFallback).not.toHaveBeenCalled();
+		expect(lastFrame() ?? "").toContain("Press Enter to retry");
+	});
 });
