@@ -109,6 +109,28 @@ describe("upload helpers", () => {
 		expect(result).toHaveLength(1);
 		expect(result[0]?.previousVersionId).toBe("prev");
 	});
+
+	test("force keeps unchanged files as candidates with their previous version id", () => {
+		const path = writeLog("forced.md", "same");
+		const abs = realpathSync(path);
+		const hash = fileSha256(path);
+		const existing = new Map([
+			[
+				abs,
+				{
+					id: "prev",
+					local_file_path: abs,
+					local_content_hash: hash,
+					uploaded_at: null,
+				},
+			],
+		]);
+		// A matching hash is normally filtered out (see the test above); force
+		// keeps it, still carrying the previous version id for lineage.
+		const result = filterNewFiles([path], existing, true);
+		expect(result).toHaveLength(1);
+		expect(result[0]?.previousVersionId).toBe("prev");
+	});
 });
 
 describe("runUpload", () => {
@@ -138,6 +160,9 @@ describe("runUpload", () => {
 				expect((init?.headers as Record<string, string>).Authorization).toBe(
 					"Bearer supabase-upload-token",
 				);
+				// Regression guard for the per-page timeout: the conversations
+				// fetch must carry an abort signal like every other call here.
+				expect(init?.signal).toBeInstanceOf(AbortSignal);
 				return new Response("[]", {
 					headers: { "Content-Type": "application/json" },
 				});
@@ -174,6 +199,78 @@ describe("runUpload", () => {
 			expect(summary.failed).toBe(0);
 			expect(calls.some((c) => c.includes("presign-upload"))).toBe(true);
 			expect(calls.some((c) => c.includes("confirm-upload"))).toBe(true);
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	test("force re-uploads a file whose hash already matches an existing row", async () => {
+		writeAuth();
+		const path = writeLog("unchanged.md", "hello");
+		const abs = realpathSync(path);
+		const hash = fileSha256(path);
+
+		let presignCalls = 0;
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+			input: string | URL | Request,
+			init?: RequestInit,
+		) => {
+			const url =
+				typeof input === "string" || input instanceof URL
+					? String(input)
+					: input.url;
+			if (url.includes("/codev-proxy/supabase/exchange")) {
+				return new Response(
+					JSON.stringify({
+						access_token: "supabase-upload-token",
+						user: { id: "u", email: "u@example.com" },
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/rest/v1/conversations")) {
+				// The stored row already matches the local hash — a normal run would
+				// skip this file. Force must re-upload it anyway.
+				return new Response(
+					JSON.stringify([
+						{
+							id: "prev",
+							local_file_path: abs,
+							local_content_hash: hash,
+							uploaded_at: null,
+						},
+					]),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/functions/v1/presign-upload")) {
+				presignCalls++;
+				return new Response(
+					JSON.stringify({
+						uploadUrl: "https://upload.example.com/file",
+						conversationId: "cid",
+						storagePath: "u/cid/unchanged.md",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url === "https://upload.example.com/file") {
+				return new Response("", { status: 200 });
+			}
+			if (url.includes("/functions/v1/confirm-upload")) {
+				// Lineage preserved: the forced re-upload supersedes the prior row.
+				const body = JSON.parse(String(init?.body));
+				expect(body.previousVersionId).toBe("prev");
+				return new Response(JSON.stringify({ ok: true }));
+			}
+			return new Response("not found", { status: 404 });
+		}) as typeof fetch);
+
+		try {
+			const summary = await runUpload({ force: true });
+			expect(summary.uploaded).toBe(1);
+			expect(summary.skipped).toBe(0);
+			expect(presignCalls).toBe(1);
 		} finally {
 			fetchSpy.mockRestore();
 		}
