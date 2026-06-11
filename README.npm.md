@@ -26,7 +26,7 @@ When you run `codev install` (or `codev config`), CoDev also installs [CodeGraph
 
 ```bash
 cd your-project
-codev codegraph init -y     # initialize + index the current project (one time)
+codev codegraph init        # initialize + index the current project (one time)
 codev codegraph status      # show index status
 ```
 
