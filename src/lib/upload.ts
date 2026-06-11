@@ -49,6 +49,13 @@ export interface UploadOptions {
 	// UploadApp). Returns an inline error string to re-prompt, or null once the
 	// pasted code is accepted. The daemon doesn't pass this — no TTY.
 	onManualSubmit?: (submit: (pasted: string) => string | null) => void;
+	// Fires once a fresh SSO login completes — via the loopback browser callback
+	// or a manual paste — before the upload proceeds. Lets the interactive caller
+	// tear down the login UI (authorize URL + paste-back prompt) that onLoginUrl
+	// and onManualSubmit put up; otherwise it lingers on screen while the upload
+	// runs (the browser path never sets `submitting`, so nothing else hides it).
+	// The daemon doesn't pass this.
+	onLoginDone?: () => void;
 }
 
 export interface UploadSummary {
@@ -87,6 +94,7 @@ export async function runUpload({
 	onStatus = () => {},
 	onLoginUrl,
 	onManualSubmit,
+	onLoginDone,
 }: UploadOptions = {}): Promise<UploadSummary> {
 	onStatus("Exporting local conversations...");
 	await runExport(onStatus);
@@ -104,7 +112,12 @@ export async function runUpload({
 		};
 	}
 
-	const auth = await ensureAuth(onStatus, onLoginUrl, onManualSubmit);
+	const auth = await ensureAuth(
+		onStatus,
+		onLoginUrl,
+		onManualSubmit,
+		onLoginDone,
+	);
 
 	// Try the Supabase block once. If it trips a refreshable failure (cache
 	// missing, or Supabase rejected our credentials), refresh the cached
@@ -218,6 +231,7 @@ async function ensureAuth(
 	onStatus: (message: string) => void,
 	onLoginUrl?: (url: string) => void,
 	onManualSubmit?: (submit: (pasted: string) => string | null) => void,
+	onLoginDone?: () => void,
 ) {
 	const auth = loadAuth();
 	if (auth) return auth;
@@ -235,6 +249,10 @@ async function ensureAuth(
 		onManualSubmit?.(submitManualCode);
 		openBrowser();
 	});
+	// Login finished (loopback browser callback or manual paste). Signal the
+	// caller to dismiss the login URL + paste-back prompt before the upload
+	// continues, so they don't linger on screen.
+	onLoginDone?.();
 	// login() no longer refreshes CoDev config on its own — every caller does
 	// it explicitly so the call uses the user's chosen proxy URL. On a fresh
 	// login we don't have a cache yet, so populating it here avoids burning
