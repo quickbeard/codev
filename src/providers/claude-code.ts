@@ -105,6 +105,33 @@ function parseToolResults(content: unknown): ParsedToolResult[] {
 	return results;
 }
 
+// Total characters a record's content carried — used to roll subagent
+// (sidechain) turns into the parent's subagentChars* without rendering them,
+// mirroring the OpenCode descendant rollup. Sums every text-bearing block
+// (text, thinking, tool-call input, tool-result output) so the estimate
+// reflects the subagent's full volume, not just its visible text.
+function contentCharCount(content: unknown): number {
+	if (typeof content === "string") return content.length;
+	if (!Array.isArray(content)) return 0;
+	let total = extractText(content).length;
+	for (const result of parseToolResults(content))
+		total += result.content.length;
+	for (const item of content) {
+		if (!item || typeof item !== "object") continue;
+		const obj = item as Record<string, unknown>;
+		if (obj.type === "thinking" && typeof obj.thinking === "string") {
+			total += obj.thinking.length;
+		} else if (
+			obj.type === "tool_use" &&
+			obj.input &&
+			typeof obj.input === "object"
+		) {
+			total += JSON.stringify(obj.input).length;
+		}
+	}
+	return total;
+}
+
 async function parseSessionFile(filePath: string): Promise<Session | null> {
 	const raw = await readFile(filePath, "utf-8");
 	const lines = raw.split("\n").filter((l) => l.trim().length > 0);
@@ -116,6 +143,8 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 	let updatedAt: Date | null = null;
 	const messages: Message[] = [];
 	let firstUserMessage = "";
+	let subagentCharsIn = 0;
+	let subagentCharsOut = 0;
 
 	let activeAssistantContent = "";
 	let activeAssistantTimestamp: string | undefined;
@@ -160,8 +189,17 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 		} catch {
 			continue;
 		}
-		// Skip subagent turns — folded into the parent via the `Task` tool-use.
-		if (rec.isSidechain === true) continue;
+		// Fold subagent turns into the parent: their content isn't rendered (the
+		// parent's `Task` tool-use already shows the spawn + result), but their
+		// character volume is rolled into subagentChars* so the parent reflects
+		// the subagent's cost — matching the OpenCode descendant rollup. Bucket by
+		// role: assistant output is "out", user/tool input is "in".
+		if (rec.isSidechain === true) {
+			const chars = contentCharCount(rec.message?.content);
+			if (rec.message?.role === "assistant") subagentCharsOut += chars;
+			else subagentCharsIn += chars;
+			continue;
+		}
 		if (!sessionId && typeof rec.sessionId === "string") {
 			sessionId = rec.sessionId;
 		}
@@ -293,6 +331,9 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 		title: aiTitle || undefined,
 		firstUserMessage,
 		messages,
+		...(subagentCharsIn > 0 || subagentCharsOut > 0
+			? { subagentCharsIn, subagentCharsOut }
+			: {}),
 	};
 }
 

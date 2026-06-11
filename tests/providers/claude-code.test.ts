@@ -429,10 +429,11 @@ describe("claudeCodeProvider.listSessions", () => {
 		expect(sessions).toEqual([]);
 	});
 
-	test("excludes isSidechain records so subagent internal turns are not counted", async () => {
+	test("folds isSidechain turns into subagentChars without rendering them", async () => {
 		// The parent session has one user prompt and one Task spawn (inline).
 		// The subagent's own turns are written to the same file flagged with
-		// isSidechain — they must not appear in the exported transcript.
+		// isSidechain — they must not appear in the exported transcript, but
+		// their character volume is rolled into subagentChars*.
 		const sessionId = "abcdefab-1234-5678-9abc-def012345678";
 		const lines = [
 			JSON.stringify({
@@ -505,8 +506,12 @@ describe("claudeCodeProvider.listSessions", () => {
 			'data-tool-type="task" data-tool-name="task"',
 		);
 		expect(s.messages[1]?.content).toContain("src/index.ts");
-		// Subagent's own text must not leak into the parent.
+		// Subagent's own text must not leak into the parent body...
 		expect(s.messages[1]?.content).not.toContain("Found: src/index.ts");
+		// ...but its character volume is rolled into subagentChars* (matching the
+		// OpenCode descendant rollup) so the parent reflects the subagent's cost.
+		expect(s.subagentCharsIn).toBe("List all ts files".length);
+		expect(s.subagentCharsOut).toBe("Found: src/index.ts".length);
 	});
 
 	test('marks orphan tool_use as data-edit-status="aborted", not rejected', async () => {

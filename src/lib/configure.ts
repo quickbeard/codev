@@ -147,7 +147,6 @@ const OPENCODE_K = {
 
 export interface AgentConfigResult {
 	baseUrl?: string;
-	model?: string;
 }
 
 export function readAgentConfig(agent: Agent): AgentConfigResult {
@@ -178,7 +177,6 @@ function readClaudeCodeConfig(): AgentConfigResult {
 		>;
 		return {
 			baseUrl: (env[CLAUDE_K.baseUrl] as string) || undefined,
-			model: (env[CLAUDE_K.model] as string) || undefined,
 		};
 	} catch {
 		return {};
@@ -201,7 +199,6 @@ function readCodexConfig(): AgentConfigResult {
 			{};
 		return {
 			baseUrl: (aigateway[CODEX_K.baseUrl as string] as string) || undefined,
-			model: (r[CODEX_K.model as string] as string) || undefined,
 		};
 	} catch {
 		return {};
@@ -224,15 +221,8 @@ function readOpenCodeConfig(): AgentConfigResult {
 		const options =
 			(aigateway[OPENCODE_K.options as string] as Record<string, unknown>) ||
 			{};
-		// OpenCode's model field is "aigateway/MiniMax/MiniMax-M2.7"; strip the
-		// provider prefix so the value is a plain model ID like Claude/Codex use.
-		const fullModel = (r[OPENCODE_K.model as string] as string) || "";
-		const model = fullModel.startsWith(`${OPENCODE_K.providerKey}/`)
-			? fullModel.slice(OPENCODE_K.providerKey.length + 1)
-			: fullModel;
 		return {
 			baseUrl: (options[OPENCODE_K.baseURL as string] as string) || undefined,
-			model: model || undefined,
 		};
 	} catch {
 		return {};

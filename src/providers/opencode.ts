@@ -69,8 +69,9 @@ interface SessionRow {
 	// sessions have it NULL. Subagent runs are folded into their parent (the
 	// parent already embeds the spawn prompt + result as an inline `task`
 	// tool-use), so child rows are skipped rather than uploaded as standalone
-	// conversations.
-	parent_id: string | null;
+	// conversations. Optional: older OpenCode schemas predate the column, in
+	// which case it's omitted from the SELECT entirely.
+	parent_id?: string | null;
 	time_created: number;
 	time_updated: number;
 }
@@ -112,23 +113,46 @@ function resolveProject(db: DB, cwd: string): ProjectMatch | null {
 	return null;
 }
 
-function listSessionRows(db: DB, match: ProjectMatch): SessionRow[] {
+// OpenCode added the session.parent_id column when it introduced subagents.
+// Databases from older versions lack it, so probe before relying on it —
+// without this, the parent_id queries below throw "no such column: parent_id"
+// and runExport drops EVERY OpenCode session. When the column is absent we fall
+// back to the pre-subagent behavior: export all sessions, skip the rollup.
+function sessionHasParentId(db: DB): boolean {
+	try {
+		const cols = db
+			.prepare<[], { name: string }>("PRAGMA table_info(session)")
+			.all();
+		return cols.some((c) => c.name === "parent_id");
+	} catch {
+		return false;
+	}
+}
+
+function listSessionRows(
+	db: DB,
+	match: ProjectMatch,
+	hasParentId: boolean,
+): SessionRow[] {
 	// `parent_id IS NULL` drops normal-mode subagent sessions — they're folded
 	// into their spawning session, which already carries the spawn inline.
-	// Headless subagents (spawned programmatically without parent_id) are left
-	// to appear as standalone sessions; their tokens are counted independently.
+	// Headless subagents (no parent_id) appear standalone, counted independently.
+	// On schemas without the column, select every session instead — exporting a
+	// subagent as standalone beats throwing and losing the whole provider.
+	const cols = hasParentId
+		? "id, title, directory, parent_id, time_created, time_updated"
+		: "id, title, directory, time_created, time_updated";
+	const parentFilter = hasParentId ? " AND parent_id IS NULL" : "";
 	if (match.directoryFilter) {
 		return db
 			.prepare<[string, string], SessionRow>(
-				"SELECT id, title, directory, parent_id, time_created, time_updated " +
-					"FROM session WHERE project_id = ? AND directory = ? AND parent_id IS NULL ORDER BY time_created",
+				`SELECT ${cols} FROM session WHERE project_id = ? AND directory = ?${parentFilter} ORDER BY time_created`,
 			)
 			.all(match.projectId, match.directoryFilter);
 	}
 	return db
 		.prepare<[string], SessionRow>(
-			"SELECT id, title, directory, parent_id, time_created, time_updated " +
-				"FROM session WHERE project_id = ? AND parent_id IS NULL ORDER BY time_created",
+			`SELECT ${cols} FROM session WHERE project_id = ?${parentFilter} ORDER BY time_created`,
 		)
 		.all(match.projectId);
 }
@@ -390,7 +414,11 @@ function collectDescendantChars(db: DB, sessionId: string): ChildChars {
 	return { charsIn, charsOut };
 }
 
-function buildSession(row: SessionRow, db: DB): Session | null {
+function buildSession(
+	row: SessionRow,
+	db: DB,
+	hasParentId: boolean,
+): Session | null {
 	const messages: Message[] = [];
 	let firstUserMessage = "";
 	const msgRows = readMessages(db, row.id);
@@ -424,10 +452,12 @@ function buildSession(row: SessionRow, db: DB): Session | null {
 	const createdMs = unixToISO(row.time_created);
 	const updatedMs = unixToISO(row.time_updated);
 
-	// Aggregate token counts from descendant subagent sessions so the parent
-	// shows accurate totals even though child sessions aren't uploaded separately.
-	const { charsIn: subagentCharsIn, charsOut: subagentCharsOut } =
-		collectDescendantChars(db, row.id);
+	// Aggregate char counts from descendant subagent sessions so the parent
+	// reflects their cost even though child sessions aren't uploaded separately.
+	// Skipped on schemas without parent_id — there are no parent links to walk.
+	const { charsIn: subagentCharsIn, charsOut: subagentCharsOut } = hasParentId
+		? collectDescendantChars(db, row.id)
+		: { charsIn: 0, charsOut: 0 };
 
 	return {
 		id: row.id,
@@ -454,7 +484,7 @@ export const openCodeProvider: Provider = {
 			db = await openDb(path);
 			const match = resolveProject(db, cwd);
 			if (!match) return false;
-			const rows = listSessionRows(db, match);
+			const rows = listSessionRows(db, match, sessionHasParentId(db));
 			return rows.length > 0;
 		} catch {
 			return false;
@@ -470,11 +500,12 @@ export const openCodeProvider: Provider = {
 		try {
 			const match = resolveProject(db, cwd);
 			if (!match) return [];
-			const rows = listSessionRows(db, match);
+			const hasParentId = sessionHasParentId(db);
+			const rows = listSessionRows(db, match, hasParentId);
 			const sessions: Session[] = [];
 			for (const row of rows) {
 				try {
-					const session = buildSession(row, db);
+					const session = buildSession(row, db, hasParentId);
 					if (session) sessions.push(session);
 				} catch {
 					// Skip malformed sessions.
