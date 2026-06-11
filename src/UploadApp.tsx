@@ -30,6 +30,10 @@ export function UploadApp({ force = false }: { force?: boolean }) {
 			onManualSubmit: (submit) => {
 				paste.submitRef.current = submit;
 			},
+			// Login finished — drop the URL + paste-back prompt so they don't
+			// linger below the spinner while the upload runs (the browser-callback
+			// path never sets `submitting`, which is what otherwise hides them).
+			onLoginDone: () => setLoginUrl(null),
 		})
 			.then((result) => {
 				setSummary(result);
