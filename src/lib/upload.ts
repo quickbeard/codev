@@ -1,7 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-	appendFileSync,
 	closeSync,
 	existsSync,
 	mkdirSync,
@@ -430,9 +429,15 @@ async function confirmUpload(
 // Background-upload daemon: triggered before every `codev claude/codex/opencode`
 // invocation so prior sessions keep flowing to the backend without blocking the
 // user's workflow. The parent fire-and-forgets a detached `codev upload --daemon`
-// child whose stdio is wired to ~/.codev/upload.log; the child takes a lockfile
-// to prevent concurrent uploads and writes ~/.codev/last-upload.json with the
-// outcome so future runs can surface failures.
+// child; the child takes a lockfile to prevent concurrent uploads and writes
+// ~/.codev/last-upload.json with the outcome so future runs can surface
+// failures.
+//
+// Daemon diagnostics go to the standard NDJSON log (lib/log.ts) like every
+// other command — the child runs through index.tsx, so initLogging is active.
+// ~/.codev/upload.log is NOT a log sink anymore: it only captures the detached
+// child's raw stdio (spawnUploadDaemon wires it), as last-resort evidence for
+// a crash that happens before the logger can.
 
 const STALE_LOCK_MS = 60 * 60 * 1000;
 
@@ -470,16 +475,6 @@ function uploadLockPath(): string {
 
 function lastUploadStatusPath(): string {
 	return join(codevHomeDir(), "last-upload.json");
-}
-
-function logLine(message: string): void {
-	try {
-		const path = uploadLogPath();
-		mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-		appendFileSync(path, `[${new Date().toISOString()}] ${message}\n`);
-	} catch {
-		// Best-effort.
-	}
 }
 
 function isPidAlive(pid: number): boolean {
@@ -554,16 +549,25 @@ function writeStatusFile(status: UploadStatus): void {
 export async function runUploadDaemon(): Promise<number> {
 	const startedAt = new Date().toISOString();
 	if (!loadAuth()) {
-		logLine("Skipped: not logged in.");
+		logInfo("auto-upload skipped: not logged in", {
+			action: "daemon.skip",
+			extra: { reason: "not-logged-in" },
+		});
 		return 0;
 	}
 	if (!tryAcquireLock()) {
-		logLine("Skipped: another upload is in progress.");
+		logInfo("auto-upload skipped: another upload is in progress", {
+			action: "daemon.skip",
+			extra: { reason: "lock-held" },
+		});
 		return 0;
 	}
 	try {
-		logLine("Starting auto-upload.");
-		const summary = await runUpload({ onStatus: (m) => logLine(m) });
+		logInfo("starting auto-upload", {
+			action: "daemon.run",
+			eventType: "start",
+		});
+		const summary = await runUpload();
 		writeStatusFile({
 			ok: summary.failed === 0,
 			startedAt,
@@ -577,13 +581,28 @@ export async function runUploadDaemon(): Promise<number> {
 			},
 			errors: summary.errors.length > 0 ? summary.errors : undefined,
 		});
-		logLine(
-			`Done: uploaded=${summary.uploaded} skipped=${summary.skipped} failed=${summary.failed}`,
+		logInfo(
+			`auto-upload done: uploaded=${summary.uploaded} skipped=${summary.skipped} failed=${summary.failed}`,
+			{
+				action: "daemon.run",
+				eventType: "end",
+				outcome: summary.failed > 0 ? "failure" : "success",
+				extra: {
+					uploaded: summary.uploaded,
+					skipped: summary.skipped,
+					failed: summary.failed,
+				},
+			},
 		);
 		return summary.failed > 0 ? 1 : 0;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		logLine(`Failed: ${message}`);
+		logError("auto-upload failed", {
+			action: "daemon.run",
+			eventType: "end",
+			outcome: "failure",
+			err,
+		});
 		writeStatusFile({
 			ok: false,
 			startedAt,
@@ -610,6 +629,8 @@ export function spawnUploadDaemon(): void {
 	if (!selfPath) return;
 	try {
 		mkdirSync(codevHomeDir(), { recursive: true, mode: 0o700 });
+		// upload.log only receives the child's raw stdio — a crash before the
+		// child's own logger initializes still leaves evidence somewhere.
 		const logFd = openSync(uploadLogPath(), "a");
 		try {
 			const traceId = currentTraceId();

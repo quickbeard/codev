@@ -50,7 +50,8 @@ const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 export interface LogFields {
 	// event.action — keep to the stable taxonomy: command.start, command.end,
 	// http.request, process.spawn, process.exit, step.transition, task.result,
-	// export.provider, upload.file, crash.
+	// export.provider, upload.file, upload.summary, daemon.skip, daemon.run,
+	// configure.tool, restore.kind, sqlite.probe, crash.
 	action?: string;
 	// ECS event.type — distinguishes a begin document ("start") from its
 	// completion ("end") without forking event.action. Start documents are the

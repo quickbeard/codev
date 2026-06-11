@@ -124,6 +124,23 @@ Supabase coordinates (`supabase_url`, `supabase_anon_key`) are not baked into th
    - Tests that exercise real `login()` must mock `POST /codev-proxy/config` if (and only if) the caller also calls `refreshCodevConfig`.
 2. **`runUpload` retries once on a "refreshable" error.** `isRefreshableError` (in `src/lib/upload.ts`) is deliberately narrow: `Missing supabase_…` from the cache accessors, or HTTP `401`/`403` from any Supabase or proxy fetch. `5xx`, `404`, network errors, and timeouts are NOT retried — refreshing won't help and we'd amplify the outage. Per-file upload errors stay in `summary.errors` and don't trigger the pipeline-level retry. If you change `runSupabaseUpload`'s shape, keep that boundary intact.
 
+## Diagnostic logging
+
+`~/.codev` has two log homes — don't mix them up:
+
+- `~/.codev/agent-logs/<project>/` — **conversation exports** (the data `codev upload` ships). `paths.ts#agentLogsDir` / `projectLogsDir`. Used to live at `~/.codev/logs/`; `runExport` still migrates legacy project folders over (directories only).
+- `~/.codev/logs/codev-YYYYMMDD.ndjson` — **the CLI's own diagnostics** (`paths.ts#cliLogsDir`, written by `src/lib/log.ts`). One ECS NDJSON document per line.
+
+`lib/log.ts` ground rules, in priority order: (1) logging can never break or block a command — every disk touch is wrapped, failed init degrades to no-op; (2) no secrets on disk — key-based redaction of structured fields plus pattern scrubbing of the serialized line (bearer values, JWTs, `sk-…` keys, sensitive query params); URLs persist as domain + path only; (3) never write to stdout/stderr — Ink owns the TTY. Files are date-named (no rename rotation: the foreground CLI and the detached upload daemon append concurrently); retention prunes at init (14 days / 50 MB) and only touches the `codev-*.ndjson` pattern. Env knobs: `CODEV_LOG_LEVEL` (default `debug`, `silent` disables), `CODEV_LOG_DIR`.
+
+`initLogging(command, argv)` runs in `index.tsx` before dispatch: every command gets `command.start`/`command.end` (sync exit hook) and crash capture (`uncaughtException`/`unhandledRejection` — handlers replicate Node's print-and-exit-1). Each process has a `trace.id`; `CODEV_TRACE_PARENT` carries the parent's id across the sqlite re-exec and the upload-daemon spawn (`codev.parent_trace_id`).
+
+Instrumented seams — extend these rather than adding ad-hoc writes: `loggedFetch(endpoint, url, init)` wraps every direct fetch (start + completion docs; error bodies read from a `Response.clone()` so callers' streams stay intact; request headers/bodies never serialized); `npm.ts#execAsync` covers all shelled-out children (npm, `code`, JetBrains CLIs, codegraph) with exit code + stderr tail; `runAgent` logs agent launches with an **args count only** — agent args can carry prompt text and must never reach disk; `login()` and `runUpload` tee their status callbacks. Keep `event.action` to the taxonomy listed in `LogFields`.
+
+Daemon specifics: `runUploadDaemon` logs `daemon.skip` / `daemon.run` documents to the NDJSON log; `~/.codev/upload.log` is NOT a log sink — it only captures the detached child's raw stdio (wired in `spawnUploadDaemon`) as last-resort crash evidence. `~/.codev/last-upload.json` is status, not logging, and stays.
+
+Testing: logging is a silent no-op until `initLogging` runs, so ordinary tests need no setup and never write files. Tests that assert documents stub `CODEV_LOG_DIR`, call `initLogging(cmd, [], { installProcessHooks: false })` (so vitest's process stays free of our exit/crash listeners), and `resetLogging()` in `afterEach`. Related: `login()`'s force-login probe is keyed off `~/.codev/auth.json` — not the `~/.codev` dir — precisely because the logger creates `~/.codev/logs` at the entry of every command.
+
 ## CodeGraph integration
 
 `src/lib/codegraph.ts` integrates the external [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) tool (a CLI + MCP server). Two surfaces:
