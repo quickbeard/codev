@@ -6,7 +6,7 @@ import { runUpload, type UploadSummary } from "@/lib/upload.js";
 
 type Phase = "running" | "done" | "error";
 
-export function UploadApp() {
+export function UploadApp({ force = false }: { force?: boolean }) {
 	const { exit } = useApp();
 	const [phase, setPhase] = useState<Phase>("running");
 	const [status, setStatus] = useState("Uploading logs...");
@@ -24,6 +24,7 @@ export function UploadApp() {
 		if (hasRun.current) return;
 		hasRun.current = true;
 		runUpload({
+			force,
 			onStatus: setStatus,
 			onLoginUrl: setLoginUrl,
 			onManualSubmit: (submit) => {
@@ -38,7 +39,7 @@ export function UploadApp() {
 				setError(String(err));
 				setPhase("error");
 			});
-	}, [paste.submitRef]);
+	}, [paste.submitRef, force]);
 
 	useEffect(() => {
 		if (phase === "done" || phase === "error") {

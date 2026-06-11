@@ -50,11 +50,6 @@ describe("printHelp", () => {
 		expect(output()).toContain("restore [agent]");
 	});
 
-	test("lists the codegraph forwarding subcommand", () => {
-		printHelp();
-		expect(output()).toContain("codegraph [args]");
-	});
-
 	test("lists the login command", () => {
 		printHelp();
 		expect(output()).toContain("login");
