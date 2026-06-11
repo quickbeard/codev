@@ -26,43 +26,43 @@ export const HELP_HINT = "Run `codev --help` to see all commands.";
 export const HAPPY_CODING = "Happy coding! 🎉";
 
 interface CodevAuthFile {
-  supabase_url?: string;
-  supabase_anon_key?: string;
-  proxy_url?: string;
+	supabase_url?: string;
+	supabase_anon_key?: string;
+	proxy_url?: string;
 }
 
 function readCodevAuthFile(): CodevAuthFile | null {
-  try {
-    return JSON.parse(
-      readFileSync(join(homedir(), ".codev", "auth.json"), "utf-8"),
-    ) as CodevAuthFile;
-  } catch {
-    return null;
-  }
+	try {
+		return JSON.parse(
+			readFileSync(join(homedir(), ".codev", "auth.json"), "utf-8"),
+		) as CodevAuthFile;
+	} catch {
+		return null;
+	}
 }
 
 function readField(field: keyof CodevAuthFile, label: string): string {
-  const value = readCodevAuthFile()?.[field];
-  if (!value) {
-    throw new Error(
-      `Missing ${label} in ~/.codev/auth.json. Run \`codev install\` (or log in again) to fetch the latest configuration.`,
-    );
-  }
-  return value;
+	const value = readCodevAuthFile()?.[field];
+	if (!value) {
+		throw new Error(
+			`Missing ${label} in ~/.codev/auth.json. Run \`codev install\` (or log in again) to fetch the latest configuration.`,
+		);
+	}
+	return value;
 }
 
 export function SUPABASE_URL(): string {
-  return readField("supabase_url", "supabase_url");
+	return readField("supabase_url", "supabase_url");
 }
 
 export function SUPABASE_ANON_KEY(): string {
-  return readField("supabase_anon_key", "supabase_anon_key");
+	return readField("supabase_anon_key", "supabase_anon_key");
 }
 
 // User-overridable: returns the proxy_url from ~/.codev/auth.json if set,
 // otherwise the baked-in default. Picked during `codev install` / `codev
 // config` via the ProxyUrl Step.
 export function PROXY_URL(): string {
-  const override = readCodevAuthFile()?.proxy_url;
-  return override && override.length > 0 ? override : DEFAULT_PROXY_URL;
+	const override = readCodevAuthFile()?.proxy_url;
+	return override && override.length > 0 ? override : DEFAULT_PROXY_URL;
 }
