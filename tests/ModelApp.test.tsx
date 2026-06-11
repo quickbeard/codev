@@ -5,6 +5,7 @@ import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as auth from "@/lib/auth.js";
 import * as configure from "@/lib/configure.js";
+import { FALLBACK_MODEL } from "@/lib/const.js";
 import * as proxy from "@/lib/proxy.js";
 import { ModelApp } from "@/ModelApp.js";
 
@@ -256,7 +257,7 @@ describe("ModelApp", () => {
 		);
 	});
 
-	test("non-auth fetch failure shows the retry prompt instead of routing to re-auth", async () => {
+	test("non-auth fetch failure falls back to the default model and proceeds", async () => {
 		vi.spyOn(auth, "loadApiKey").mockReturnValue({
 			apiKey: "sk-x",
 		});
@@ -268,32 +269,6 @@ describe("ModelApp", () => {
 			.mockRejectedValue(
 				new Error("Models fetch failed (503): Service Unavailable"),
 			);
-
-		const { frames } = render(<ModelApp />);
-		await waitForFrame(frames, "Press Enter to retry");
-
-		const history = allFrames(frames);
-		expect(history).toContain("503");
-		expect(history).toContain("Failed to fetch models");
-		// Should not have entered any re-auth branch — a 503 is not an auth error.
-		expect(history).not.toContain("Saved API key was rejected");
-		// One attempt so far; ModelSelect leaves the choice to the user.
-		expect(fetchSpy).toHaveBeenCalledTimes(1);
-	});
-
-	test("non-auth fetch failure recovers when the user retries", async () => {
-		vi.spyOn(auth, "loadApiKey").mockReturnValue({
-			apiKey: "sk-x",
-		});
-		vi.spyOn(configure, "detectConfiguredTools").mockReturnValue([
-			"claude-code",
-		]);
-		const fetchSpy = vi
-			.spyOn(proxy, "fetchModels")
-			.mockRejectedValueOnce(
-				new Error("Models fetch failed (503): Service Unavailable"),
-			)
-			.mockResolvedValue(["recovered-alpha", "recovered-beta"]);
 		const configureClaude = vi
 			.spyOn(configure, "configureClaudeCode")
 			.mockReturnValue([
@@ -305,19 +280,24 @@ describe("ModelApp", () => {
 				},
 			]);
 
-		const { stdin, frames } = render(<ModelApp />);
-		await waitForFrame(frames, "Press Enter to retry");
-		stdin.write("\r");
-		await waitForFrame(frames, "○ recovered-alpha");
-		stdin.write("\r");
+		const { frames } = render(<ModelApp />);
 		await waitForFrame(frames, "Default model updated to");
 
-		expect(fetchSpy).toHaveBeenCalledTimes(2);
+		const history = allFrames(frames);
+		// Warned about the failed fetch, then proceeded with the baked-in fallback.
+		expect(history).toContain("Couldn't fetch the model list");
+		expect(history).toContain(FALLBACK_MODEL);
+		// A 503 is not an auth error, so no re-auth branch...
+		expect(history).not.toContain("Saved API key was rejected");
+		// ...and no retry prompt — the fallback proceeds on its own.
+		expect(history).not.toContain("Press Enter to retry");
 		expect(configureClaude).toHaveBeenCalledWith({
 			apiKey: "sk-x",
 			baseUrl: undefined,
-			model: "recovered-alpha",
-			models: ["recovered-alpha", "recovered-beta"],
+			model: FALLBACK_MODEL,
+			models: [FALLBACK_MODEL],
 		});
+		// The fallback path doesn't retry — a single fetch attempt.
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
 	});
 });

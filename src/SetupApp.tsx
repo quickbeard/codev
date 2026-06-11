@@ -59,6 +59,7 @@ import {
 	resetClaudeAuth,
 	type Tool,
 } from "@/lib/configure.js";
+import { FALLBACK_MODEL } from "@/lib/const.js";
 import { validateApiKey } from "@/lib/proxy.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 import { disableClaudeCodeLoginPrompt } from "@/lib/vscode-settings.js";
@@ -201,6 +202,10 @@ export function SetupApp({ mode }: SetupAppProps) {
 	const [codegraphResult, setCodegraphResult] =
 		useState<CodegraphSetupResult | null>(null);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
+	// Set when ModelSelect falls back to FALLBACK_MODEL because the gateway's
+	// model list couldn't be fetched. Drives a persistent yellow ▲ row above
+	// the model step so the user sees why a model was auto-picked.
+	const [modelWarning, setModelWarning] = useState<string | null>(null);
 	// Set only when refreshCodevConfig fails. Drives a yellow ▲ row that
 	// appears between the install Step and the next visible Step. Stays null
 	// (and the row stays unmounted) on the success path, so refresh remains
@@ -464,6 +469,12 @@ export function SetupApp({ mode }: SetupAppProps) {
 		setStep("model-choice");
 	}, []);
 
+	const handleModelFallback = useCallback((err: Error) => {
+		setModelWarning(
+			`Couldn't fetch the model list (${err.message}); using fallback model ${FALLBACK_MODEL}.`,
+		);
+	}, []);
+
 	const handleModelSelect = useCallback(
 		(model: string, models: string[]) => {
 			setChosenModel(model);
@@ -700,6 +711,16 @@ export function SetupApp({ mode }: SetupAppProps) {
 					)}
 				{POST_KEY_CHOICE.includes(step) &&
 					authMethod !== "skip" &&
+					modelWarning && (
+						<Step title={<Text bold>Model list</Text>}>
+							<Box>
+								<Text color="yellow">▲</Text>
+								<Text color="yellow">{` ${modelWarning}`}</Text>
+							</Box>
+						</Step>
+					)}
+				{POST_KEY_CHOICE.includes(step) &&
+					authMethod !== "skip" &&
 					creds &&
 					step !== "fetching-key" &&
 					step !== "manual-creds" && (
@@ -711,6 +732,8 @@ export function SetupApp({ mode }: SetupAppProps) {
 								apiKey={creds.apiKey}
 								baseUrl={creds.baseUrl}
 								onSelect={handleModelSelect}
+								onFallback={handleModelFallback}
+								fallbackModel={FALLBACK_MODEL}
 								readOnly={step !== "model-choice"}
 								selected={chosenModel}
 							/>

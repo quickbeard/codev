@@ -22,6 +22,7 @@ import {
 	detectConfiguredTools,
 	type Tool,
 } from "@/lib/configure.js";
+import { FALLBACK_MODEL } from "@/lib/const.js";
 import { isInvalidKeyError } from "@/lib/proxy.js";
 import { formatToolList } from "@/lib/text.js";
 
@@ -62,6 +63,9 @@ export function ModelApp() {
 	const [creds, setCreds] = useState<Credentials | null>(null);
 	const [tools, setTools] = useState<Tool[]>([]);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
+	// Set when ModelSelect falls back to FALLBACK_MODEL because the gateway's
+	// model list couldn't be fetched. Rendered as a persistent yellow ▲ row.
+	const [modelWarning, setModelWarning] = useState<string | null>(null);
 	const [auth, setAuth] = useState<AuthData | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	// Re-auth happens at most once per session. If the new key is *also*
@@ -173,6 +177,12 @@ export function ModelApp() {
 		[creds],
 	);
 
+	const handleModelFallback = useCallback((err: Error) => {
+		setModelWarning(
+			`Couldn't fetch the model list (${err.message}); using fallback model ${FALLBACK_MODEL}.`,
+		);
+	}, []);
+
 	const handleModelSelect = useCallback((model: string, models: string[]) => {
 		setChosenModel(model);
 		setCreds((prev) => (prev ? { ...prev, model, models } : prev));
@@ -278,10 +288,22 @@ export function ModelApp() {
 							baseUrl={creds.baseUrl}
 							onSelect={handleModelSelect}
 							onError={handleModelsError}
+							onFallback={handleModelFallback}
+							fallbackModel={FALLBACK_MODEL}
 							selected={chosenModel}
 						/>
 					</Step>
 				)}
+
+				{modelWarning &&
+					(phase === "model-choice" ||
+						phase === "configuring" ||
+						phase === "done") && (
+						<Box marginBottom={1}>
+							<Text color="yellow">▲</Text>
+							<Text color="yellow">{` ${modelWarning}`}</Text>
+						</Box>
+					)}
 
 				{(phase === "configuring" || phase === "done") && (
 					<Step

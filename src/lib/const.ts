@@ -11,6 +11,11 @@ export const AI_GATEWAY_OPENAI_URL = `${AI_GATEWAY_URL}/v1`;
 
 export const LOGIN_SUCCESS_URL = `${BASE_URL}/codev-landing-page`;
 
+// Default model used when the gateway's model list can't be fetched (network,
+// 5xx, timeout, or an empty list). Base64-encoded to match the other baked-in
+// constants above. Decodes to "MiniMax/MiniMax-M2.7".
+export const FALLBACK_MODEL = atob("TWluaU1heC9NaW5pTWF4LU0yLjc=");
+
 // Self-hosted gateway model has a 196608-token window. Telling Claude Code
 // to treat that as its effective window and to fire auto-compaction at 85%
 // of it (≈167K) keeps compaction well below the hard limit.
