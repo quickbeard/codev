@@ -15,6 +15,7 @@ import { InstallApp } from "@/InstallApp.js";
 import * as auth from "@/lib/auth.js";
 import * as codegraph from "@/lib/codegraph.js";
 import * as configure from "@/lib/configure.js";
+import { FALLBACK_MODEL } from "@/lib/const.js";
 import * as npm from "@/lib/npm.js";
 import * as proxy from "@/lib/proxy.js";
 import {
@@ -1126,14 +1127,13 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 	});
 
-	test("models fetch failure shows retry prompt; Enter retries to success", async () => {
+	test("models fetch failure falls back to the default model and proceeds", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
 		const fetchModelsSpy = vi
 			.spyOn(proxy, "fetchModels")
-			.mockRejectedValueOnce(new Error("Models fetch failed (502): boom"))
-			.mockResolvedValue(["m-alpha", "m-beta"]);
+			.mockRejectedValue(new Error("Models fetch failed (502): boom"));
 		const configureSpy = vi
 			.spyOn(configure, "configureClaudeCode")
 			.mockReturnValue([
@@ -1150,25 +1150,21 @@ describe("InstallApp fail-stop invariant", () => {
 		await advanceThroughConfirm(stdin, frames);
 		await pickNewKey(stdin, frames);
 
-		// First fetch rejects — the retry prompt should render in place.
-		await waitForFrame(frames, "Press Enter to retry");
-		const errored = allFrames(frames);
-		expect(errored).toContain("Failed to fetch models");
-		expect(errored).toContain("Models fetch failed (502): boom");
-		expect(configureSpy).not.toHaveBeenCalled();
-
-		// Enter to retry — second attempt resolves; the user picks the first
-		// model and the flow reaches "Happy coding".
-		stdin.write("\r");
-		await pickFirstModel(stdin, frames);
+		// A 502 (non-auth) failure warns and proceeds with the baked-in fallback
+		// instead of blocking on the retry prompt.
 		await waitForFrame(frames, "Happy coding");
 
-		expect(fetchModelsSpy).toHaveBeenCalledTimes(2);
+		const history = allFrames(frames);
+		expect(history).toContain("Couldn't fetch the model list");
+		expect(history).toContain(FALLBACK_MODEL);
+		expect(history).not.toContain("Press Enter to retry");
+		// A single attempt — the fallback path doesn't retry.
+		expect(fetchModelsSpy).toHaveBeenCalledTimes(1);
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-test-123",
-			model: "m-alpha",
-			models: ["m-alpha", "m-beta"],
+			model: FALLBACK_MODEL,
+			models: [FALLBACK_MODEL],
 		});
 	});
 
