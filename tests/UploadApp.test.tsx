@@ -111,4 +111,35 @@ describe("UploadApp", () => {
 		await new Promise((r) => setTimeout(r, 50));
 		expect(lastFrame() ?? "").not.toContain("authorization code");
 	});
+
+	test("dismisses the login prompt once login completes via the browser", async () => {
+		// Browser-login path: onLoginUrl raises the prompt, then onLoginDone fires
+		// when the loopback callback completes — without any paste. The URL +
+		// paste-back prompt must come down instead of lingering while the upload
+		// proceeds (the bug: only the manual-paste path used to hide them).
+		let finishLogin: (() => void) | undefined;
+		let resolveUpload: ((s: upload.UploadSummary) => void) | undefined;
+		vi.spyOn(upload, "runUpload").mockImplementation((opts) => {
+			return new Promise<upload.UploadSummary>((resolve) => {
+				opts?.onLoginUrl?.("https://sso.test/authorize?x=1");
+				opts?.onManualSubmit?.(() => null);
+				finishLogin = opts?.onLoginDone;
+				resolveUpload = resolve;
+			});
+		});
+
+		const { lastFrame } = render(<UploadApp />);
+		// Prompt is up while login is pending.
+		await waitFor(() => (lastFrame() ?? "").includes("authorization code"));
+
+		// Browser login completes (no paste) — the prompt + URL must disappear.
+		finishLogin?.();
+		await waitFor(() => !(lastFrame() ?? "").includes("authorization code"));
+		expect(lastFrame() ?? "").not.toContain("authorization code");
+		expect(lastFrame() ?? "").not.toContain("authorize?x=1");
+
+		// Let the upload finish so the component unmounts cleanly.
+		resolveUpload?.(EMPTY_SUMMARY);
+		await new Promise((r) => setTimeout(r, 20));
+	});
 });

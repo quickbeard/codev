@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import * as auth from "@/lib/auth.js";
 import {
 	fileSha256,
 	filterNewFiles,
@@ -134,6 +135,88 @@ describe("upload helpers", () => {
 });
 
 describe("runUpload", () => {
+	test("signals onLoginDone after a fresh login completes", async () => {
+		// auth.json has Supabase coords but no SSO session, so loadAuth() returns
+		// null and ensureAuth() must log in. Mock login() to resolve immediately
+		// (no browser), then assert onLoginDone fired so the caller can dismiss
+		// the login prompt before the upload proceeds.
+		mkdirSync(join(tempHome, ".codev"), { recursive: true });
+		writeFileSync(
+			join(tempHome, ".codev", "auth.json"),
+			JSON.stringify({
+				supabase_url: "https://test.supabase.co",
+				supabase_anon_key: "anon",
+			}),
+		);
+		writeLog("fresh.md", "hello");
+
+		const loginSpy = vi.spyOn(auth, "login").mockResolvedValue({
+			access_token: "token",
+			id_token: "token",
+			expires_at: Date.now() + 3600000,
+			user: { sub: "u", email: "u@example.com", displayName: "User" },
+		});
+		const onLoginDone = vi.fn();
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+			input: string | URL | Request,
+		) => {
+			const url =
+				typeof input === "string" || input instanceof URL
+					? String(input)
+					: input.url;
+			if (url.includes("/codev-proxy/config")) {
+				return new Response(
+					JSON.stringify({
+						supabaseUrl: "https://test.supabase.co",
+						supabaseAnonKey: "anon",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/codev-proxy/supabase/exchange")) {
+				return new Response(
+					JSON.stringify({
+						access_token: "supabase-upload-token",
+						user: { id: "u", email: "u@example.com" },
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url.includes("/rest/v1/conversations")) {
+				return new Response("[]", {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+			if (url.includes("/functions/v1/presign-upload")) {
+				return new Response(
+					JSON.stringify({
+						uploadUrl: "https://upload.example.com/file",
+						conversationId: "cid",
+						storagePath: "u/cid/fresh.md",
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			}
+			if (url === "https://upload.example.com/file") {
+				return new Response("", { status: 200 });
+			}
+			if (url.includes("/functions/v1/confirm-upload")) {
+				return new Response(JSON.stringify({ ok: true }));
+			}
+			return new Response("not found", { status: 404 });
+		}) as typeof fetch);
+
+		try {
+			const summary = await runUpload({ onLoginDone });
+			expect(loginSpy).toHaveBeenCalledTimes(1);
+			expect(onLoginDone).toHaveBeenCalledTimes(1);
+			expect(summary.uploaded).toBe(1);
+		} finally {
+			fetchSpy.mockRestore();
+			loginSpy.mockRestore();
+		}
+	});
+
 	test("presigns, uploads, and confirms new logs", async () => {
 		writeAuth();
 		writeLog("new.md", "hello");
