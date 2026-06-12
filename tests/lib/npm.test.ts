@@ -7,6 +7,7 @@ import {
 	detectInstalledViaNpm,
 	installAndVerify,
 	installPackage,
+	isPackageInstalledGlobally,
 	npmGlobalRoot,
 	verifyInstall,
 } from "@/lib/npm.js";
@@ -599,6 +600,38 @@ describe("npm.ts", () => {
 		test("false (stay quiet) when npm root -g fails", async () => {
 			stubExecFile({ handler: () => ({ error: new Error("boom") }) });
 			expect(await claudeNativeBinaryMissing()).toBe(false);
+		});
+	});
+
+	describe("isPackageInstalledGlobally", () => {
+		test("returns true when the package dir exists under npm root", async () => {
+			stubExecFile({ handler: () => ({ stdout: "/fake/root" }) });
+			const existsSpy = vi
+				.mocked(fs.existsSync)
+				.mockImplementation(
+					(p: fs.PathLike) =>
+						String(p) === join("/fake/root", "@colbymchenry", "codegraph"),
+				);
+			expect(await isPackageInstalledGlobally("@colbymchenry/codegraph")).toBe(
+				true,
+			);
+			existsSpy.mockRestore();
+		});
+
+		test("returns false when the package dir is missing", async () => {
+			stubExecFile({ handler: () => ({ stdout: "/fake/root" }) });
+			const existsSpy = vi
+				.mocked(fs.existsSync)
+				.mockImplementation(() => false);
+			expect(await isPackageInstalledGlobally("@colbymchenry/codegraph")).toBe(
+				false,
+			);
+			existsSpy.mockRestore();
+		});
+
+		test("returns false when npm root resolution fails", async () => {
+			stubExecFile({ handler: () => ({ error: new Error("boom") }) });
+			expect(await isPackageInstalledGlobally("some-pkg")).toBe(false);
 		});
 	});
 

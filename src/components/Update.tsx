@@ -2,6 +2,12 @@ import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
 import { type TaskItem, TaskList } from "@/components/TaskList.js";
+import {
+	CODEGRAPH_PKG,
+	CODEGRAPH_TASK_KEY,
+	detectCodegraphInstalled,
+	ensureCodegraphInstalled,
+} from "@/lib/codegraph.js";
 import { detectConfiguredTools } from "@/lib/configure.js";
 import {
 	CLAUDE_CODE_INTELLIJ_PLUGIN_ID,
@@ -50,6 +56,9 @@ type Phase =
 			// (where the YAML marker is a clean "user wanted Continue" signal).
 			claudeCodeExtTargets: ExtensionTarget[];
 			continueTargets: ExtensionTarget[];
+			// CodeGraph is a global npm package, not a Tool — install/config put
+			// it on disk. We refresh it here only when it's already installed.
+			codegraphInstalled: boolean;
 	  };
 
 interface UpdateProps {
@@ -74,17 +83,21 @@ export function Update({ onDone }: UpdateProps) {
 			const hasClaudeCodeMarker = detected.includes("claude-code");
 			const hasContinueMarker = detected.includes("vscode-continue");
 
-			const [npmFlags, vscodeAvailable, jetbrainsAvailable] = await Promise.all(
-				[
-					Promise.all(NPM_TOOLS.map((t) => detectInstalledViaNpm(t))),
-					hasClaudeCodeMarker || hasContinueMarker
-						? isCodeCliAvailable()
-						: Promise.resolve(false),
-					hasClaudeCodeMarker || hasContinueMarker
-						? isAnyJetBrainsCliAvailable()
-						: Promise.resolve(false),
-				],
-			);
+			const [
+				npmFlags,
+				vscodeAvailable,
+				jetbrainsAvailable,
+				codegraphInstalled,
+			] = await Promise.all([
+				Promise.all(NPM_TOOLS.map((t) => detectInstalledViaNpm(t))),
+				hasClaudeCodeMarker || hasContinueMarker
+					? isCodeCliAvailable()
+					: Promise.resolve(false),
+				hasClaudeCodeMarker || hasContinueMarker
+					? isAnyJetBrainsCliAvailable()
+					: Promise.resolve(false),
+				detectCodegraphInstalled(),
+			]);
 			const detectedNpm = NPM_TOOLS.filter((_, i) => npmFlags[i]);
 
 			const claudeCodeExtTargets: ExtensionTarget[] = [];
@@ -102,7 +115,8 @@ export function Update({ onDone }: UpdateProps) {
 			if (
 				detectedNpm.length === 0 &&
 				claudeCodeExtTargets.length === 0 &&
-				continueTargets.length === 0
+				continueTargets.length === 0 &&
+				!codegraphInstalled
 			) {
 				setPhase({ kind: "nothing" });
 				onDone(true);
@@ -113,6 +127,7 @@ export function Update({ onDone }: UpdateProps) {
 				npmTools: detectedNpm,
 				claudeCodeExtTargets,
 				continueTargets,
+				codegraphInstalled,
 			});
 		})();
 	}, [onDone]);
@@ -169,14 +184,31 @@ export function Update({ onDone }: UpdateProps) {
 			};
 		}),
 	];
+	// CodeGraph refresh, only when it's already globally installed (codev
+	// install/config put it there). Best-effort, exactly like the Install step:
+	// a failed refresh is a ▲ warning — still a survivor key — never a ✗, so it
+	// can't fail `codev update`. Mirrors the CodeGraph row in components/
+	// Install.tsx.
+	if (phase.codegraphInstalled) {
+		tasks.push({
+			key: CODEGRAPH_TASK_KEY,
+			label: CODEGRAPH_PKG,
+			run: async () => {
+				const err = await ensureCodegraphInstalled();
+				return err ? { warning: `CodeGraph not updated: ${err}` } : null;
+			},
+		});
+	}
 	return (
 		<TaskList
 			tasks={tasks}
 			verb={{ infinitive: "update", present: "Updating", past: "Updated" }}
-			// Update keeps its all-or-nothing contract: UpdateApp aborts on
-			// any failure, no partial-success advance. Adapt TaskList's
-			// survivor-key list to a boolean here so UpdateApp's onDone shape
-			// stays unchanged.
+			// All-or-nothing for the agent/extension rows: UpdateApp aborts on any
+			// hard failure (✗), no partial-success advance. The CodeGraph row is
+			// best-effort — it warns (▲) instead of failing, so it stays in the
+			// survivor set and never flips the result. Adapt TaskList's
+			// survivor-key list to a boolean so UpdateApp's onDone shape stays
+			// unchanged.
 			onDone={(keys) => onDone(keys.length === tasks.length)}
 		/>
 	);
