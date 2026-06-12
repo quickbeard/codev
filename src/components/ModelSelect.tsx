@@ -1,7 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
-import { fetchModels, isInvalidKeyError } from "@/lib/proxy.js";
+import { fetchModels, isInvalidKeyError } from "@/lib/backend.js";
 
 interface ModelSelectProps {
 	apiKey: string;

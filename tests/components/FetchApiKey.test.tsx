@@ -2,7 +2,7 @@ import { cleanup, render } from "ink-testing-library";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { FetchApiKey } from "@/components/FetchApiKey.js";
 import type * as auth from "@/lib/auth.js";
-import * as proxy from "@/lib/proxy.js";
+import * as backend from "@/lib/backend.js";
 
 afterEach(() => {
 	cleanup();
@@ -19,7 +19,7 @@ function fakeAuth(): auth.AuthData {
 
 describe("FetchApiKey", () => {
 	test("calls onDone and renders a success line after a successful fetch", async () => {
-		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
+		vi.spyOn(backend, "fetchApiKey").mockResolvedValue("sk-test-123");
 
 		const onDone = vi.fn();
 		const onFallback = vi.fn();
@@ -36,7 +36,7 @@ describe("FetchApiKey", () => {
 	});
 
 	test("shows retry prompt on first empty key", async () => {
-		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("");
+		vi.spyOn(backend, "fetchApiKey").mockResolvedValue("");
 
 		const onDone = vi.fn();
 		const onFallback = vi.fn();
@@ -56,7 +56,7 @@ describe("FetchApiKey", () => {
 
 	test("retry on empty re-calls fetchApiKey with the same access_token", async () => {
 		const fetchSpy = vi
-			.spyOn(proxy, "fetchApiKey")
+			.spyOn(backend, "fetchApiKey")
 			.mockImplementationOnce(() => Promise.resolve(""))
 			.mockImplementationOnce(() => Promise.resolve("sk-second-try"));
 		fetchSpy.mockClear();
@@ -80,7 +80,7 @@ describe("FetchApiKey", () => {
 	});
 
 	test("second empty result shows manual fallback prompt", async () => {
-		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("");
+		vi.spyOn(backend, "fetchApiKey").mockResolvedValue("");
 
 		const onDone = vi.fn();
 		const onFallback = vi.fn();
@@ -102,7 +102,7 @@ describe("FetchApiKey", () => {
 	});
 
 	test("Enter on the manual fallback prompt calls onFallback", async () => {
-		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("");
+		vi.spyOn(backend, "fetchApiKey").mockResolvedValue("");
 
 		const onDone = vi.fn();
 		const onFallback = vi.fn();
@@ -121,8 +121,8 @@ describe("FetchApiKey", () => {
 	});
 
 	test("shows error and retry prompt on fetchApiKey rejection", async () => {
-		vi.spyOn(proxy, "fetchApiKey").mockRejectedValue(
-			new Error("Proxy /auth/exchange failed (502): boom"),
+		vi.spyOn(backend, "fetchApiKey").mockRejectedValue(
+			new Error("Backend /auth/exchange failed (502): boom"),
 		);
 
 		const onDone = vi.fn();
@@ -142,7 +142,7 @@ describe("FetchApiKey", () => {
 
 	test("Enter retries after a fetchApiKey error and succeeds on second attempt", async () => {
 		const fetchSpy = vi
-			.spyOn(proxy, "fetchApiKey")
+			.spyOn(backend, "fetchApiKey")
 			.mockImplementationOnce(() => Promise.reject(new Error("transient")))
 			.mockImplementationOnce(() => Promise.resolve("sk-recovered"));
 		fetchSpy.mockClear();

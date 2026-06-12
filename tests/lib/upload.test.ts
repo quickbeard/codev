@@ -373,7 +373,7 @@ describe("runUpload", () => {
 					? String(input)
 					: input.url;
 
-			// codev-proxy /config: hand back fresh Supabase coords on refresh.
+			// backend /config: hand back fresh Supabase coords on refresh.
 			if (url.includes("/codev-proxy/config")) {
 				configCalls++;
 				return new Response(
@@ -765,7 +765,7 @@ describe("isRefreshableError", () => {
 	test("false on HTTP 404", () => {
 		expect(
 			isRefreshableError(
-				new Error("Proxy /supabase/exchange failed (404): Not found"),
+				new Error("Backend /supabase/exchange failed (404): Not found"),
 			),
 		).toBe(false);
 	});

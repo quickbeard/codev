@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as auth from "@/lib/auth.js";
+import * as backend from "@/lib/backend.js";
 import * as configure from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
-import * as proxy from "@/lib/proxy.js";
 import { ModelApp } from "@/ModelApp.js";
 
 let tempHome: string;
@@ -85,7 +85,10 @@ describe("ModelApp", () => {
 			"claude-code",
 			"opencode",
 		]);
-		vi.spyOn(proxy, "fetchModels").mockResolvedValue(["new-alpha", "new-beta"]);
+		vi.spyOn(backend, "fetchModels").mockResolvedValue([
+			"new-alpha",
+			"new-beta",
+		]);
 		const configureClaude = vi
 			.spyOn(configure, "configureClaudeCode")
 			.mockReturnValue([
@@ -155,7 +158,7 @@ describe("ModelApp", () => {
 			"claude-code",
 		]);
 		// First fetch: 401. Second fetch (after manual re-auth): success.
-		vi.spyOn(proxy, "fetchModels")
+		vi.spyOn(backend, "fetchModels")
 			.mockRejectedValueOnce(
 				new Error("Models fetch failed (401): invalid key"),
 			)
@@ -213,14 +216,14 @@ describe("ModelApp", () => {
 		vi.spyOn(configure, "detectConfiguredTools").mockReturnValue([
 			"claude-code",
 		]);
-		vi.spyOn(proxy, "fetchModels").mockRejectedValueOnce(
+		vi.spyOn(backend, "fetchModels").mockRejectedValueOnce(
 			new Error("Models fetch failed (401): invalid key"),
 		);
 
 		const { frames } = render(<ModelApp />);
 		await waitForFrame(frames, "Saved API key was rejected");
 		// We don't drive Login here (it would actually try to login() against
-		// the proxy). Just assert the SSO branch was taken.
+		// the backend). Just assert the SSO branch was taken.
 		expect(allFrames(frames)).toContain("Login");
 		expect(allFrames(frames)).toContain("Saved API key was rejected");
 	});
@@ -235,7 +238,7 @@ describe("ModelApp", () => {
 			"claude-code",
 		]);
 		// Both fetch attempts return 401.
-		vi.spyOn(proxy, "fetchModels").mockRejectedValue(
+		vi.spyOn(backend, "fetchModels").mockRejectedValue(
 			new Error("Models fetch failed (401): invalid key"),
 		);
 
@@ -265,7 +268,7 @@ describe("ModelApp", () => {
 			"claude-code",
 		]);
 		const fetchSpy = vi
-			.spyOn(proxy, "fetchModels")
+			.spyOn(backend, "fetchModels")
 			.mockRejectedValue(
 				new Error("Models fetch failed (503): Service Unavailable"),
 			);

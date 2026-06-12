@@ -2,7 +2,7 @@ import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useState } from "react";
 import type { AuthData } from "@/lib/auth.js";
-import { fetchApiKey } from "@/lib/proxy.js";
+import { fetchApiKey } from "@/lib/backend.js";
 
 interface FetchApiKeyProps {
 	auth: AuthData;

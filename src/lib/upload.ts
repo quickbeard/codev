@@ -22,6 +22,7 @@ import {
 	login,
 	refreshCodevConfig,
 } from "@/lib/auth.js";
+import { fetchSupabaseSession } from "@/lib/backend.js";
 import { runExport } from "@/lib/export.js";
 import {
 	currentTraceId,
@@ -32,7 +33,6 @@ import {
 	logWarn,
 } from "@/lib/log.js";
 import { projectLogsDir } from "@/lib/paths.js";
-import { fetchSupabaseSession } from "@/lib/proxy.js";
 import { getSupabaseConfig, type SupabaseConfig } from "@/lib/supabase.js";
 import { AGENTS } from "@/providers/types.js";
 
@@ -136,9 +136,9 @@ export async function runUpload({
 
 	// Try the Supabase block once. If it trips a refreshable failure (cache
 	// missing, or Supabase rejected our credentials), refresh the cached
-	// CoDev config from codev-proxy and retry exactly once. ensureAuth above
+	// CoDev config from the backend and retry exactly once. ensureAuth above
 	// guarantees auth.access_token is fresh, so refreshCodevConfig will
-	// authenticate against the proxy with a valid bearer.
+	// authenticate against the backend with a valid bearer.
 	try {
 		return await runSupabaseUpload(outDir, files, auth, onStatus, force);
 	} catch (err) {
@@ -223,12 +223,12 @@ async function runSupabaseUpload(
 	return summary;
 }
 
-// Narrow refresh trigger: empty cache, or Supabase/proxy returning 401/403.
+// Narrow refresh trigger: empty cache, or Supabase/backend returning 401/403.
 // 5xx, network errors, and timeouts are NOT retried — refreshing config won't
 // help and we'd just amplify the outage.
 //
 // The pattern is anchored to `failed (NNN)` — the exact shape every thrower in
-// upload.ts/proxy.ts/auth.ts emits for HTTP errors. A bare `\((\d{3})\)` match
+// upload.ts/backend.ts/auth.ts emits for HTTP errors. A bare `\((\d{3})\)` match
 // would pick up any 3-digit number in parens anywhere in the message (e.g. an
 // id like `(401abc)` is fine — that one doesn't actually match — but a 500 body
 // containing a literal `(403)` reference would falsely trigger a refresh).
@@ -305,7 +305,7 @@ async function ensureAuth(
 	// continues, so they don't linger on screen.
 	onLoginDone?.();
 	// login() no longer refreshes CoDev config on its own — every caller does
-	// it explicitly so the call uses the user's chosen proxy URL. On a fresh
+	// it explicitly so the timing fits each flow. On a fresh
 	// login we don't have a cache yet, so populating it here avoids burning
 	// the first Supabase attempt + retry path just to fetch coords.
 	await refreshCodevConfig(fresh.access_token, onStatus);

@@ -344,7 +344,7 @@ describe("loggedFetch", () => {
 			.mockResolvedValue(new Response("ok", { status: 200 }));
 		try {
 			const res = await loggedFetch(
-				"proxy.config",
+				"backend.config",
 				"https://proxy.example.com/codev-proxy/config?x=1",
 				{
 					method: "POST",
@@ -375,7 +375,7 @@ describe("loggedFetch", () => {
 			};
 			expect(start.event?.action).toBe("http.request");
 			expect(start.event?.type).toEqual(["start"]);
-			expect(start.codev?.endpoint).toBe("proxy.config");
+			expect(start.codev?.endpoint).toBe("backend.config");
 			expect(start.url?.domain).toBe("proxy.example.com");
 			expect(start.url?.path).toBe("/codev-proxy/config");
 			expect(end.event?.type).toEqual(["end"]);

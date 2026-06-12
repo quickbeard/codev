@@ -29,9 +29,9 @@ const MODELS_TIMEOUT_MS = 10_000;
 // A real (1-token) completion can be slower than listing models — it actually
 // hits inference — so give the smoke test more headroom.
 const SMOKE_TIMEOUT_MS = 15_000;
-// Proxy endpoints are quick: token exchange, a tiny config blob, a Supabase
+// Backend endpoints are quick: token exchange, a tiny config blob, a Supabase
 // session exchange. Cap so a stalled gateway doesn't hang the CLI.
-const PROXY_TIMEOUT_MS = 10_000;
+const BACKEND_TIMEOUT_MS = 10_000;
 
 export interface SupabaseSession {
 	access_token: string;
@@ -46,19 +46,19 @@ export interface SupabaseSession {
 
 export async function fetchApiKey(accessToken: string): Promise<string> {
 	const res = await loggedFetch(
-		"proxy.auth-exchange",
+		"backend.auth-exchange",
 		`${BACKEND_URL}/auth/exchange`,
 		{
 			method: "POST",
 			headers: { Authorization: `Bearer ${accessToken}` },
-			signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+			signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
 		},
 	);
 
 	if (!res.ok) {
 		const body = (await res.json().catch(() => ({}))) as ErrorResponse;
 		const reason = body.error || res.statusText;
-		throw new Error(`Proxy /auth/exchange failed (${res.status}): ${reason}`);
+		throw new Error(`Backend /auth/exchange failed (${res.status}): ${reason}`);
 	}
 
 	const data = (await res.json()) as ExchangeResponse;
@@ -72,22 +72,22 @@ export async function fetchApiKey(accessToken: string): Promise<string> {
 export async function fetchCodevConfig(
 	accessToken: string,
 ): Promise<CodevConfig> {
-	const res = await loggedFetch("proxy.config", `${BACKEND_URL}/config`, {
+	const res = await loggedFetch("backend.config", `${BACKEND_URL}/config`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
-		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+		signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
 	});
 
 	if (!res.ok) {
 		const body = (await res.json().catch(() => ({}))) as ErrorResponse;
 		const reason = body.error || res.statusText;
-		throw new Error(`Proxy /config failed (${res.status}): ${reason}`);
+		throw new Error(`Backend /config failed (${res.status}): ${reason}`);
 	}
 
 	const data = (await res.json()) as ConfigResponse;
 	if (!data.supabaseUrl || !data.supabaseAnonKey) {
 		throw new Error(
-			`Proxy /config returned incomplete payload: ${JSON.stringify(data)}`,
+			`Backend /config returned incomplete payload: ${JSON.stringify(data)}`,
 		);
 	}
 	return {
@@ -230,12 +230,12 @@ export async function fetchSupabaseSession(
 	accessToken: string,
 ): Promise<SupabaseSession> {
 	const res = await loggedFetch(
-		"proxy.supabase-exchange",
+		"backend.supabase-exchange",
 		`${BACKEND_URL}/supabase/exchange`,
 		{
 			method: "POST",
 			headers: { Authorization: `Bearer ${accessToken}` },
-			signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+			signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
 		},
 	);
 
@@ -243,7 +243,7 @@ export async function fetchSupabaseSession(
 		const body = (await res.json().catch(() => ({}))) as ErrorResponse;
 		const reason = body.error || res.statusText;
 		throw new Error(
-			`Proxy /supabase/exchange failed (${res.status}): ${reason}`,
+			`Backend /supabase/exchange failed (${res.status}): ${reason}`,
 		);
 	}
 

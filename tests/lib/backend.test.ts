@@ -1,10 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
-	AI_GATEWAY_OPENAI_URL,
-	AI_GATEWAY_URL,
-	BACKEND_URL,
-} from "@/lib/const.js";
-import {
 	fetchApiKey,
 	fetchCodevConfig,
 	fetchModels,
@@ -12,7 +7,12 @@ import {
 	isInvalidKeyError,
 	smokeTestModel,
 	validateApiKey,
-} from "@/lib/proxy.js";
+} from "@/lib/backend.js";
+import {
+	AI_GATEWAY_OPENAI_URL,
+	AI_GATEWAY_URL,
+	BACKEND_URL,
+} from "@/lib/const.js";
 
 function jsonResponse(status: number, body: unknown): Response {
 	return new Response(JSON.stringify(body), {
@@ -55,12 +55,12 @@ describe("fetchApiKey", () => {
 		expect(await fetchApiKey("token")).toBe("");
 	});
 
-	test("throws on a non-2xx response with the proxy-supplied error", async () => {
+	test("throws on a non-2xx response with the backend-supplied error", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(502, { error: "upstream timeout" }),
 		);
 		await expect(fetchApiKey("token")).rejects.toThrow(
-			"Proxy /auth/exchange failed (502): upstream timeout",
+			"Backend /auth/exchange failed (502): upstream timeout",
 		);
 	});
 
@@ -69,7 +69,7 @@ describe("fetchApiKey", () => {
 			new Response("not json", { status: 500, statusText: "Server Error" }),
 		);
 		await expect(fetchApiKey("token")).rejects.toThrow(
-			"Proxy /auth/exchange failed (500): Server Error",
+			"Backend /auth/exchange failed (500): Server Error",
 		);
 	});
 
@@ -314,7 +314,7 @@ describe("smokeTestModel", () => {
 });
 
 describe("fetchSupabaseSession", () => {
-	test("posts to the codev-proxy /supabase/exchange endpoint", async () => {
+	test("posts to the backend /supabase/exchange endpoint", async () => {
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				access_token: "supabase-token",
@@ -348,7 +348,7 @@ describe("fetchSupabaseSession", () => {
 			jsonResponse(401, { error: "invalid sso token" }),
 		);
 		await expect(fetchSupabaseSession("bad-token")).rejects.toThrow(
-			"Proxy /supabase/exchange failed (401): invalid sso token",
+			"Backend /supabase/exchange failed (401): invalid sso token",
 		);
 	});
 });
@@ -367,7 +367,7 @@ describe("fetchCodevConfig", () => {
 		});
 	});
 
-	test("posts to the codev-proxy /config endpoint with a Bearer token", async () => {
+	test("posts to the backend /config endpoint with a Bearer token", async () => {
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				supabaseUrl: "u",
@@ -384,12 +384,12 @@ describe("fetchCodevConfig", () => {
 		expect(init.headers?.Authorization).toBe("Bearer my-token");
 	});
 
-	test("throws on a non-2xx response with the proxy-supplied error", async () => {
+	test("throws on a non-2xx response with the backend-supplied error", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(401, { error: "invalid sso" }),
 		);
 		await expect(fetchCodevConfig("bad")).rejects.toThrow(
-			"Proxy /config failed (401): invalid sso",
+			"Backend /config failed (401): invalid sso",
 		);
 	});
 

@@ -248,8 +248,8 @@ async function errorBody(res: Response): Promise<string> {
 	}
 }
 
-// Instrumented fetch for codev's direct network calls (SSO, codev-proxy,
-// gateway, Supabase). `endpoint` is a stable label (e.g. "proxy.config",
+// Instrumented fetch for codev's direct network calls (SSO, backend,
+// gateway, Supabase). `endpoint` is a stable label (e.g. "backend.config",
 // "supabase.presign") persisted as codev.endpoint so failures group cleanly.
 //
 // Writes a start document (the evidence trail when a request hangs and never

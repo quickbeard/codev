@@ -13,9 +13,9 @@ import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ConfigApp } from "@/ConfigApp.js";
 import * as auth from "@/lib/auth.js";
+import * as backend from "@/lib/backend.js";
 import * as codegraph from "@/lib/codegraph.js";
 import * as configure from "@/lib/configure.js";
-import * as proxy from "@/lib/proxy.js";
 
 // ConfigApp shares its state machine with InstallApp (both render <SetupApp />).
 // These tests cover only the config-specific deltas:
@@ -31,7 +31,7 @@ import * as proxy from "@/lib/proxy.js";
 
 function stubModels() {
 	return vi
-		.spyOn(proxy, "fetchModels")
+		.spyOn(backend, "fetchModels")
 		.mockResolvedValue(["m-alpha", "m-beta"]);
 }
 
@@ -68,7 +68,7 @@ beforeEach(() => {
 	vi.spyOn(auth, "loadApiKey").mockReturnValue(null);
 	// Stub the post-model gateway smoke test to a pass so full-flow tests don't
 	// make a real completion call; the failure-path test overrides it.
-	vi.spyOn(proxy, "smokeTestModel").mockResolvedValue(null);
+	vi.spyOn(backend, "smokeTestModel").mockResolvedValue(null);
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
@@ -340,7 +340,7 @@ describe("ConfigApp finalize: Claude file fate by auth choice", () => {
 
 	test("Skip configuration preserves ~/.claude.json and ~/.claude/.credentials.json originals", async () => {
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+		vi.spyOn(backend, "fetchApiKey").mockImplementation(
 			() => new Promise(() => {}),
 		);
 		vi.spyOn(configure, "backupOnly").mockReturnValue([
@@ -375,10 +375,10 @@ describe("ConfigApp finalize: Claude file fate by auth choice", () => {
 	test("manual-credentials path triggers the destructive reset", async () => {
 		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		vi.spyOn(proxy, "fetchApiKey").mockImplementation(
+		vi.spyOn(backend, "fetchApiKey").mockImplementation(
 			() => new Promise(() => {}),
 		);
-		vi.spyOn(proxy, "validateApiKey").mockResolvedValue(true);
+		vi.spyOn(backend, "validateApiKey").mockResolvedValue(true);
 		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
 			{
 				kind: "claude-settings",
@@ -421,7 +421,7 @@ describe("ConfigApp finalize: Claude file fate by auth choice", () => {
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 		// The chosen model is rejected by the gateway — surface it at config time
 		// instead of letting it 403 at the agent's first message.
-		vi.spyOn(proxy, "smokeTestModel").mockResolvedValue(
+		vi.spyOn(backend, "smokeTestModel").mockResolvedValue(
 			"Gateway rejected a test request for m-alpha (HTTP 403): key not allowed to access model",
 		);
 		const configureSpy = vi
