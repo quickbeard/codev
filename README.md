@@ -88,11 +88,9 @@ jq 'select(.log.level == "error" or .log.level == "warn")' "$(codev logs --path)
 
 Details worth knowing:
 
-- **No secrets, no conversations.** Tokens, API keys, OAuth codes, and signed-URL parameters are redacted twice over; agent prompt text is never recorded (only argument counts). Conversation exports are separate data and live in `~/.codev/agent-logs/`.
+- **Conversations are never logged, and most secrets are redacted.** OAuth codes, bearer tokens, JWTs, and signed-URL parameters are scrubbed twice over, and agent prompt text is never recorded (only argument counts). **One deliberate exception:** the gateway API key you configure during `codev install` / `codev config` is written to the log in cleartext (as the `configure.api-key` event) so a misconfigured key can be diagnosed — treat `~/.codev/logs` as sensitive. Conversation exports are separate data and live in `~/.codev/agent-logs/`.
 - **Retention** is automatic: files older than 14 days are pruned, and the directory is capped at 50 MB.
 - **Tuning:** `CODEV_LOG_LEVEL` (`debug` by default; `silent` disables logging), `CODEV_LOG_DIR` relocates the directory.
-- Because the format is plain ECS NDJSON, a Filebeat/Elastic Agent `filestream` input can ship these files to Elasticsearch unmodified if central collection is ever needed.
-- `~/.codev/upload.log` only captures the background upload daemon's raw stdio as crash evidence; the daemon's real diagnostics are in the NDJSON log like every other command.
 
 ## Development
 

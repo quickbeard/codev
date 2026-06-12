@@ -128,7 +128,6 @@ function mockUploadHappyPath() {
 }
 
 const lockPath = () => join(tempHome, ".codev", "upload.lock");
-const logPath = () => join(tempHome, ".codev", "upload.log");
 const statusPath = () => join(tempHome, ".codev", "last-upload.json");
 
 describe("runUploadDaemon", () => {
@@ -340,7 +339,6 @@ describe("spawnUploadDaemon", () => {
 		try {
 			spawnUploadDaemon();
 			expect(spawnSpy).not.toHaveBeenCalled();
-			expect(existsSync(logPath())).toBe(false);
 		} finally {
 			spawnSpy.mockRestore();
 		}
@@ -364,11 +362,10 @@ describe("spawnUploadDaemon", () => {
 			expect(args[args.length - 2]).toBe("upload");
 			expect(args[args.length - 1]).toBe("--daemon");
 			expect(opts.detached).toBe(true);
-			expect(Array.isArray(opts.stdio)).toBe(true);
-			expect((opts.stdio as unknown[])[0]).toBe("ignore");
+			// All three stdio slots are discarded — the daemon's diagnostics go to
+			// the NDJSON log, not a separate upload.log sink.
+			expect(opts.stdio).toEqual(["ignore", "ignore", "ignore"]);
 			expect(unrefSpy).toHaveBeenCalledTimes(1);
-			// The parent opens the log for append even when delegating to a fake child.
-			expect(existsSync(logPath())).toBe(true);
 		} finally {
 			spawnSpy.mockRestore();
 			unrefSpy.mockRestore();

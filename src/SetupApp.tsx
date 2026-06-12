@@ -60,7 +60,7 @@ import {
 	type Tool,
 } from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
-import { logDebug, logError } from "@/lib/log.js";
+import { logApiKeyConfigured, logDebug, logError } from "@/lib/log.js";
 import { validateApiKey } from "@/lib/proxy.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 import { disableClaudeCodeLoginPrompt } from "@/lib/vscode-settings.js";
@@ -434,6 +434,12 @@ export function SetupApp({ mode }: SetupAppProps) {
 			setAuthMethod(choice);
 			if (choice === "existing") {
 				if (!savedCreds) return;
+				logApiKeyConfigured(
+					"existing",
+					savedCreds.apiKey,
+					savedCreds.baseUrl,
+					savedCreds.model,
+				);
 				setCreds({
 					apiKey: savedCreds.apiKey,
 					baseUrl: savedCreds.baseUrl,
@@ -461,6 +467,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 		// undefined on this branch (SSO-fetched key uses the default gateway);
 		// the model step will re-save with the full tuple.
 		saveApiKey({ apiKey: key });
+		logApiKeyConfigured("new", key);
 		setCreds({ apiKey: key });
 		setStep("model-choice");
 	}, []);
@@ -470,6 +477,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 	}, []);
 
 	const handleManualDone = useCallback((value: ManualCredentialsValue) => {
+		logApiKeyConfigured("manual", value.apiKey, value.baseUrl);
 		// Defer saveApiKey to the model-choice step so we only persist a
 		// complete tuple (apiKey + baseUrl + model) to ~/.codev/auth.json.
 		setCreds({

@@ -468,9 +468,8 @@ async function confirmUpload(
 //
 // Daemon diagnostics go to the standard NDJSON log (lib/log.ts) like every
 // other command — the child runs through index.tsx, so initLogging is active.
-// ~/.codev/upload.log is NOT a log sink anymore: it only captures the detached
-// child's raw stdio (spawnUploadDaemon wires it), as last-resort evidence for
-// a crash that happens before the logger can.
+// The detached child's own stdout/stderr are discarded (stdio "ignore"); there
+// is no separate upload.log sink.
 
 const STALE_LOCK_MS = 60 * 60 * 1000;
 
@@ -496,10 +495,6 @@ interface UploadStatus {
 
 function codevHomeDir(): string {
 	return join(homedir(), ".codev");
-}
-
-function uploadLogPath(): string {
-	return join(codevHomeDir(), "upload.log");
 }
 
 function uploadLockPath(): string {
@@ -661,35 +656,29 @@ export function spawnUploadDaemon(): void {
 	const selfPath = process.argv[1];
 	if (!selfPath) return;
 	try {
-		mkdirSync(codevHomeDir(), { recursive: true, mode: 0o700 });
-		// upload.log only receives the child's raw stdio — a crash before the
-		// child's own logger initializes still leaves evidence somewhere.
-		const logFd = openSync(uploadLogPath(), "a");
-		try {
-			const traceId = currentTraceId();
-			const child = spawner.spawn(
-				process.execPath,
-				[selfPath, "upload", "--daemon"],
-				{
-					detached: true,
-					stdio: ["ignore", logFd, logFd],
-					// The daemon initLoggings with its own trace id; carrying ours as
-					// CODEV_TRACE_PARENT ties its diagnostic docs to the agent launch
-					// that spawned it.
-					env: {
-						...process.env,
-						...(traceId ? { CODEV_TRACE_PARENT: traceId } : {}),
-					},
+		const traceId = currentTraceId();
+		// The detached child's stdout/stderr are discarded — its diagnostics go
+		// to the NDJSON log via its own initLogging, like every other command.
+		const child = spawner.spawn(
+			process.execPath,
+			[selfPath, "upload", "--daemon"],
+			{
+				detached: true,
+				stdio: ["ignore", "ignore", "ignore"],
+				// The daemon initLoggings with its own trace id; carrying ours as
+				// CODEV_TRACE_PARENT ties its diagnostic docs to the agent launch
+				// that spawned it.
+				env: {
+					...process.env,
+					...(traceId ? { CODEV_TRACE_PARENT: traceId } : {}),
 				},
-			);
-			child.unref();
-			logDebug("spawned upload daemon", {
-				action: "process.spawn",
-				extra: { pid: child.pid ?? null },
-			});
-		} finally {
-			closeSync(logFd);
-		}
+			},
+		);
+		child.unref();
+		logDebug("spawned upload daemon", {
+			action: "process.spawn",
+			extra: { pid: child.pid ?? null },
+		});
 	} catch (err) {
 		// Never block the agent on a failed daemon launch.
 		logWarn("could not spawn upload daemon", { err });
