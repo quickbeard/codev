@@ -51,7 +51,7 @@ export interface LogFields {
 	// event.action — keep to the stable taxonomy: command.start, command.end,
 	// http.request, process.spawn, process.exit, step.transition, task.result,
 	// export.provider, upload.file, upload.summary, daemon.skip, daemon.run,
-	// configure.tool, restore.kind, sqlite.probe, crash.
+	// configure.tool, configure.api-key, restore.kind, sqlite.probe, crash.
 	action?: string;
 	// ECS event.type — distinguishes a begin document ("start") from its
 	// completion ("end") without forking event.action. Start documents are the
@@ -68,6 +68,12 @@ export interface LogFields {
 	// Extra context, persisted under the codev.* namespace after key-based
 	// redaction.
 	extra?: Record<string, unknown>;
+	// Verbatim fields that bypass BOTH redaction layers — the field-key redactor
+	// (redactByKey) AND the serialized-line scrubber (scrubLine). The ONLY
+	// sanctioned use is the gateway API key we intentionally record at
+	// install/config time (see logApiKeyConfigured); everything else must use
+	// `extra`, which stays fully redacted.
+	unsafeUnredacted?: Record<string, unknown>;
 }
 
 interface LoggingState {
@@ -204,6 +210,27 @@ export function logError(message: string, fields: LogFields = {}): void {
 	writeDoc("error", message, fields);
 }
 
+// The ONLY sanctioned use of unsafeUnredacted: record the gateway API key the
+// user configured during `codev install`/`codev config`, in cleartext, so a
+// misconfigured key is diagnosable. Scoped to those commands by its call sites
+// in SetupApp — `codev model` also persists keys (saveApiKey) but deliberately
+// does not log them. The key lands in codev.api_key, NOT the message, so
+// `codev logs` shows only the headline line, never the secret. base_url/model
+// are non-secret and ride along in `extra` (still redacted by key like anything
+// else, though neither matches the secret-key pattern).
+export function logApiKeyConfigured(
+	source: "new" | "existing" | "manual",
+	apiKey: string,
+	baseUrl?: string,
+	model?: string,
+): void {
+	logInfo("configured gateway API key", {
+		action: "configure.api-key",
+		extra: { source, base_url: baseUrl, model },
+		unsafeUnredacted: { api_key: apiKey },
+	});
+}
+
 const ERROR_BODY_MAX_CHARS = 2048;
 
 // Read an error response's body from a CLONE so the caller's own
@@ -304,7 +331,11 @@ function writeDoc(level: LogLevel, message: string, fields: LogFields): void {
 	if (LEVEL_RANK[level] < LEVEL_RANK[state.level]) return;
 	try {
 		const doc = buildDoc(state, level, message, fields);
-		const line = scrubLine(JSON.stringify(doc));
+		const serialized = JSON.stringify(doc);
+		// A doc carrying unsafeUnredacted content opts out of the line scrubber
+		// too — the value (a gateway API key) would otherwise be caught by the
+		// sk-…/JWT/Bearer patterns. Only logApiKeyConfigured sets this.
+		const line = fields.unsafeUnredacted ? serialized : scrubLine(serialized);
 		appendFileSync(join(state.dir, logFileName(new Date())), `${line}\n`);
 	} catch {
 		// Rule 1: logging never breaks the CLI.
@@ -320,6 +351,9 @@ function buildDoc(
 	const codev: Record<string, unknown> = {
 		command: s.command,
 		...redactByKey(f.extra ?? {}),
+		// Verbatim, bypassing redactByKey — see LogFields.unsafeUnredacted. The
+		// serialized-line scrubber is skipped for this doc in writeDoc.
+		...(f.unsafeUnredacted ?? {}),
 	};
 	if (s.parentTraceId) codev.parent_trace_id = s.parentTraceId;
 

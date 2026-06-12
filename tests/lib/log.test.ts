@@ -16,6 +16,7 @@ import { logTaskResult } from "@/components/TaskList.js";
 import {
 	currentTraceId,
 	initLogging,
+	logApiKeyConfigured,
 	logDebug,
 	logError,
 	logFileName,
@@ -256,6 +257,43 @@ describe("redaction", () => {
 		expect(raw).toContain("Bearer [REDACTED]");
 		expect(raw).toContain("[REDACTED:jwt]");
 		expect(raw).toContain("[REDACTED:key]");
+	});
+});
+
+describe("logApiKeyConfigured (unsafeUnredacted)", () => {
+	test("records the gateway API key verbatim, past both redaction layers", () => {
+		initLogging("install", [], { installProcessHooks: false });
+		logApiKeyConfigured("new", "sk-litellm0realkey0value", undefined, "gpt-5");
+		// The sk-… value would normally be scrubbed to [REDACTED:key], and a
+		// field literally named api_key would be [REDACTED] by key — the unsafe
+		// hatch keeps it cleartext on disk.
+		expect(rawLog()).toContain("sk-litellm0realkey0value");
+		const doc = readDocs().find(
+			(d) => (d.event as { action?: string })?.action === "configure.api-key",
+		) as {
+			codev?: { api_key?: string; source?: string; model?: string };
+			message?: string;
+		};
+		expect(doc.codev?.api_key).toBe("sk-litellm0realkey0value");
+		expect(doc.codev?.source).toBe("new");
+		expect(doc.codev?.model).toBe("gpt-5");
+		// The key rides in codev.api_key, never the message, so `codev logs`'
+		// pretty printer (message-only) never echoes it to the terminal.
+		expect(doc.message).toBe("configured gateway API key");
+	});
+
+	test("bypass is per-document — other docs stay redacted", () => {
+		initLogging("install", [], { installProcessHooks: false });
+		logApiKeyConfigured(
+			"manual",
+			"sk-keptcleartextvalue",
+			"https://gw.example",
+		);
+		logInfo("creds", { extra: { api_key: "sk-should0be0redacted" } });
+		const raw = rawLog();
+		expect(raw).toContain("sk-keptcleartextvalue");
+		expect(raw).not.toContain("sk-should0be0redacted");
+		expect(raw).toContain("[REDACTED");
 	});
 });
 
