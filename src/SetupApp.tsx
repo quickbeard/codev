@@ -60,8 +60,8 @@ import {
 	type Tool,
 } from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
-import { logApiKeyConfigured, logDebug, logError } from "@/lib/log.js";
-import { validateApiKey } from "@/lib/proxy.js";
+import { logApiKeyConfigured, logDebug, logError, logWarn } from "@/lib/log.js";
+import { smokeTestModel, validateApiKey } from "@/lib/proxy.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 import { disableClaudeCodeLoginPrompt } from "@/lib/vscode-settings.js";
 
@@ -79,6 +79,7 @@ type Phase =
 	| "fetching-key"
 	| "manual-creds"
 	| "model-choice"
+	| "verifying-gateway"
 	| "configuring"
 	| "configure-failed"
 	| "finalizing"
@@ -94,6 +95,7 @@ const POST_LOGIN: Phase[] = [
 	"fetching-key",
 	"manual-creds",
 	"model-choice",
+	"verifying-gateway",
 	"configuring",
 	"configure-failed",
 	"finalizing",
@@ -110,6 +112,7 @@ const POST_INSTALL: Phase[] = [
 	"fetching-key",
 	"manual-creds",
 	"model-choice",
+	"verifying-gateway",
 	"configuring",
 	"configure-failed",
 	"finalizing",
@@ -121,6 +124,7 @@ const POST_REFRESH: Phase[] = [
 	"fetching-key",
 	"manual-creds",
 	"model-choice",
+	"verifying-gateway",
 	"configuring",
 	"configure-failed",
 	"finalizing",
@@ -131,6 +135,7 @@ const POST_VALIDATE: Phase[] = [
 	"fetching-key",
 	"manual-creds",
 	"model-choice",
+	"verifying-gateway",
 	"configuring",
 	"configure-failed",
 	"finalizing",
@@ -140,12 +145,22 @@ const POST_KEY_CHOICE: Phase[] = [
 	"fetching-key",
 	"manual-creds",
 	"model-choice",
+	"verifying-gateway",
 	"configuring",
 	"configure-failed",
 	"finalizing",
 	"done",
 ];
 const POST_MODEL_CHOICE: Phase[] = [
+	"configuring",
+	"configure-failed",
+	"finalizing",
+	"done",
+];
+// "verifying-gateway and everything after" — gates the smoke-test Step so it
+// mounts when the test starts and stays (read-only) through configure/finalize.
+const POST_VERIFY_GATEWAY: Phase[] = [
+	"verifying-gateway",
 	"configuring",
 	"configure-failed",
 	"finalizing",
@@ -207,6 +222,11 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// model list couldn't be fetched. Drives a persistent yellow ▲ row above
 	// the model step so the user sees why a model was auto-picked.
 	const [modelWarning, setModelWarning] = useState<string | null>(null);
+	// Set when the post-model smoke test (smokeTestModel) fails — the gateway
+	// rejected a real completion for the chosen model (the 403 users otherwise
+	// hit at their agent's first message). Drives a prominent ▲ row at the
+	// verifying-gateway Step; the flow still proceeds to configure.
+	const [smokeWarning, setSmokeWarning] = useState<string | null>(null);
 	// Set only when refreshCodevConfig fails. Drives a yellow ▲ row that
 	// appears between the install Step and the next visible Step. Stays null
 	// (and the row stays unmounted) on the success path, so refresh remains
@@ -488,6 +508,14 @@ export function SetupApp({ mode }: SetupAppProps) {
 	}, []);
 
 	const handleModelFallback = useCallback((err: Error) => {
+		// Record WHY the fallback was taken (the underlying fetch error) as one
+		// clear event, so `codev logs` shows the cause without correlating the
+		// raw gateway.models http.request doc.
+		logWarn("model list fetch failed; using fallback model", {
+			action: "model.fallback",
+			err,
+			extra: { fallback_model: FALLBACK_MODEL },
+		});
 		setModelWarning(
 			`Couldn't fetch the model list (${err.message}); using fallback model ${FALLBACK_MODEL}.`,
 		);
@@ -500,10 +528,33 @@ export function SetupApp({ mode }: SetupAppProps) {
 			// Persist apiKey/baseUrl/model to ~/.codev/auth.json. The full list
 			// isn't persisted — it's re-fetched on every install so reinstalls
 			// always see the current set.
-			if (creds) {
-				saveApiKey({ apiKey: creds.apiKey, baseUrl: creds.baseUrl, model });
+			if (!creds) {
+				// Defensive: the model step doesn't render on the skip path, so
+				// there's normally no creds-less selection. Nothing to test/persist.
+				setStep("configuring");
+				return;
 			}
-			setStep("configuring");
+			saveApiKey({ apiKey: creds.apiKey, baseUrl: creds.baseUrl, model });
+			// Smoke-test the chosen model before writing configs: a 1-token
+			// completion through the gateway surfaces a runtime 403 (key not
+			// allowed for the model / over budget / edge block) HERE instead of at
+			// the agent's first message. Best-effort — a failure warns but the
+			// flow still proceeds to configure.
+			setStep("verifying-gateway");
+			smokeTestModel(creds.apiKey, model, creds.baseUrl)
+				.then((reason) => {
+					if (!reason) return;
+					setSmokeWarning(reason);
+					logWarn("gateway smoke test failed", {
+						action: "configure.smoke-test",
+						outcome: "failure",
+						extra: { model, reason },
+					});
+				})
+				.catch(() => {
+					// smokeTestModel swallows its own errors; defensive only.
+				})
+				.finally(() => setStep("configuring"));
 		},
 		[creds],
 	);
@@ -759,6 +810,35 @@ export function SetupApp({ mode }: SetupAppProps) {
 							/>
 						</Step>
 					)}
+				{POST_VERIFY_GATEWAY.includes(step) && creds && (
+					<Step
+						active={step === "verifying-gateway"}
+						title={<Text bold>Verifying gateway access</Text>}
+					>
+						{step === "verifying-gateway" ? (
+							<Box>
+								<Text color="cyan">
+									<Spinner />
+								</Text>
+								<Text>{` Sending a test request to ${chosenModel ?? "the model"}…`}</Text>
+							</Box>
+						) : smokeWarning ? (
+							<Box flexDirection="column">
+								<Box>
+									<Text color="yellow">▲</Text>
+									<Text color="yellow">{` ${smokeWarning}`}</Text>
+								</Box>
+								<Text dimColor>
+									{
+										"Config was still written, but your agents will hit this same error — fix gateway access (model entitlement, budget, or region/IP), then relaunch."
+									}
+								</Text>
+							</Box>
+						) : (
+							<Text dimColor>{"Gateway accepted a test request."}</Text>
+						)}
+					</Step>
+				)}
 				{POST_MODEL_CHOICE.includes(step) &&
 					(creds || authMethod === "skip") &&
 					(authMethod === "skip" ? (

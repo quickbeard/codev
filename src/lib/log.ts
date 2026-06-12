@@ -51,7 +51,8 @@ export interface LogFields {
 	// event.action — keep to the stable taxonomy: command.start, command.end,
 	// http.request, process.spawn, process.exit, step.transition, task.result,
 	// export.provider, upload.file, upload.summary, daemon.skip, daemon.run,
-	// configure.tool, configure.api-key, restore.kind, sqlite.probe, crash.
+	// configure.tool, configure.api-key, configure.smoke-test, model.fallback,
+	// restore.kind, sqlite.probe, crash.
 	action?: string;
 	// ECS event.type — distinguishes a begin document ("start") from its
 	// completion ("end") without forking event.action. Start documents are the
