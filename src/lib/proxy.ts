@@ -26,6 +26,9 @@ interface ErrorResponse {
 
 const VALIDATE_TIMEOUT_MS = 5_000;
 const MODELS_TIMEOUT_MS = 10_000;
+// A real (1-token) completion can be slower than listing models — it actually
+// hits inference — so give the smoke test more headroom.
+const SMOKE_TIMEOUT_MS = 15_000;
 // Proxy endpoints are quick: token exchange, a tiny config blob, a Supabase
 // session exchange. Cap so a stalled gateway doesn't hang the CLI.
 const PROXY_TIMEOUT_MS = 10_000;
@@ -132,15 +135,20 @@ export function isInvalidKeyError(err: unknown): boolean {
 	return /Models fetch failed \((?:401|403)\)/.test(msg);
 }
 
-// Hits the OpenAI-compatible /v1/models endpoint. AI_GATEWAY_OPENAI_URL
-// already ends in /v1; manual baseUrls may or may not — normalize either way
-// so we always end up at `<base>/v1/models`.
-function modelsUrl(baseUrl?: string): string {
+// Build a `<base>/v1/<suffix>` gateway URL. AI_GATEWAY_OPENAI_URL already ends
+// in /v1; manual baseUrls may or may not — normalize either way so we always
+// end up with exactly one /v1 segment before the suffix.
+function gatewayV1Url(baseUrl: string | undefined, suffix: string): string {
 	const base = baseUrl ?? AI_GATEWAY_OPENAI_URL;
 	const withV1 = /\/v1\/?$/.test(base)
 		? base.replace(/\/$/, "")
 		: `${base.replace(/\/$/, "")}/v1`;
-	return `${withV1}/models`;
+	return `${withV1}/${suffix}`;
+}
+
+// Hits the OpenAI-compatible /v1/models endpoint.
+function modelsUrl(baseUrl?: string): string {
+	return gatewayV1Url(baseUrl, "models");
 }
 
 // Fetches the list of model IDs available to the given API key. Throws on
@@ -169,6 +177,53 @@ export async function fetchModels(
 		.filter((id): id is string => typeof id === "string" && id.length > 0);
 	if (ids.length === 0) throw new Error("Gateway returned no models");
 	return ids;
+}
+
+// Confirms the configured key can actually RUN the chosen model through the
+// gateway. validateApiKey (/key/info) and fetchModels (/v1/models) only prove
+// the key exists and that models are listable — neither proves inference is
+// permitted. This 1-token chat completion catches the gateway 403s ("key not
+// allowed to access model", over-budget, edge/WAF blocks) that otherwise stay
+// hidden until the agent's first message. Returns null on success, or a short
+// human-readable reason (HTTP status + body snippet, or the network error) on
+// failure. Never throws — a pre-flight check must not break install/config.
+export async function smokeTestModel(
+	apiKey: string,
+	model: string,
+	baseUrl?: string,
+): Promise<string | null> {
+	try {
+		const res = await loggedFetch(
+			"gateway.smoke-test",
+			gatewayV1Url(baseUrl, "chat/completions"),
+			{
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${apiKey}`,
+				},
+				body: JSON.stringify({
+					model,
+					messages: [{ role: "user", content: "ping" }],
+					max_tokens: 1,
+				}),
+				signal: AbortSignal.timeout(SMOKE_TIMEOUT_MS),
+			},
+		);
+		if (res.ok) return null;
+		// The 403 body is the gold (loggedFetch also captures it from a clone, so
+		// this read is safe) — it's what tells "model access" from "over budget"
+		// from a bare edge block. Trim and cap so a huge HTML error page can't
+		// blow up the terminal frame.
+		const body = (await res.text().catch(() => "")).trim();
+		const snippet = body
+			? `: ${body.slice(0, 200)}${body.length > 200 ? "…" : ""}`
+			: "";
+		return `Gateway rejected a test request for ${model} (HTTP ${res.status})${snippet}`;
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return `Couldn't reach the gateway to test ${model}: ${msg}`;
+	}
 }
 
 export async function fetchSupabaseSession(

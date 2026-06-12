@@ -66,6 +66,9 @@ beforeEach(() => {
 	// Default to "no saved API key" so the validating-existing branch doesn't
 	// surface a stale dev-machine key.
 	vi.spyOn(auth, "loadApiKey").mockReturnValue(null);
+	// Stub the post-model gateway smoke test to a pass so full-flow tests don't
+	// make a real completion call; the failure-path test overrides it.
+	vi.spyOn(proxy, "smokeTestModel").mockResolvedValue(null);
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
@@ -411,5 +414,45 @@ describe("ConfigApp finalize: Claude file fate by auth choice", () => {
 			hasCompletedOnboarding: true,
 		});
 		expect(existsSync(credPath)).toBe(false);
+	});
+
+	test("a failing gateway smoke test warns but still writes config", async () => {
+		stubModels();
+		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
+		// The chosen model is rejected by the gateway — surface it at config time
+		// instead of letting it 403 at the agent's first message.
+		vi.spyOn(proxy, "smokeTestModel").mockResolvedValue(
+			"Gateway rejected a test request for m-alpha (HTTP 403): key not allowed to access model",
+		);
+		const configureSpy = vi
+			.spyOn(configure, "configureClaudeCode")
+			.mockReturnValue([
+				{
+					kind: "claude-settings",
+					sourcePath: "/tmp/x",
+					backupPath: "/tmp/x.backup",
+					created: true,
+				},
+			]);
+		stubExecFile(() => ({ stdout: "ok" }));
+		seedClaudeFiles();
+
+		const { stdin, frames } = render(<ConfigApp />);
+		await advanceThroughConfirm(stdin, frames);
+		await pickManual(stdin, frames);
+		await typeManualCreds(
+			stdin,
+			frames,
+			"https://gateway.example.com/v1",
+			"sk-smoke-403",
+		);
+		await pickFirstModel(stdin, frames, "m-alpha");
+		await waitForFrame(frames, "Happy coding");
+
+		const history = allFrames(frames);
+		expect(history).toContain("Verifying gateway access");
+		expect(history).toContain("key not allowed to access model");
+		// Best-effort: the warning is shown but does not block configuration.
+		expect(configureSpy).toHaveBeenCalled();
 	});
 });

@@ -10,6 +10,7 @@ import {
 	fetchModels,
 	fetchSupabaseSession,
 	isInvalidKeyError,
+	smokeTestModel,
 	validateApiKey,
 } from "@/lib/proxy.js";
 
@@ -262,6 +263,53 @@ describe("fetchModels", () => {
 		await fetchModels("sk-z", "https://gw.example.com/");
 		const [url] = fetchSpy.mock.calls[0] as [string];
 		expect(url).toBe("https://gw.example.com/v1/models");
+	});
+});
+
+describe("smokeTestModel", () => {
+	test("returns null when the gateway accepts the completion", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, { choices: [{ message: { content: "ok" } }] }),
+		);
+		await expect(
+			smokeTestModel("sk-ok", "MiniMax/MiniMax-M2.7"),
+		).resolves.toBeNull();
+	});
+
+	test("returns a reason with the status and body on a non-2xx", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response("key not allowed to access model MiniMax/MiniMax-M2.7", {
+				status: 403,
+			}),
+		);
+		const reason = await smokeTestModel("sk-bad", "MiniMax/MiniMax-M2.7");
+		expect(reason).toContain("MiniMax/MiniMax-M2.7");
+		expect(reason).toContain("403");
+		// The gateway's own message — the bit that distinguishes model-access
+		// from over-budget from an edge block — is preserved.
+		expect(reason).toContain("key not allowed to access model");
+	});
+
+	test("returns a reason instead of throwing on a network error", async () => {
+		vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("ECONNREFUSED"));
+		const reason = await smokeTestModel("sk-x", "m1");
+		expect(reason).toContain("ECONNREFUSED");
+	});
+
+	test("POSTs a 1-token completion to /v1/chat/completions for the model", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, {}));
+		await smokeTestModel("sk-y", "m-test", "https://gw.example.com/v1");
+		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe("https://gw.example.com/v1/chat/completions");
+		expect(init.method).toBe("POST");
+		const body = JSON.parse(init.body as string) as {
+			model: string;
+			max_tokens: number;
+		};
+		expect(body.model).toBe("m-test");
+		expect(body.max_tokens).toBe(1);
 	});
 });
 

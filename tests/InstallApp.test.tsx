@@ -80,6 +80,10 @@ beforeEach(() => {
 		status: "skipped",
 		targets: [],
 	});
+	// The post-model gateway smoke test hits the gateway with a real completion;
+	// default it to a pass so full-flow tests don't make a network call. The
+	// failure-path test overrides it.
+	vi.spyOn(proxy, "smokeTestModel").mockResolvedValue(null);
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
