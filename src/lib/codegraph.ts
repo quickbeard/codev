@@ -2,7 +2,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { constants } from "node:os";
 import type { Tool } from "@/lib/configure.js";
 import { logError, logInfo, logWarn } from "@/lib/log.js";
-import { execAsync } from "@/lib/npm.js";
+import { execAsync, isPackageInstalledGlobally } from "@/lib/npm.js";
 import { formatToolList } from "@/lib/text.js";
 
 // The npm package that ships the `codegraph` CLI + MCP server.
@@ -82,6 +82,16 @@ export async function ensureCodegraphInstalled(): Promise<string | null> {
 	const r = await execAsync("npm", ["i", "-g", CODEGRAPH_PKG]);
 	if (!r.error) return null;
 	return r.stderr.trim() || r.error.message;
+}
+
+// Is the global CodeGraph package present under `npm root -g`? This is the
+// signal `codev update` uses to decide whether to refresh CodeGraph: update
+// only upgrades what's already on disk (the same "detect, then update"
+// contract the agent rows follow), so it never freshly installs CodeGraph.
+// Install/config gate on the selected tools instead — there's no tool
+// selection at update time.
+export function detectCodegraphInstalled(): Promise<boolean> {
+	return isPackageInstalledGlobally(CODEGRAPH_PKG);
 }
 
 // Run CodeGraph's installer for the given targets, user-wide and

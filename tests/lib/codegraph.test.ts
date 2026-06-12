@@ -6,6 +6,7 @@ import {
 	type CodegraphTarget,
 	codegraphRunner,
 	codegraphTargets,
+	detectCodegraphInstalled,
 	ensureCodegraphInstalled,
 	formatCodegraphTargets,
 	forwardToCodegraph,
@@ -192,6 +193,25 @@ describe("ensureCodegraphInstalled", () => {
 			error: new Error("exit 1"),
 		});
 		expect(await ensureCodegraphInstalled()).toBe("npm exploded");
+	});
+});
+
+describe("detectCodegraphInstalled", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	test("delegates to isPackageInstalledGlobally with the CodeGraph package", async () => {
+		const spy = vi
+			.spyOn(npm, "isPackageInstalledGlobally")
+			.mockResolvedValue(true);
+		expect(await detectCodegraphInstalled()).toBe(true);
+		expect(spy).toHaveBeenCalledWith("@colbymchenry/codegraph");
+	});
+
+	test("returns false when the package isn't globally installed", async () => {
+		vi.spyOn(npm, "isPackageInstalledGlobally").mockResolvedValue(false);
+		expect(await detectCodegraphInstalled()).toBe(false);
 	});
 });
 

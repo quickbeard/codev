@@ -344,4 +344,89 @@ describe("Update", () => {
 		expect(onDone).toHaveBeenCalledWith(true);
 		existsSpy.mockRestore();
 	});
+
+	test("refreshes CodeGraph when it is globally installed", async () => {
+		// No agents/extensions detected; only the global CodeGraph package is on
+		// disk → the sole row is the CodeGraph refresh.
+		stubContinueDetected(false);
+		stubExecFile((file, args) => {
+			if (file === "npm" && args[0] === "root") return { stdout: "/fake/root" };
+			if (file === "npm" && args[0] === "i") return { stdout: "ok" };
+			return { stdout: "" };
+		});
+		const existsSpy = vi
+			.mocked(fs.existsSync)
+			.mockImplementation(
+				(p: fs.PathLike) =>
+					String(p) === join("/fake/root", "@colbymchenry", "codegraph"),
+			);
+		const onDone = vi.fn(() => {});
+
+		const { frames } = render(<Update onDone={onDone} />);
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled(), WAIT_OPTS);
+
+		const history = allFrames(frames);
+		expect(history).toContain("Updated @colbymchenry/codegraph");
+		expect(onDone).toHaveBeenCalledWith(true);
+		existsSpy.mockRestore();
+	});
+
+	test("does not schedule a CodeGraph row when it isn't globally installed", async () => {
+		// opencode is installed, CodeGraph is not → only opencode updates.
+		stubContinueDetected(false);
+		stubExecFile((file, args) => {
+			if (file === "npm" && args[0] === "root") return { stdout: "/fake/root" };
+			if (file === "npm" && args[0] === "i") return { stdout: "ok" };
+			if (file === "opencode") return { stdout: "1.0.0" };
+			return { stdout: "" };
+		});
+		const existsSpy = vi
+			.mocked(fs.existsSync)
+			.mockImplementation(
+				(p: fs.PathLike) => String(p) === join("/fake/root", "opencode-ai"),
+			);
+		const onDone = vi.fn(() => {});
+
+		const { frames } = render(<Update onDone={onDone} />);
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled(), WAIT_OPTS);
+
+		const history = allFrames(frames);
+		expect(history).toContain("Updated opencode-ai");
+		expect(history).not.toContain("@colbymchenry/codegraph");
+		expect(onDone).toHaveBeenCalledWith(true);
+		existsSpy.mockRestore();
+	});
+
+	test("treats a failed CodeGraph refresh as a warning, not a hard failure", async () => {
+		// CodeGraph is best-effort: a failed `npm i -g` must surface as a ▲
+		// warning (a survivor) and keep the overall update successful — never a ✗
+		// that flips onDone to false.
+		stubContinueDetected(false);
+		stubExecFile((file, args) => {
+			if (file === "npm" && args[0] === "root") return { stdout: "/fake/root" };
+			if (file === "npm" && args[0] === "i") {
+				return { error: new Error("x"), stderr: "npm exploded" };
+			}
+			return { stdout: "" };
+		});
+		const existsSpy = vi
+			.mocked(fs.existsSync)
+			.mockImplementation(
+				(p: fs.PathLike) =>
+					String(p) === join("/fake/root", "@colbymchenry", "codegraph"),
+			);
+		const onDone = vi.fn(() => {});
+
+		const { frames } = render(<Update onDone={onDone} />);
+		await vi.waitFor(() => expect(onDone).toHaveBeenCalled(), WAIT_OPTS);
+
+		const history = allFrames(frames);
+		expect(history).toContain("Warning: CodeGraph not updated");
+		expect(history).toContain("npm exploded");
+		// Warned (▲), not failed (✗) — the failure row text must not appear...
+		expect(history).not.toContain("Failed to update @colbymchenry/codegraph");
+		// ...and the update still reports success.
+		expect(onDone).toHaveBeenCalledWith(true);
+		existsSpy.mockRestore();
+	});
 });

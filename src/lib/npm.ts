@@ -285,9 +285,19 @@ export async function installAndVerify(tool: NpmTool): Promise<string | null> {
 	return `installed but '${CLI[tool]}' fails: ${firstVerify}`;
 }
 
-export async function detectInstalledViaNpm(tool: NpmTool): Promise<boolean> {
+// Is a globally-installed npm package present under `npm root -g`? The shared
+// primitive behind agent detection (detectInstalledViaNpm) and the CodeGraph
+// update probe (codegraph.ts#detectCodegraphInstalled) — both ask "is <pkg> in
+// the global tree?". A scoped name like `@scope/name` splits into the nested
+// `@scope/name` directory.
+export async function isPackageInstalledGlobally(
+	pkg: string,
+): Promise<boolean> {
 	const root = await npmGlobalRoot();
 	if (!root) return false;
-	const pkgDir = join(root, ...PKG[tool].split("/"));
-	return existsSync(pkgDir);
+	return existsSync(join(root, ...pkg.split("/")));
+}
+
+export function detectInstalledViaNpm(tool: NpmTool): Promise<boolean> {
+	return isPackageInstalledGlobally(PKG[tool]);
 }
