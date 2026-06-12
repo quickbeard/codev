@@ -8,6 +8,9 @@ import { cliLogsDir } from "@/lib/paths.js";
 //   codev logs               pretty-print the most recent run
 //   codev logs --path        print the newest log file's path
 //   codev logs --trace <id>  print one run by trace id (prefix accepted)
+//   codev logs --verbose     also print each document's codev.* context fields
+//                            (the gateway api_key, endpoints, pids, …); composes
+//                            with the bare and --trace modes
 //
 // Plain console output, no Ink — by the time someone reaches for this command
 // something already went wrong, so it stays dependency- and ceremony-free.
@@ -17,9 +20,24 @@ interface DiagDoc {
 	log?: { level?: string };
 	message?: string;
 	trace?: { id?: string };
-	codev?: { command?: string; parent_trace_id?: string };
+	// command + parent_trace_id are read explicitly; the index signature lets
+	// --verbose enumerate the rest of the codev.* context (api_key, endpoint,
+	// source, pid, …) without naming each field here.
+	codev?: {
+		command?: string;
+		parent_trace_id?: string;
+		[key: string]: unknown;
+	};
 	event?: { outcome?: string };
 	error?: { message?: string };
+}
+
+// --verbose renders codev.* context values as indented ↳ lines. Primitives
+// print bare; the defensive JSON.stringify covers any nested object a future
+// field might carry.
+function formatExtra(value: unknown): string {
+	if (value === null || typeof value !== "object") return String(value);
+	return JSON.stringify(value);
 }
 
 // Mirror initLogging's directory resolution so the reader always looks where
@@ -65,7 +83,7 @@ function readAllDocs(paths: string[]): DiagDoc[] {
 	return docs;
 }
 
-function printRun(run: DiagDoc[], allDocs: DiagDoc[]): void {
+function printRun(run: DiagDoc[], allDocs: DiagDoc[], verbose = false): void {
 	const first = run[0];
 	const traceId = first?.trace?.id ?? "?";
 	const command = first?.codev?.command ?? "?";
@@ -81,6 +99,17 @@ function printRun(run: DiagDoc[], allDocs: DiagDoc[]): void {
 		// adds something the message line doesn't already say.
 		if (doc.error?.message && doc.error.message !== doc.message) {
 			console.log(`${" ".repeat(19)}↳ ${doc.error.message}`);
+		}
+		// --verbose: surface the per-document codev.* context the compact view
+		// hides — the gateway api_key (the one cleartext secret), plus endpoints,
+		// sources, pids, and any field added later. command and parent_trace_id
+		// are structural (shown in the header/footer), so skip them.
+		if (verbose && doc.codev) {
+			for (const [key, value] of Object.entries(doc.codev)) {
+				if (key === "command" || key === "parent_trace_id") continue;
+				if (value === undefined) continue;
+				console.log(`${" ".repeat(19)}↳ ${key}=${formatExtra(value)}`);
+			}
 		}
 	}
 	// Child processes (re-exec, upload daemon) log under their own trace with
@@ -106,11 +135,14 @@ function printRun(run: DiagDoc[], allDocs: DiagDoc[]): void {
 
 export function runLogs(args: string[]): number {
 	let showPath = false;
+	let verbose = false;
 	let trace: string | null = null;
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 		if (arg === "--path") {
 			showPath = true;
+		} else if (arg === "--verbose") {
+			verbose = true;
 		} else if (arg === "--trace") {
 			trace = args[++i] ?? null;
 			if (!trace) {
@@ -119,7 +151,7 @@ export function runLogs(args: string[]): number {
 			}
 		} else {
 			console.error(`Unknown option: ${arg}`);
-			console.error("Usage: codev logs [--path | --trace <id>]");
+			console.error("Usage: codev logs [--path | --trace <id>] [--verbose]");
 			return 1;
 		}
 	}
@@ -155,7 +187,7 @@ export function runLogs(args: string[]): number {
 			for (const id of ids) console.error(`  ${id}`);
 			return 1;
 		}
-		printRun(matches, docs);
+		printRun(matches, docs, verbose);
 		return 0;
 	}
 
@@ -186,6 +218,7 @@ export function runLogs(args: string[]): number {
 	printRun(
 		docs.filter((d) => d.trace?.id === target),
 		docs,
+		verbose,
 	);
 	return 0;
 }

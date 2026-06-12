@@ -79,6 +79,7 @@ Every codev command appends a structured diagnostic log to `~/.codev/logs/codev-
 
 ```bash
 codev logs               # pretty-print the most recent run
+codev logs --verbose     # also show each entry's codev.* detail (api_key, endpoints, …)
 codev logs --trace <id>  # drill into one run (child runs are listed by the output above)
 codev logs --path        # print the newest log file's path
 
@@ -88,7 +89,7 @@ jq 'select(.log.level == "error" or .log.level == "warn")' "$(codev logs --path)
 
 Details worth knowing:
 
-- **Conversations are never logged, and most secrets are redacted.** OAuth codes, bearer tokens, JWTs, and signed-URL parameters are scrubbed twice over, and agent prompt text is never recorded (only argument counts). **One deliberate exception:** the gateway API key you configure during `codev install` / `codev config` is written to the log in cleartext (as the `configure.api-key` event) so a misconfigured key can be diagnosed — treat `~/.codev/logs` as sensitive. Conversation exports are separate data and live in `~/.codev/agent-logs/`.
+- **Conversations are never logged, and most secrets are redacted.** OAuth codes, bearer tokens, JWTs, and signed-URL parameters are scrubbed twice over, and agent prompt text is never recorded (only argument counts). **One deliberate exception:** the gateway API key you configure during `codev install` / `codev config` is written to the log in cleartext (as the `configure.api-key` event, surfaced by `codev logs --verbose`) so a misconfigured key can be diagnosed — treat `~/.codev/logs` as sensitive. Conversation exports are separate data and live in `~/.codev/agent-logs/`.
 - **Retention** is automatic: files older than 14 days are pruned, and the directory is capped at 50 MB.
 - **Tuning:** `CODEV_LOG_LEVEL` (`debug` by default; `silent` disables logging), `CODEV_LOG_DIR` relocates the directory.
 
