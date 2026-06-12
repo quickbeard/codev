@@ -143,9 +143,9 @@ async function settleAfterLogin(
 	_stdin: { write: (s: string) => void },
 	frames: string[],
 ) {
-	// Config mode jumps login → refreshing-config → key-choice. The
-	// "Choose proxy URL" step is currently hidden (SHOW_PROXY_URL_STEP=false),
-	// so the flow auto-advances past it on the default URL.
+	// Config mode jumps login → refreshing-config → key-choice (with a
+	// CodeGraph-only install step in between when a selected agent maps to a
+	// CodeGraph target).
 	await waitForFrame(frames, "Choose configuration method");
 }
 

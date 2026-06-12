@@ -28,7 +28,6 @@ export const HAPPY_CODING = "Happy coding! 🎉";
 interface CodevAuthFile {
 	supabase_url?: string;
 	supabase_anon_key?: string;
-	proxy_url?: string;
 }
 
 function readCodevAuthFile(): CodevAuthFile | null {
@@ -59,10 +58,9 @@ export function SUPABASE_ANON_KEY(): string {
 	return readField("supabase_anon_key", "supabase_anon_key");
 }
 
-// User-overridable: returns the proxy_url from ~/.codev/auth.json if set,
-// otherwise the baked-in default. Picked during `codev install` / `codev
-// config` via the ProxyUrl Step.
+// Returns the codev-proxy backend URL. Kept as a function so call sites resolve
+// it lazily (consistent with SUPABASE_URL/ANON_KEY), even though it now simply
+// returns the baked-in default.
 export function PROXY_URL(): string {
-	const override = readCodevAuthFile()?.proxy_url;
-	return override && override.length > 0 ? override : BACKEND_URL;
+	return BACKEND_URL;
 }

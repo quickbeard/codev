@@ -24,11 +24,6 @@ import {
 	manualCredentialsTitle,
 } from "@/components/ManualCredentials.js";
 import { ModelSelect, modelSelectTitle } from "@/components/ModelSelect.js";
-import {
-	ProxyUrl,
-	type ProxyUrlChoice,
-	proxyUrlTitle,
-} from "@/components/ProxyUrl.js";
 import { SetupComplete } from "@/components/SetupComplete.js";
 import { Step } from "@/components/Step.js";
 import {
@@ -44,7 +39,6 @@ import {
 	loadApiKey,
 	refreshCodevConfig,
 	saveApiKey,
-	saveProxyUrl,
 } from "@/lib/auth.js";
 import {
 	CODEGRAPH_TASK_KEY,
@@ -72,7 +66,6 @@ type Phase =
 	| "login"
 	| "installing"
 	| "install-failed"
-	| "proxy-url"
 	| "refreshing-config"
 	| "validating-existing"
 	| "key-choice"
@@ -88,24 +81,6 @@ type Phase =
 const POST_LOGIN: Phase[] = [
 	"installing",
 	"install-failed",
-	"proxy-url",
-	"refreshing-config",
-	"validating-existing",
-	"key-choice",
-	"fetching-key",
-	"manual-creds",
-	"model-choice",
-	"verifying-gateway",
-	"configuring",
-	"configure-failed",
-	"finalizing",
-	"done",
-];
-// "proxy-url and everything after". Used as the visibility gate for the
-// ProxyUrl Step itself, so it doesn't mount during the install phase but
-// stays rendered (read-only) after the user has picked.
-const POST_INSTALL: Phase[] = [
-	"proxy-url",
 	"refreshing-config",
 	"validating-existing",
 	"key-choice",
@@ -167,14 +142,6 @@ const POST_VERIFY_GATEWAY: Phase[] = [
 	"done",
 ];
 
-// Temporarily hide the "Choose proxy URL" step. When false, the step never
-// renders and the flow advances past it using the default proxy URL — without
-// persisting anything (~/.codev/auth.json is left untouched, so PROXY_URL()
-// resolves to the baked-in default). Flip to true to bring back the
-// interactive picker + its persistence with no other changes. Typed `boolean`
-// (not the literal `false`) so the gated render stays type-reachable.
-const SHOW_PROXY_URL_STEP: boolean = false;
-
 export type SetupMode = "install" | "config";
 
 interface SetupAppProps {
@@ -232,13 +199,6 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// (and the row stays unmounted) on the success path, so refresh remains
 	// invisible when it works.
 	const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
-	// Survivors waiting for the proxy-url Step to resolve. Populated by
-	// handleInstallDone (install mode) or handleLoginDone (config mode); read
-	// by handleProxyUrlConfirm to hand off to runPostInstallSideEffects.
-	const [pendingSurvivors, setPendingSurvivors] = useState<Tool[]>([]);
-	// User's proxy-url pick, kept so the read-only history row above later
-	// steps shows which option was chosen and (for custom) the URL entered.
-	const [proxyChoice, setProxyChoice] = useState<ProxyUrlChoice | null>(null);
 
 	// Diagnostic trail of the wizard's progress — one document per phase
 	// transition, so a stuck or aborted run shows exactly where it stopped.
@@ -360,17 +320,17 @@ export function SetupApp({ mode }: SetupAppProps) {
 			}
 			// Config mode skips the *agent* install (they're treated as already
 			// installed, so the survivor set equals `tools`), but still installs
-			// CodeGraph. When any selected agent maps to a CodeGraph
-			// target, show the CodeGraph-only Install step right after login;
-			// otherwise skip straight to the post-login side-effects via proxy-url.
+			// CodeGraph. When any selected agent maps to a CodeGraph target, show
+			// the CodeGraph-only Install step right after login; otherwise run the
+			// post-login side-effects directly. authData is passed explicitly
+			// because the setAuth above hasn't flushed to state yet this tick.
 			if (codegraphTargets(tools).length > 0) {
 				setStep("installing");
 			} else {
-				setPendingSurvivors(tools);
-				setStep("proxy-url");
+				runPostInstallSideEffects(tools, authData);
 			}
 		},
-		[mode, tools],
+		[mode, tools, runPostInstallSideEffects],
 	);
 
 	// Total-failure-only hang: when every selected tool hard-failed (empty
@@ -386,13 +346,16 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// survivor set.
 	const handleInstallDone = useCallback(
 		(succeededKeys: string[]) => {
+			// login() runs before install, so `auth` is set by the time this
+			// fires; the `if (auth)` guards below are defensive — if it were
+			// somehow null we'd rather stall than run side-effects without a token.
+			//
 			// Config mode's Install step only ran the CodeGraph row (agents
 			// are assumed already installed), so the survivor set is the full
 			// selection regardless of the CodeGraph row's outcome — it's
 			// best-effort and must never drop an agent or park the flow.
 			if (mode === "config") {
-				setPendingSurvivors(tools);
-				setStep("proxy-url");
+				if (auth) runPostInstallSideEffects(tools, auth);
 				return;
 			}
 			// The CodeGraph task shares this TaskList but isn't an agent: split
@@ -406,48 +369,14 @@ export function SetupApp({ mode }: SetupAppProps) {
 				setStep("install-failed");
 				return;
 			}
-			// Park survivors and hand off to the proxy-url Step. Post-install
-			// side-effects (resetClaudeAuth, installShims, refreshCodevConfig)
-			// run after handleProxyUrlConfirm so the chosen proxy URL is in
-			// effect for the very first refresh call.
-			setPendingSurvivors(toolSurvivors);
-			setStep("proxy-url");
+			// Hand straight off to the post-install side-effects. The
+			// filesystem-mutating ones (resetClaudeAuth, installShims) still run
+			// later in runFinalizeSideEffects; this only kicks off the invisible
+			// config refresh + saved-key validation.
+			if (auth) runPostInstallSideEffects(toolSurvivors, auth);
 		},
-		[mode, tools],
+		[mode, tools, auth, runPostInstallSideEffects],
 	);
-
-	const handleProxyUrlConfirm = useCallback(
-		(choice: ProxyUrlChoice) => {
-			setProxyChoice(choice);
-			// Persist BEFORE runPostInstallSideEffects fires — that helper calls
-			// refreshCodevConfig, which reads PROXY_URL() at request time.
-			if (choice.method === "custom") {
-				saveProxyUrl(choice.url);
-			} else {
-				// "default" means: clear any prior override so PROXY_URL() falls
-				// back to the baked-in default. Re-running install/config is the
-				// only place to switch back, so we have to handle the revert.
-				saveProxyUrl("");
-			}
-			if (!auth) {
-				// login() runs before this phase, so this is defensive only.
-				return;
-			}
-			runPostInstallSideEffects(pendingSurvivors, auth);
-		},
-		[auth, pendingSurvivors, runPostInstallSideEffects],
-	);
-
-	// When the proxy-url step is hidden, advance straight past it. We bypass
-	// handleProxyUrlConfirm on purpose: no saveProxyUrl, so ~/.codev/auth.json is
-	// left untouched and PROXY_URL() resolves to the default. Fires once when the
-	// flow parks on "proxy-url"; runPostInstallSideEffects moves step forward so
-	// the guard below is false on every later render.
-	useEffect(() => {
-		if (SHOW_PROXY_URL_STEP) return;
-		if (step !== "proxy-url" || !auth) return;
-		runPostInstallSideEffects(pendingSurvivors, auth);
-	}, [step, auth, pendingSurvivors, runPostInstallSideEffects]);
 
 	const handleAuthMethod = useCallback(
 		(choice: AuthMethodChoice) => {
@@ -704,18 +633,6 @@ export function SetupApp({ mode }: SetupAppProps) {
 							/>
 						</Step>
 					)}
-				{SHOW_PROXY_URL_STEP && POST_INSTALL.includes(step) && (
-					<Step
-						active={step === "proxy-url"}
-						title={proxyUrlTitle(step !== "proxy-url")}
-					>
-						<ProxyUrl
-							onConfirm={handleProxyUrlConfirm}
-							readOnly={step !== "proxy-url"}
-							selected={proxyChoice}
-						/>
-					</Step>
-				)}
 				{POST_REFRESH.includes(step) && refreshWarning && (
 					<Step title={<Text bold>Refresh CoDev config</Text>}>
 						<Box>

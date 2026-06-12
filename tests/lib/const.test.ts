@@ -88,39 +88,13 @@ describe("Supabase const accessors", () => {
 });
 
 describe("PROXY_URL", () => {
-	test("returns the baked-in default when auth.json does not exist", () => {
+	test("returns the baked-in backend URL when auth.json does not exist", () => {
 		expect(PROXY_URL()).toBe(BACKEND_URL);
 	});
 
-	test("returns the baked-in default when proxy_url is unset", () => {
+	test("ignores auth.json contents — there is no override path", () => {
 		writeAuthJson({ supabase_url: "u", supabase_anon_key: "a" });
 		expect(PROXY_URL()).toBe(BACKEND_URL);
-	});
-
-	test("returns the baked-in default when proxy_url is an empty string", () => {
-		writeAuthJson({ proxy_url: "" });
-		expect(PROXY_URL()).toBe(BACKEND_URL);
-	});
-
-	test("returns the override when proxy_url is set", () => {
-		writeAuthJson({ proxy_url: "https://my-proxy.example.com" });
-		expect(PROXY_URL()).toBe("https://my-proxy.example.com");
-	});
-
-	test("reads the live file (no module-load caching)", () => {
-		writeAuthJson({ proxy_url: "https://first.example.com" });
-		expect(PROXY_URL()).toBe("https://first.example.com");
-
-		writeAuthJson({ proxy_url: "https://second.example.com" });
-		expect(PROXY_URL()).toBe("https://second.example.com");
-	});
-
-	test("ignores other fields when reading proxy_url", () => {
-		writeAuthJson({
-			proxy_url: "https://only-this.example.com",
-			supabase_url: "should-not-matter",
-		});
-		expect(PROXY_URL()).toBe("https://only-this.example.com");
 	});
 });
 
