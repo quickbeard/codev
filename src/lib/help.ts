@@ -25,10 +25,5 @@ Commands:
   remove              Revert this machine to its pre-CoDev state (--yes to skip prompt)
   --version, -v       Show version
   --help, -h          Show this help
-
-Diagnostics:
-  Every run appends a structured log to ~/.codev/logs/codev-YYYYMMDD.ndjson
-  (kept 14 days / 50 MB; no prompts or credentials are ever written).
-  Set CODEV_LOG_LEVEL=silent to disable, CODEV_LOG_DIR to relocate.
 `);
 }
