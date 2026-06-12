@@ -40,6 +40,7 @@ interface DocOpts {
 	command?: string;
 	parent?: string;
 	errMessage?: string;
+	codevExtra?: Record<string, unknown>;
 }
 
 function doc(traceId: string, message: string, opts: DocOpts = {}): string {
@@ -51,6 +52,7 @@ function doc(traceId: string, message: string, opts: DocOpts = {}): string {
 		codev: {
 			command: opts.command ?? "upload",
 			...(opts.parent ? { parent_trace_id: opts.parent } : {}),
+			...(opts.codevExtra ?? {}),
 		},
 		...(opts.errMessage ? { error: { message: opts.errMessage } } : {}),
 	});
@@ -190,5 +192,49 @@ describe("codev logs argument handling", () => {
 		const err = errors();
 		expect(err).toContain("Unknown option: --nope");
 		expect(err).toContain("Usage: codev logs");
+	});
+});
+
+describe("codev logs --verbose", () => {
+	test("surfaces codev.* context (api_key, source, model) as ↳ lines", () => {
+		writeLogFile("codev-20260611.ndjson", [
+			doc("trace-cfg", "codev config started", { command: "config" }),
+			doc("trace-cfg", "configured gateway API key", {
+				command: "config",
+				codevExtra: { source: "new", model: "gpt-5", api_key: "sk-realkey123" },
+			}),
+		]);
+		expect(runLogs(["--verbose"])).toBe(0);
+		const out = output();
+		expect(out).toContain("configured gateway API key");
+		expect(out).toContain("↳ api_key=sk-realkey123");
+		expect(out).toContain("↳ source=new");
+		expect(out).toContain("↳ model=gpt-5");
+		// Structural fields (command, parent_trace_id) aren't repeated as detail.
+		expect(out).not.toContain("↳ command=");
+	});
+
+	test("the compact (non-verbose) view hides codev.api_key", () => {
+		// Legitimate negative: the same data renders the key in the --verbose
+		// branch above — this pins the conditional, not a removed feature.
+		writeLogFile("codev-20260611.ndjson", [
+			doc("trace-cfg", "configured gateway API key", {
+				command: "config",
+				codevExtra: { api_key: "sk-secretkey789" },
+			}),
+		]);
+		expect(runLogs([])).toBe(0);
+		expect(output()).not.toContain("sk-secretkey789");
+	});
+
+	test("composes with --trace", () => {
+		writeLogFile("codev-20260611.ndjson", [
+			doc("aaaa-1111", "configured gateway API key", {
+				command: "config",
+				codevExtra: { api_key: "sk-tracekey456" },
+			}),
+		]);
+		expect(runLogs(["--trace", "aaaa", "--verbose"])).toBe(0);
+		expect(output()).toContain("↳ api_key=sk-tracekey456");
 	});
 });

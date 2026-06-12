@@ -19,7 +19,7 @@ Commands:
   restore [agent]     Restore an agent's pre-CoDev config from its *.backup
                       (no arg processes every agent)
   logs                Show the last run from the diagnostic log
-                      (--path prints the newest file, --trace <id> shows one run)
+                      (--path newest file, --trace <id> one run, --verbose extra detail)
   login               Sign in to SSO (--force to bypass cached session)
   logout              Sign out of SSO
   remove              Revert this machine to its pre-CoDev state (--yes to skip prompt)
