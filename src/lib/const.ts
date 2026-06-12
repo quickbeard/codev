@@ -57,10 +57,3 @@ export function SUPABASE_URL(): string {
 export function SUPABASE_ANON_KEY(): string {
 	return readField("supabase_anon_key", "supabase_anon_key");
 }
-
-// Returns the codev-proxy backend URL. Kept as a function so call sites resolve
-// it lazily (consistent with SUPABASE_URL/ANON_KEY), even though it now simply
-// returns the baked-in default.
-export function PROXY_URL(): string {
-	return BACKEND_URL;
-}

@@ -3,9 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
-	BACKEND_URL,
 	FALLBACK_MODEL,
-	PROXY_URL,
 	SUPABASE_ANON_KEY,
 	SUPABASE_URL,
 } from "@/lib/const.js";
@@ -84,17 +82,6 @@ describe("Supabase const accessors", () => {
 			supabase_anon_key: "a2",
 		});
 		expect(SUPABASE_URL()).toBe("https://second.supabase.co");
-	});
-});
-
-describe("PROXY_URL", () => {
-	test("returns the baked-in backend URL when auth.json does not exist", () => {
-		expect(PROXY_URL()).toBe(BACKEND_URL);
-	});
-
-	test("ignores auth.json contents — there is no override path", () => {
-		writeAuthJson({ supabase_url: "u", supabase_anon_key: "a" });
-		expect(PROXY_URL()).toBe(BACKEND_URL);
 	});
 });
 
