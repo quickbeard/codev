@@ -1,7 +1,7 @@
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { ModelSelect } from "@/components/ModelSelect.js";
-import * as proxy from "@/lib/proxy.js";
+import * as backend from "@/lib/backend.js";
 
 afterEach(() => {
 	cleanup();
@@ -15,7 +15,7 @@ async function tick(ms = 30): Promise<void> {
 describe("ModelSelect", () => {
 	test("renders the loading spinner while fetching", () => {
 		// Never resolve, so we stay in the loading phase for assertion.
-		vi.spyOn(proxy, "fetchModels").mockImplementation(
+		vi.spyOn(backend, "fetchModels").mockImplementation(
 			() => new Promise(() => {}),
 		);
 		const { lastFrame } = render(
@@ -25,7 +25,7 @@ describe("ModelSelect", () => {
 	});
 
 	test("renders the model list after fetch resolves", async () => {
-		vi.spyOn(proxy, "fetchModels").mockResolvedValue(["alpha", "beta"]);
+		vi.spyOn(backend, "fetchModels").mockResolvedValue(["alpha", "beta"]);
 		const { lastFrame } = render(
 			<ModelSelect apiKey="sk-x" onSelect={() => {}} onError={() => {}} />,
 		);
@@ -36,7 +36,7 @@ describe("ModelSelect", () => {
 	});
 
 	test("Enter on the default cursor invokes onSelect with the first model", async () => {
-		vi.spyOn(proxy, "fetchModels").mockResolvedValue(["alpha", "beta"]);
+		vi.spyOn(backend, "fetchModels").mockResolvedValue(["alpha", "beta"]);
 		const onSelect = vi.fn();
 		const { stdin, lastFrame } = render(
 			<ModelSelect apiKey="sk-x" onSelect={onSelect} onError={() => {}} />,
@@ -52,7 +52,7 @@ describe("ModelSelect", () => {
 	});
 
 	test("down-arrow then Enter selects the second model", async () => {
-		vi.spyOn(proxy, "fetchModels").mockResolvedValue(["alpha", "beta"]);
+		vi.spyOn(backend, "fetchModels").mockResolvedValue(["alpha", "beta"]);
 		const onSelect = vi.fn();
 		const { stdin, lastFrame } = render(
 			<ModelSelect apiKey="sk-x" onSelect={onSelect} onError={() => {}} />,
@@ -71,7 +71,7 @@ describe("ModelSelect", () => {
 	});
 
 	test("fetch rejection calls onError exactly once", async () => {
-		vi.spyOn(proxy, "fetchModels").mockRejectedValue(
+		vi.spyOn(backend, "fetchModels").mockRejectedValue(
 			new Error("Models fetch failed (401): invalid key"),
 		);
 		const onError = vi.fn();
@@ -84,7 +84,7 @@ describe("ModelSelect", () => {
 	});
 
 	test("passes baseUrl through to fetchModels", async () => {
-		const spy = vi.spyOn(proxy, "fetchModels").mockResolvedValue(["alpha"]);
+		const spy = vi.spyOn(backend, "fetchModels").mockResolvedValue(["alpha"]);
 		render(
 			<ModelSelect
 				apiKey="sk-x"
@@ -98,7 +98,7 @@ describe("ModelSelect", () => {
 	});
 
 	test("readOnly ignores Enter even after the list is ready", async () => {
-		vi.spyOn(proxy, "fetchModels").mockResolvedValue(["alpha"]);
+		vi.spyOn(backend, "fetchModels").mockResolvedValue(["alpha"]);
 		const onSelect = vi.fn();
 		const { stdin } = render(
 			<ModelSelect
@@ -115,7 +115,7 @@ describe("ModelSelect", () => {
 	});
 
 	test("renders the error message and retry prompt after a fetch failure", async () => {
-		vi.spyOn(proxy, "fetchModels").mockRejectedValue(
+		vi.spyOn(backend, "fetchModels").mockRejectedValue(
 			new Error("Models fetch failed (502): boom"),
 		);
 		const { lastFrame } = render(
@@ -133,7 +133,7 @@ describe("ModelSelect", () => {
 
 	test("Enter on the errored frame re-runs fetchModels", async () => {
 		const spy = vi
-			.spyOn(proxy, "fetchModels")
+			.spyOn(backend, "fetchModels")
 			.mockRejectedValueOnce(new Error("Models fetch failed (502): boom"))
 			.mockResolvedValue(["alpha", "beta"]);
 		const onSelect = vi.fn();
@@ -155,7 +155,7 @@ describe("ModelSelect", () => {
 	});
 
 	test("a second failure after retry fires onError again (auth-routing parents need this)", async () => {
-		vi.spyOn(proxy, "fetchModels")
+		vi.spyOn(backend, "fetchModels")
 			.mockRejectedValueOnce(new Error("Models fetch failed (502): boom"))
 			.mockRejectedValue(new Error("Models fetch failed (401): invalid key"));
 		const onError = vi.fn();
@@ -173,7 +173,7 @@ describe("ModelSelect", () => {
 	});
 
 	test("with fallbackModel, a non-auth failure auto-selects the fallback and warns", async () => {
-		vi.spyOn(proxy, "fetchModels").mockRejectedValue(
+		vi.spyOn(backend, "fetchModels").mockRejectedValue(
 			new Error("Models fetch failed (503): Service Unavailable"),
 		);
 		const onSelect = vi.fn();
@@ -199,7 +199,7 @@ describe("ModelSelect", () => {
 	});
 
 	test("with fallbackModel, a 401 still routes to onError (no fallback)", async () => {
-		vi.spyOn(proxy, "fetchModels").mockRejectedValue(
+		vi.spyOn(backend, "fetchModels").mockRejectedValue(
 			new Error("Models fetch failed (401): invalid key"),
 		);
 		const onSelect = vi.fn();

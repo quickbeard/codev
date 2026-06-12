@@ -463,7 +463,7 @@ describe("login refresh-token path", () => {
 		fetchSpy?.mockRestore();
 	});
 
-	test("refreshes tokens silently without touching codev-proxy", async () => {
+	test("refreshes tokens silently without touching the backend", async () => {
 		// Pre-seed an expired SSO session with a refresh_token so login() takes
 		// the silent-refresh branch instead of the browser flow.
 		const dir = join(tempDir, ".codev");
@@ -695,7 +695,7 @@ describe("login full OAuth flow", () => {
 		expect(capturedUrl).not.toBe(openedUrl);
 	});
 
-	test("does not call codev-proxy /config during login", async () => {
+	test("does not call the backend /config during login", async () => {
 		mockSsoFetch();
 
 		await login(

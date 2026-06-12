@@ -40,6 +40,7 @@ import {
 	refreshCodevConfig,
 	saveApiKey,
 } from "@/lib/auth.js";
+import { smokeTestModel, validateApiKey } from "@/lib/backend.js";
 import {
 	CODEGRAPH_TASK_KEY,
 	type CodegraphSetupResult,
@@ -55,7 +56,6 @@ import {
 } from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
 import { logApiKeyConfigured, logDebug, logError, logWarn } from "@/lib/log.js";
-import { smokeTestModel, validateApiKey } from "@/lib/proxy.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 import { disableClaudeCodeLoginPrompt } from "@/lib/vscode-settings.js";
 

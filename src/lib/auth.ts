@@ -13,9 +13,9 @@ import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import open from "open";
+import { fetchCodevConfig } from "@/lib/backend.js";
 import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
 import { logDebug, logError, loggedFetch, logWarn } from "@/lib/log.js";
-import { fetchCodevConfig } from "@/lib/proxy.js";
 
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
 const REVOKE_TIMEOUT_MS = 3_000;
@@ -73,7 +73,7 @@ export interface ApiKeyCreds {
 
 // auth.json holds three independent blocks: SSO tokens (issued by the IdP),
 // the gateway API key (issued by /auth/exchange or entered manually), and the
-// CoDev runtime config (Supabase coordinates, fetched from codev-proxy's
+// CoDev runtime config (Supabase coordinates, fetched from the backend's
 // /config endpoint on every successful SSO login). They share a file because
 // they're written together on a fresh install, but each is updated in
 // isolation — saving SSO must not clobber the api_key or codev-config blocks,
@@ -436,7 +436,7 @@ export async function login(
 	return authData;
 }
 
-// Best-effort: pull the latest Supabase coordinates from codev-proxy and
+// Best-effort: pull the latest Supabase coordinates from the backend and
 // persist them next to the SSO session. Failure is logged but not thrown —
 // downstream accessors (SUPABASE_URL/ANON_KEY in const.ts) will hard-fail
 // later if no values were ever fetched, with a "run codev install" message

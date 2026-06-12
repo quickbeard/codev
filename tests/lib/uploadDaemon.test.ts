@@ -242,14 +242,16 @@ describe("runUploadDaemon", () => {
 		expect(code).toBe(1);
 		const status = JSON.parse(readFileSync(statusPath(), "utf-8"));
 		expect(status.ok).toBe(false);
-		expect(status.error).toContain("Proxy /supabase/exchange failed");
+		expect(status.error).toContain("Backend /supabase/exchange failed");
 		expect(status.summary).toBeUndefined();
 		const failed = readDiagDocs(diagDir).find(
 			(d) => d.event?.action === "daemon.run" && d.event?.type?.[0] === "end",
 		);
 		expect(failed?.log?.level).toBe("error");
 		expect(failed?.event?.outcome).toBe("failure");
-		expect(failed?.error?.message).toContain("Proxy /supabase/exchange failed");
+		expect(failed?.error?.message).toContain(
+			"Backend /supabase/exchange failed",
+		);
 		expect(existsSync(lockPath())).toBe(false);
 	});
 

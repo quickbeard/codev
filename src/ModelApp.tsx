@@ -13,6 +13,7 @@ import {
 import { ModelSelect, modelSelectTitle } from "@/components/ModelSelect.js";
 import { Step } from "@/components/Step.js";
 import { type AuthData, loadApiKey, saveApiKey } from "@/lib/auth.js";
+import { isInvalidKeyError } from "@/lib/backend.js";
 import {
 	type Credentials,
 	configureClaudeCode,
@@ -24,7 +25,6 @@ import {
 } from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
 import { logError, logInfo, logWarn } from "@/lib/log.js";
-import { isInvalidKeyError } from "@/lib/proxy.js";
 import { formatToolList } from "@/lib/text.js";
 
 // ModelSelect handles its own /v1/models fetch — we don't duplicate it here.
