@@ -187,26 +187,13 @@ async function advanceThroughConfirmCodex(
 	stdin.write("y\r");
 }
 
-// After install completes, the proxy-url Step is the first prompt. Walk past
-// it by picking the default option, then refreshing-config + validation run
+// After install completes, refreshing-config + saved-key validation run
 // (refreshCodevConfig is mocked in beforeEach) and the flow lands on the
 // key-choice step. Wait for the choose-configuration screen (no-saved-key
 // path) or the existing-key option (saved-key path) to actually appear.
-async function settleAfterInstall(
-	stdin: { write: (s: string) => void },
-	frames: string[],
-) {
-	await advanceThroughProxyUrl(stdin, frames);
+async function settleAfterInstall(frames: string[]) {
 	await waitForFrame(frames, "Choose configuration method");
 }
-
-// The "Choose proxy URL" step is currently hidden (SHOW_PROXY_URL_STEP=false):
-// the flow auto-advances past it using the default URL, so there's nothing to
-// drive here. Kept as a seam so re-enabling the step only needs this body back.
-async function advanceThroughProxyUrl(
-	_stdin: { write: (s: string) => void },
-	_frames: string[],
-) {}
 
 async function pickNewKey(
 	stdin: { write: (s: string) => void },
@@ -215,7 +202,7 @@ async function pickNewKey(
 	// Wait for login + install + refresh + validation to settle and the
 	// key-choice screen to appear, then press Enter on the default first
 	// option ("Get a new API Key" when no saved key exists).
-	await settleAfterInstall(stdin, frames);
+	await settleAfterInstall(frames);
 	stdin.write("\r");
 	await new Promise((r) => setTimeout(r, 30));
 }
@@ -226,7 +213,7 @@ async function pickManual(
 ) {
 	// Wait for the upstream phases to settle, move cursor to "I have my
 	// own API Key", Enter.
-	await settleAfterInstall(stdin, frames);
+	await settleAfterInstall(frames);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
@@ -240,7 +227,7 @@ async function pickSkip(
 	// Wait for the upstream phases to settle, move cursor past
 	// "Get a new API Key" and "I have my own API Key" to land on
 	// "Skip configuration", Enter.
-	await settleAfterInstall(stdin, frames);
+	await settleAfterInstall(frames);
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\x1B[B");
@@ -475,34 +462,6 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(history).toContain("CodeGraph install failed: boom");
 		// Best-effort: the warning never aborts the CoDev flow.
 		expect(history).toContain("Happy coding");
-	});
-
-	test("proxy-url step is hidden and never persists a proxy URL", async () => {
-		// SHOW_PROXY_URL_STEP is false: the flow must complete without ever
-		// showing the picker, and must not write proxy_url to ~/.codev/auth.json
-		// (the default URL is used implicitly via PROXY_URL()).
-		stubExecFile(() => ({ stdout: "ok" }));
-		stubModels();
-		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
-		vi.spyOn(proxy, "fetchApiKey").mockResolvedValue("sk-test-123");
-		const saveProxyUrlSpy = vi.spyOn(auth, "saveProxyUrl");
-		vi.spyOn(configure, "configureClaudeCode").mockReturnValue([
-			{
-				kind: "claude-settings",
-				sourcePath: "/tmp/x",
-				backupPath: "/tmp/x.b",
-				created: true,
-			},
-		]);
-
-		const { stdin, frames } = render(<InstallApp />);
-		await advanceThroughConfirm(stdin, frames);
-		await pickNewKey(stdin, frames);
-		await pickFirstModel(stdin, frames);
-		await waitForFrame(frames, "Happy coding");
-
-		expect(allFrames(frames)).not.toContain("Choose proxy URL");
-		expect(saveProxyUrlSpy).not.toHaveBeenCalled();
 	});
 
 	test("Codex selection routes to configureCodex and reaches done", async () => {
@@ -1265,7 +1224,6 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin, frames);
-		await advanceThroughProxyUrl(stdin, frames);
 		// Wait for refresh + validation to settle and the saved-key option to
 		// appear in the key-choice list.
 		await waitForFrame(frames, "Reuse existing API Key");
@@ -1320,7 +1278,6 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin, frames);
-		await advanceThroughProxyUrl(stdin, frames);
 		await waitForFrame(frames, "Saved API key is no longer valid");
 
 		const history = allFrames(frames);
@@ -1342,7 +1299,6 @@ describe("InstallApp existing-key path", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 		await advanceThroughConfirm(stdin, frames);
-		await advanceThroughProxyUrl(stdin, frames);
 		await waitForFrame(frames, "Could not verify saved API key");
 
 		const history = allFrames(frames);

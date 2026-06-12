@@ -2,7 +2,7 @@ import type { CodevConfig } from "@/lib/auth.js";
 import {
 	AI_GATEWAY_OPENAI_URL,
 	AI_GATEWAY_URL,
-	PROXY_URL,
+	BACKEND_URL,
 } from "@/lib/const.js";
 import { loggedFetch } from "@/lib/log.js";
 
@@ -47,7 +47,7 @@ export interface SupabaseSession {
 export async function fetchApiKey(accessToken: string): Promise<string> {
 	const res = await loggedFetch(
 		"proxy.auth-exchange",
-		`${PROXY_URL()}/auth/exchange`,
+		`${BACKEND_URL}/auth/exchange`,
 		{
 			method: "POST",
 			headers: { Authorization: `Bearer ${accessToken}` },
@@ -72,7 +72,7 @@ export async function fetchApiKey(accessToken: string): Promise<string> {
 export async function fetchCodevConfig(
 	accessToken: string,
 ): Promise<CodevConfig> {
-	const res = await loggedFetch("proxy.config", `${PROXY_URL()}/config`, {
+	const res = await loggedFetch("proxy.config", `${BACKEND_URL}/config`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${accessToken}` },
 		signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
@@ -231,7 +231,7 @@ export async function fetchSupabaseSession(
 ): Promise<SupabaseSession> {
 	const res = await loggedFetch(
 		"proxy.supabase-exchange",
-		`${PROXY_URL()}/supabase/exchange`,
+		`${BACKEND_URL}/supabase/exchange`,
 		{
 			method: "POST",
 			headers: { Authorization: `Bearer ${accessToken}` },

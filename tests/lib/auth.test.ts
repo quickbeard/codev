@@ -22,7 +22,6 @@ import {
 	refreshCodevConfig,
 	saveApiKey,
 	saveCodevConfig,
-	saveProxyUrl,
 } from "@/lib/auth.js";
 import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
 
@@ -237,100 +236,6 @@ describe("logout", () => {
 		) as Record<string, unknown>;
 		expect(after.supabase_url).toBe("https://keep.supabase.co");
 	});
-
-	test("preserves proxy_url when stripping SSO (override survives logout)", async () => {
-		const dir = join(tempDir, ".codev");
-		mkdirSync(dir, { recursive: true });
-		writeFileSync(
-			join(dir, "auth.json"),
-			JSON.stringify({
-				...VALID_AUTH,
-				proxy_url: "https://keep-proxy.example.com",
-			}),
-		);
-		expect(await logout()).toBe(true);
-		const after = JSON.parse(
-			readFileSync(join(dir, "auth.json"), "utf-8"),
-		) as Record<string, unknown>;
-		expect(after.proxy_url).toBe("https://keep-proxy.example.com");
-		expect(after.access_token).toBeUndefined();
-	});
-});
-
-describe("saveProxyUrl", () => {
-	test("writes proxy_url into auth.json", () => {
-		saveProxyUrl("https://my-proxy.example.com");
-		const file = JSON.parse(
-			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
-		) as Record<string, unknown>;
-		expect(file.proxy_url).toBe("https://my-proxy.example.com");
-	});
-
-	test("empty string clears the override (proxy_url drops out of the file)", () => {
-		saveProxyUrl("https://my-proxy.example.com");
-		saveProxyUrl("");
-		const file = JSON.parse(
-			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
-		) as Record<string, unknown>;
-		expect(file.proxy_url).toBeUndefined();
-	});
-
-	test("does not clobber SSO fields when saving the proxy URL", () => {
-		writeAuthFile(VALID_AUTH);
-		saveProxyUrl("https://my-proxy.example.com");
-		expect(loadAuth()?.access_token).toBe("test-access-token");
-	});
-
-	test("does not clobber api_key when saving the proxy URL", () => {
-		saveApiKey({ apiKey: "sk-keep", baseUrl: "https://gw/v1", model: "m" });
-		saveProxyUrl("https://my-proxy.example.com");
-		expect(loadApiKey()).toEqual({
-			apiKey: "sk-keep",
-			baseUrl: "https://gw/v1",
-			model: "m",
-		});
-	});
-
-	test("does not clobber supabase config when saving the proxy URL", () => {
-		saveCodevConfig({
-			supabaseUrl: "https://x.supabase.co",
-			supabaseAnonKey: "anon-x",
-		});
-		saveProxyUrl("https://my-proxy.example.com");
-		const file = JSON.parse(
-			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
-		) as Record<string, unknown>;
-		expect(file.supabase_url).toBe("https://x.supabase.co");
-		expect(file.supabase_anon_key).toBe("anon-x");
-		expect(file.proxy_url).toBe("https://my-proxy.example.com");
-	});
-
-	test("clearing the override preserves other fields", () => {
-		saveCodevConfig({
-			supabaseUrl: "https://x.supabase.co",
-			supabaseAnonKey: "anon-x",
-		});
-		saveApiKey({ apiKey: "sk-keep" });
-		saveProxyUrl("https://my-proxy.example.com");
-		saveProxyUrl("");
-		const file = JSON.parse(
-			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
-		) as Record<string, unknown>;
-		expect(file.supabase_url).toBe("https://x.supabase.co");
-		expect(file.api_key).toBe("sk-keep");
-		expect(file.proxy_url).toBeUndefined();
-	});
-
-	// Skipped on Windows: NTFS has no POSIX permission bits — see the matching
-	// saveCodevConfig case above.
-	test.skipIf(process.platform === "win32")(
-		"file is written with mode 0600",
-		() => {
-			saveProxyUrl("https://my-proxy.example.com");
-			const stat = statSync(join(tempDir, ".codev", "auth.json"));
-			expect(stat.mode & 0o777).toBe(0o600);
-		},
-	);
 });
 
 describe("saveCodevConfig", () => {
