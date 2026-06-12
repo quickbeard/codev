@@ -4,16 +4,14 @@ import { join } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
 
 const BASE_URL = atob("aHR0cHM6Ly9uZXRtaW5kLnZpZXR0ZWwudm4=");
-export const DEFAULT_PROXY_URL = `${BASE_URL}/codev-proxy`;
+export const BACKEND_URL = `${BASE_URL}/codev-proxy`;
 export const SSO_URL = `${BASE_URL}/sso-wrapper`;
+export const LOGIN_SUCCESS_URL = `${BASE_URL}/codev-landing-page`;
+
+// TODO: will be fetched from backend
 export const AI_GATEWAY_URL = `${BASE_URL}/gateway`;
 export const AI_GATEWAY_OPENAI_URL = `${AI_GATEWAY_URL}/v1`;
 
-export const LOGIN_SUCCESS_URL = `${BASE_URL}/codev-landing-page`;
-
-// Default model used when the gateway's model list can't be fetched (network,
-// 5xx, timeout, or an empty list). Base64-encoded to match the other baked-in
-// constants above. Decodes to "MiniMax/MiniMax-M2.7".
 export const FALLBACK_MODEL = atob("TWluaU1heC9NaW5pTWF4LU0yLjc=");
 
 // Self-hosted gateway model has a 196608-token window. Telling Claude Code
@@ -66,5 +64,5 @@ export function SUPABASE_ANON_KEY(): string {
 // config` via the ProxyUrl Step.
 export function PROXY_URL(): string {
 	const override = readCodevAuthFile()?.proxy_url;
-	return override && override.length > 0 ? override : DEFAULT_PROXY_URL;
+	return override && override.length > 0 ? override : BACKEND_URL;
 }

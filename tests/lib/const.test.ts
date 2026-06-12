@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
-	DEFAULT_PROXY_URL,
+	BACKEND_URL,
 	FALLBACK_MODEL,
 	PROXY_URL,
 	SUPABASE_ANON_KEY,
@@ -89,17 +89,17 @@ describe("Supabase const accessors", () => {
 
 describe("PROXY_URL", () => {
 	test("returns the baked-in default when auth.json does not exist", () => {
-		expect(PROXY_URL()).toBe(DEFAULT_PROXY_URL);
+		expect(PROXY_URL()).toBe(BACKEND_URL);
 	});
 
 	test("returns the baked-in default when proxy_url is unset", () => {
 		writeAuthJson({ supabase_url: "u", supabase_anon_key: "a" });
-		expect(PROXY_URL()).toBe(DEFAULT_PROXY_URL);
+		expect(PROXY_URL()).toBe(BACKEND_URL);
 	});
 
 	test("returns the baked-in default when proxy_url is an empty string", () => {
 		writeAuthJson({ proxy_url: "" });
-		expect(PROXY_URL()).toBe(DEFAULT_PROXY_URL);
+		expect(PROXY_URL()).toBe(BACKEND_URL);
 	});
 
 	test("returns the override when proxy_url is set", () => {

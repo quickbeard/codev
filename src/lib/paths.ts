@@ -3,7 +3,17 @@ import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import type { Session } from "@/providers/types.js";
 
-export function codevLogsDir(): string {
+// Conversation exports (the data `codev upload` ships). Lived at
+// ~/.codev/logs/ before the CLI grew its own diagnostics — that path now
+// belongs to cliLogsDir, and runExport migrates legacy project folders over.
+export function agentLogsDir(): string {
+	return join(homedir(), ".codev", "agent-logs");
+}
+
+// CoDev's own diagnostic logs (ECS NDJSON, one codev-YYYYMMDD.ndjson per day —
+// see lib/log.ts). Kept separate from agentLogsDir so self-logs and
+// conversation exports can't mix.
+export function cliLogsDir(): string {
 	return join(homedir(), ".codev", "logs");
 }
 
@@ -37,7 +47,7 @@ export function projectFolderName(cwd: string): string {
 }
 
 export function projectLogsDir(cwd: string): string {
-	return join(codevLogsDir(), projectFolderName(cwd));
+	return join(agentLogsDir(), projectFolderName(cwd));
 }
 
 // YYYY-MM-DD_HH-MM-SSZ — UTC, filesystem-safe, sortable.

@@ -8,8 +8,19 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-function tick(ms = 30): Promise<void> {
-	return new Promise((r) => setTimeout(r, ms));
+async function waitForFrame(
+	frames: string[],
+	needle: string,
+	maxMs = 3_000,
+): Promise<void> {
+	const start = Date.now();
+	while (Date.now() - start < maxMs) {
+		if (frames.join("\n").includes(needle)) {
+			await new Promise((r) => setTimeout(r, 10));
+			return;
+		}
+		await new Promise((r) => setTimeout(r, 10));
+	}
 }
 
 function stubRunRemove(result: remove.RemoveResult) {
@@ -79,7 +90,7 @@ describe("RemoveApp", () => {
 		stubRunRemove(SUCCESS_RESULT);
 		const { stdin, frames } = render(<RemoveApp />);
 		stdin.write("y\r");
-		await tick(50);
+		await waitForFrame(frames, "Removed successfully.");
 		const out = flat(history(frames));
 		expect(out).toContain(
 			"Removed successfully. You can now run npm uninstall -g codev-ai to remove the CoDev package. Restart your terminal to apply.",
@@ -90,7 +101,7 @@ describe("RemoveApp", () => {
 		const spy = stubRunRemove(SUCCESS_RESULT);
 		const { stdin, frames } = render(<RemoveApp />);
 		stdin.write("\r");
-		await tick(30);
+		await waitForFrame(frames, "Abort.");
 		expect(history(frames)).toContain("Abort.");
 		expect(spy).not.toHaveBeenCalled();
 	});
@@ -99,7 +110,7 @@ describe("RemoveApp", () => {
 		const spy = stubRunRemove(SUCCESS_RESULT);
 		const { stdin, frames } = render(<RemoveApp />);
 		stdin.write("n\r");
-		await tick(30);
+		await waitForFrame(frames, "Abort.");
 		expect(history(frames)).toContain("Abort.");
 		expect(spy).not.toHaveBeenCalled();
 	});
@@ -108,7 +119,7 @@ describe("RemoveApp", () => {
 		const spy = stubRunRemove(SUCCESS_RESULT);
 		const { stdin, frames } = render(<RemoveApp />);
 		stdin.write("maybe\r");
-		await tick(30);
+		await waitForFrame(frames, "Abort.");
 		expect(history(frames)).toContain("Abort.");
 		expect(spy).not.toHaveBeenCalled();
 	});
@@ -116,7 +127,7 @@ describe("RemoveApp", () => {
 	test("skipConfirm bypasses the prompt and runs immediately", async () => {
 		const spy = stubRunRemove(SUCCESS_RESULT);
 		const { frames } = render(<RemoveApp skipConfirm />);
-		await tick(50);
+		await waitForFrame(frames, "Removed successfully.");
 		expect(spy).toHaveBeenCalledOnce();
 		const out = flat(history(frames));
 		expect(out).toContain("Removing CoDev components...");
@@ -136,7 +147,7 @@ describe("RemoveApp", () => {
 			anyFailed: false,
 		});
 		const { frames } = render(<RemoveApp skipConfirm />);
-		await tick(50);
+		await waitForFrame(frames, "Removed successfully.");
 		const out = flat(history(frames));
 		expect(out).toContain("▲ CodeGraph: CodeGraph not available");
 		// A warning does not fail the remove — the success message still shows.
@@ -146,7 +157,7 @@ describe("RemoveApp", () => {
 	test("failure surfaces 'Some steps failed' with the failed step details", async () => {
 		stubRunRemove(FAILED_RESULT);
 		const { frames } = render(<RemoveApp skipConfirm />);
-		await tick(50);
+		await waitForFrame(frames, "Some steps failed:");
 		const out = history(frames);
 		expect(out).toContain("Some steps failed:");
 		expect(out).toContain("Shims: boom");

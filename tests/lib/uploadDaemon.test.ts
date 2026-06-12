@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { initLogging, logFileName, resetLogging } from "@/lib/log.js";
 import { runUploadDaemon, spawner, spawnUploadDaemon } from "@/lib/upload.js";
 
 let tempHome: string;
@@ -30,11 +31,36 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	resetLogging();
 	vi.unstubAllEnvs();
 	cwdSpy.mockRestore();
 	rmSync(tempHome, { recursive: true, force: true });
 	(globalThis.fetch as unknown as { mockRestore?: () => void }).mockRestore?.();
 });
+
+interface DiagDoc {
+	message?: string;
+	log?: { level?: string };
+	event?: { action?: string; outcome?: string; type?: string[] };
+	codev?: { flow?: string; endpoint?: string; reason?: string };
+	error?: { message?: string };
+}
+
+// Daemon diagnostics go to the standard NDJSON log; tests opt in by
+// initializing the logger against a per-test dir.
+function initDiag(): string {
+	const diagDir = join(tempHome, "diag");
+	vi.stubEnv("CODEV_LOG_DIR", diagDir);
+	initLogging("upload", ["--daemon"], { installProcessHooks: false });
+	return diagDir;
+}
+
+function readDiagDocs(diagDir: string): DiagDoc[] {
+	return readFileSync(join(diagDir, logFileName(new Date())), "utf-8")
+		.trim()
+		.split("\n")
+		.map((l) => JSON.parse(l) as DiagDoc);
+}
 
 function writeAuth() {
 	mkdirSync(join(tempHome, ".codev"), { recursive: true });
@@ -52,7 +78,7 @@ function writeAuth() {
 }
 
 function writeLog(name = "a.md", content = "hello") {
-	const dir = join(tempHome, ".codev", "logs", "project", "codex");
+	const dir = join(tempHome, ".codev", "agent-logs", "project", "codex");
 	mkdirSync(dir, { recursive: true });
 	const path = join(dir, name);
 	writeFileSync(path, content);
@@ -106,17 +132,20 @@ const logPath = () => join(tempHome, ".codev", "upload.log");
 const statusPath = () => join(tempHome, ".codev", "last-upload.json");
 
 describe("runUploadDaemon", () => {
-	test("skips silently when not logged in", async () => {
+	test("skips with a daemon.skip document when not logged in", async () => {
+		const diagDir = initDiag();
 		const code = await runUploadDaemon();
 		expect(code).toBe(0);
-		expect(readFileSync(logPath(), "utf-8")).toContain(
-			"Skipped: not logged in.",
+		const skip = readDiagDocs(diagDir).find(
+			(d) => d.event?.action === "daemon.skip",
 		);
+		expect(skip?.codev?.reason).toBe("not-logged-in");
 		expect(existsSync(statusPath())).toBe(false);
 		expect(existsSync(lockPath())).toBe(false);
 	});
 
 	test("skips when lockfile is held by an alive process", async () => {
+		const diagDir = initDiag();
 		writeAuth();
 		mkdirSync(join(tempHome, ".codev"), { recursive: true });
 		writeFileSync(
@@ -128,9 +157,10 @@ describe("runUploadDaemon", () => {
 		);
 		const code = await runUploadDaemon();
 		expect(code).toBe(0);
-		expect(readFileSync(logPath(), "utf-8")).toContain(
-			"another upload is in progress",
+		const skip = readDiagDocs(diagDir).find(
+			(d) => d.event?.action === "daemon.skip",
 		);
+		expect(skip?.codev?.reason).toBe("lock-held");
 		expect(existsSync(statusPath())).toBe(false);
 		// Lock belongs to someone else (here, ourselves) — must not be released.
 		expect(existsSync(lockPath())).toBe(true);
@@ -167,7 +197,8 @@ describe("runUploadDaemon", () => {
 		expect(existsSync(lockPath())).toBe(false);
 	});
 
-	test("happy path writes ok=true status, releases lock, logs Done", async () => {
+	test("happy path writes ok=true status, releases lock, logs done document", async () => {
+		const diagDir = initDiag();
 		writeAuth();
 		writeLog("new.md", "hello");
 		mockUploadHappyPath();
@@ -182,13 +213,16 @@ describe("runUploadDaemon", () => {
 		expect(status.errors).toBeUndefined();
 		expect(typeof status.startedAt).toBe("string");
 		expect(typeof status.finishedAt).toBe("string");
-		expect(readFileSync(logPath(), "utf-8")).toContain(
-			"Done: uploaded=1 skipped=0 failed=0",
+		const done = readDiagDocs(diagDir).find(
+			(d) => d.event?.action === "daemon.run" && d.event?.type?.[0] === "end",
 		);
+		expect(done?.event?.outcome).toBe("success");
+		expect(done?.message).toContain("uploaded=1 skipped=0 failed=0");
 		expect(existsSync(lockPath())).toBe(false);
 	});
 
 	test("supabase exchange failure writes ok=false status, releases lock", async () => {
+		const diagDir = initDiag();
 		writeAuth();
 		writeLog("new.md", "hello");
 		vi.spyOn(globalThis, "fetch").mockImplementation((async (
@@ -211,8 +245,49 @@ describe("runUploadDaemon", () => {
 		expect(status.ok).toBe(false);
 		expect(status.error).toContain("Proxy /supabase/exchange failed");
 		expect(status.summary).toBeUndefined();
-		expect(readFileSync(logPath(), "utf-8")).toContain("Failed:");
+		const failed = readDiagDocs(diagDir).find(
+			(d) => d.event?.action === "daemon.run" && d.event?.type?.[0] === "end",
+		);
+		expect(failed?.log?.level).toBe("error");
+		expect(failed?.event?.outcome).toBe("failure");
+		expect(failed?.error?.message).toContain("Proxy /supabase/exchange failed");
 		expect(existsSync(lockPath())).toBe(false);
+	});
+
+	test("writes flow, upload.file, and upload.summary diagnostic documents", async () => {
+		const diagDir = initDiag();
+		writeAuth();
+		writeLog();
+		mockUploadHappyPath();
+
+		const code = await runUploadDaemon();
+		expect(code).toBe(0);
+
+		const docs = readDiagDocs(diagDir);
+		// Status tee from runUpload.
+		expect(docs.some((d) => d.codev?.flow === "upload")).toBe(true);
+		// Per-file outcome + run summary.
+		expect(
+			docs.some(
+				(d) =>
+					d.event?.action === "upload.file" && d.event?.outcome === "success",
+			),
+		).toBe(true);
+		expect(
+			docs.some(
+				(d) =>
+					d.event?.action === "upload.summary" &&
+					d.event?.outcome === "success",
+			),
+		).toBe(true);
+		// loggedFetch documents from the Supabase pipeline.
+		expect(
+			docs.some(
+				(d) =>
+					d.event?.action === "http.request" &&
+					d.codev?.endpoint === "supabase.presign",
+			),
+		).toBe(true);
 	});
 
 	test("per-file upload failure leaves ok=false with errors and releases lock", async () => {

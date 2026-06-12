@@ -688,9 +688,11 @@ describe("login full OAuth flow", () => {
 			.spyOn(browserOpener, "open")
 			.mockImplementation(() => Promise.resolve(undefined));
 		// These tests exercise the silent /authorize → /callback path. Login
-		// only takes that path when ~/.codev/ exists (an absent dir signals
-		// "wipe happened, force re-auth via the wrapper /logout flow").
+		// only takes that path when ~/.codev/auth.json exists (its absence
+		// signals "fresh machine or post-remove — force re-auth via the
+		// wrapper /logout flow").
 		mkdirSync(join(tempDir, ".codev"), { recursive: true });
+		writeFileSync(join(tempDir, ".codev", "auth.json"), "{}");
 	});
 
 	afterEach(() => {
@@ -1210,10 +1212,11 @@ describe("login with force-login marker", () => {
 		expect(existsSync(markerPath)).toBe(false);
 	});
 
-	test("uses /authorize directly when no marker is present and ~/.codev exists", async () => {
-		// ~/.codev/ must exist for the silent path — otherwise the dir-absent
-		// check forces login. Create the dir explicitly without the marker.
+	test("uses /authorize directly when no marker is present and auth.json exists", async () => {
+		// auth.json must exist for the silent path — otherwise the
+		// fresh-machine check forces login. Seed an empty auth file, no marker.
 		mkdirSync(join(tempDir, ".codev"), { recursive: true });
+		writeFileSync(join(tempDir, ".codev", "auth.json"), "{}");
 
 		let openedUrl: URL | null = null;
 
@@ -1238,12 +1241,45 @@ describe("login with force-login marker", () => {
 		);
 	});
 
-	test("forces login when ~/.codev is absent (e.g. after `codev remove`)", async () => {
-		// No marker written, AND no ~/.codev/ created — mirrors the state left
+	test("forces login when auth.json is absent (e.g. after `codev remove`)", async () => {
+		// No marker written, AND no auth.json created — mirrors the state left
 		// behind by `codev remove`'s rmSync. The IdP's still-valid browser
 		// session cookie must not be silently reused: the next login must
 		// take the wrapper-logout path so the user retypes credentials.
-		expect(existsSync(join(tempDir, ".codev"))).toBe(false);
+		expect(existsSync(join(tempDir, ".codev", "auth.json"))).toBe(false);
+
+		let openedUrl: URL | null = null;
+
+		const loginPromise = login(
+			() => {},
+			(openBrowserFn) => {
+				openBrowserFn();
+				openedUrl = getInitialUrl();
+				const logoutDoneUri = openedUrl.searchParams.get("redirect_uri");
+				const port = Number.parseInt(new URL(logoutDoneUri ?? "").port, 10);
+				setTimeout(async () => {
+					const redirect = await originalFetch(
+						`http://localhost:${port}/logout-done`,
+						{ redirect: "manual" },
+					);
+					const next = new URL(redirect.headers.get("location") ?? "");
+					const state = next.searchParams.get("state") ?? "";
+					await originalFetch(
+						`http://localhost:${port}/callback?code=c&state=${state}`,
+					);
+				}, 50);
+			},
+		);
+
+		await loginPromise;
+		expect((openedUrl as unknown as URL).pathname).toBe("/sso-wrapper/logout");
+	});
+
+	test("forces login even when ~/.codev exists without auth.json (diagnostics side effect)", async () => {
+		// Diagnostic logging (lib/log.ts) and runExport both create dirs under
+		// ~/.codev before login can run. Their side effects must not read as
+		// "prior auth on this machine" — only auth.json itself counts.
+		mkdirSync(join(tempDir, ".codev", "logs"), { recursive: true });
 
 		let openedUrl: URL | null = null;
 
@@ -1309,9 +1345,11 @@ describe("login manual paste-back (no-browser)", () => {
 		openBrowserSpy = vi
 			.spyOn(browserOpener, "open")
 			.mockImplementation(() => Promise.resolve(undefined));
-		// Silent /authorize path requires ~/.codev/ to exist (an absent dir
-		// signals "wipe happened, force re-auth via the wrapper /logout flow").
+		// Silent /authorize path requires ~/.codev/auth.json to exist (its
+		// absence signals "fresh machine or post-remove — force re-auth via
+		// the wrapper /logout flow").
 		mkdirSync(join(tempDir, ".codev"), { recursive: true });
+		writeFileSync(join(tempDir, ".codev", "auth.json"), "{}");
 		fetchSpy = mockAuthFetch({
 			"/token": async () =>
 				new Response(

@@ -24,7 +24,7 @@ function createSchema(db: Database): void {
 	run(db, "CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)");
 	run(
 		db,
-		"CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, slug TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER)",
+		"CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, slug TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER)",
 	);
 	run(
 		db,
@@ -275,6 +275,193 @@ describe("openCodeProvider.listSessions", () => {
 		const nested = sessions.find((s) => s.id === "ses-nested");
 		if (!nested) throw new Error("expected nested session");
 		expect(nested.messages[1]?.model).toBe("claude-opus-4-7");
+	});
+
+	test("excludes subagent (child) sessions, keeping only the parent", async () => {
+		seedProjectAndSession();
+		const db = new Database(dbPath);
+		// A subagent session: same project, but parent_id points at ses-1. It has
+		// its own message so it would otherwise build into a standalone session.
+		run(
+			db,
+			"INSERT INTO session (id, project_id, parent_id, slug, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			[
+				"ses-sub",
+				"proj-1",
+				"ses-1",
+				"explore",
+				"Find staging models (@explore subagent)",
+				projectCwd,
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				Math.floor(Date.UTC(2026, 3, 27, 18, 41, 0) / 1000),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+			[
+				"msg-sub",
+				"ses-sub",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				JSON.stringify({ role: "user" }),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-sub",
+				"msg-sub",
+				"ses-sub",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				JSON.stringify({ type: "text", text: "Find staging models" }),
+			],
+		);
+		db.close();
+
+		const sessions = await openCodeProvider.listSessions(projectCwd);
+		expect(sessions.map((s) => s.id)).toEqual(["ses-1"]);
+	});
+
+	test("rolls up subagent descendant char counts into parent session", async () => {
+		seedProjectAndSession();
+		const db = new Database(dbPath);
+		// Child session with parent_id = ses-1.
+		run(
+			db,
+			"INSERT INTO session (id, project_id, parent_id, slug, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			[
+				"ses-child",
+				"proj-1",
+				"ses-1",
+				"explore",
+				"Find staging models (@explore subagent)",
+				projectCwd,
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				Math.floor(Date.UTC(2026, 3, 27, 18, 41, 0) / 1000),
+			],
+		);
+		// User message in child: 10 chars.
+		run(
+			db,
+			"INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+			[
+				"msg-child-u",
+				"ses-child",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				JSON.stringify({ role: "user" }),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-child-u",
+				"msg-child-u",
+				"ses-child",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 0) / 1000),
+				JSON.stringify({ type: "text", text: "1234567890" }), // 10 chars
+			],
+		);
+		// Assistant message in child: 20 chars.
+		run(
+			db,
+			"INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+			[
+				"msg-child-a",
+				"ses-child",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 5) / 1000),
+				JSON.stringify({ role: "assistant" }),
+			],
+		);
+		run(
+			db,
+			"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+			[
+				"part-child-a",
+				"msg-child-a",
+				"ses-child",
+				Math.floor(Date.UTC(2026, 3, 27, 18, 40, 5) / 1000),
+				JSON.stringify({ type: "text", text: "12345678901234567890" }), // 20 chars
+			],
+		);
+		db.close();
+
+		const sessions = await openCodeProvider.listSessions(projectCwd);
+		const parent = sessions.find((s) => s.id === "ses-1");
+		expect(parent).toBeDefined();
+		expect(parent?.subagentCharsIn).toBe(10);
+		expect(parent?.subagentCharsOut).toBe(20);
+	});
+
+	test("falls back to all sessions when the schema has no parent_id column", async () => {
+		// A legacy OpenCode DB predating subagents: the session table has no
+		// parent_id. The filter/rollup must degrade to exporting every session
+		// rather than throwing "no such column" and dropping the whole provider.
+		const db = new Database(dbPath);
+		run(db, "CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)");
+		run(
+			db,
+			"CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, slug TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER)",
+		);
+		run(
+			db,
+			"CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT)",
+		);
+		run(
+			db,
+			"CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT)",
+		);
+		run(db, "INSERT INTO project (id, worktree) VALUES (?, ?)", [
+			"proj-1",
+			projectCwd,
+		]);
+		for (const id of ["ses-a", "ses-b"]) {
+			run(
+				db,
+				"INSERT INTO session (id, project_id, slug, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				[
+					id,
+					"proj-1",
+					id,
+					`Title ${id}`,
+					projectCwd,
+					Math.floor(Date.UTC(2026, 3, 27, 18, 32, 5) / 1000),
+					Math.floor(Date.UTC(2026, 3, 27, 19, 0, 0) / 1000),
+				],
+			);
+			run(
+				db,
+				"INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+				[
+					`msg-${id}`,
+					id,
+					Math.floor(Date.UTC(2026, 3, 27, 18, 32, 5) / 1000),
+					JSON.stringify({ role: "user" }),
+				],
+			);
+			run(
+				db,
+				"INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+				[
+					`part-${id}`,
+					`msg-${id}`,
+					id,
+					Math.floor(Date.UTC(2026, 3, 27, 18, 32, 5) / 1000),
+					JSON.stringify({ type: "text", text: `Hello from ${id}` }),
+				],
+			);
+		}
+		db.close();
+
+		const sessions = await openCodeProvider.listSessions(projectCwd);
+		// Both sessions returned — no folding, no throw.
+		expect(sessions.map((s) => s.id).sort()).toEqual(["ses-a", "ses-b"]);
+		// Rollup skipped: no parent links to walk.
+		for (const s of sessions) {
+			expect(s.subagentCharsIn).toBeUndefined();
+			expect(s.subagentCharsOut).toBeUndefined();
+		}
 	});
 
 	test("returns empty list when no project matches the cwd", async () => {

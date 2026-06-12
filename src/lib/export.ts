@@ -1,7 +1,21 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import {
+	type Dirent,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
+import { readAgentConfig } from "@/lib/configure.js";
+import { logDebug, logInfo, logWarn } from "@/lib/log.js";
 import { renderMarkdown } from "@/lib/markdown.js";
-import { buildFilename, projectLogsDir } from "@/lib/paths.js";
+import {
+	agentLogsDir,
+	buildFilename,
+	cliLogsDir,
+	projectLogsDir,
+} from "@/lib/paths.js";
 import {
 	computeSessionStatistics,
 	StatisticsCollector,
@@ -39,10 +53,49 @@ const PROVIDER_LOADERS: { agent: Agent; load: () => Promise<Provider> }[] = [
 	},
 ];
 
+// Conversation exports used to live in ~/.codev/logs/<project>/; that root now
+// belongs to the CLI's own diagnostic logs (lib/log.ts) and exports moved to
+// ~/.codev/agent-logs/<project>/. Relocate any legacy project folders once so
+// prior exports don't sit orphaned inside the diagnostics dir. Only
+// directories are moved — files at the legacy root (codev-*.ndjson diagnostics
+// written by a newer run) are not export data. Best-effort throughout: a
+// folder that fails to move (or already exists at the destination) is left
+// behind, and the next export simply regenerates its sessions at the new
+// location from the agents' own data.
+export function migrateLegacyAgentLogs(): void {
+	const legacyRoot = cliLogsDir();
+	const targetRoot = agentLogsDir();
+	let entries: Dirent[];
+	try {
+		entries = readdirSync(legacyRoot, { withFileTypes: true });
+	} catch {
+		return; // No legacy dir — nothing to migrate.
+	}
+	let moved = 0;
+	for (const entry of entries) {
+		if (!entry.isDirectory()) continue;
+		const to = join(targetRoot, entry.name);
+		try {
+			if (existsSync(to)) continue; // Re-exported already; keep the newer copy.
+			mkdirSync(targetRoot, { recursive: true });
+			renameSync(join(legacyRoot, entry.name), to);
+			moved++;
+		} catch {
+			// Best-effort.
+		}
+	}
+	if (moved > 0) {
+		logInfo(`migrated ${moved} legacy export folder(s) to agent-logs`, {
+			extra: { moved },
+		});
+	}
+}
+
 export async function runExport(
 	onStatus: StatusReporter = () => {},
 ): Promise<ExportSummary> {
 	const cwd = process.cwd();
+	migrateLegacyAgentLogs();
 	const outDir = projectLogsDir(cwd);
 	mkdirSync(outDir, { recursive: true });
 
@@ -62,6 +115,12 @@ export async function runExport(
 			provider = await load();
 		} catch (err) {
 			summary.errors.push({ agent, message: String(err) });
+			logWarn(`provider ${agent} failed to load`, {
+				action: "export.provider",
+				outcome: "failure",
+				err,
+				extra: { agent },
+			});
 			continue;
 		}
 		let active: boolean;
@@ -69,10 +128,20 @@ export async function runExport(
 			active = await provider.detect(cwd);
 		} catch (err) {
 			summary.errors.push({ agent: provider.agent, message: String(err) });
+			logWarn(`provider ${agent} detect failed`, {
+				action: "export.provider",
+				outcome: "failure",
+				err,
+				extra: { agent },
+			});
 			continue;
 		}
 		if (!active) {
 			summary.skipped.push(provider.agent);
+			logDebug(`provider ${agent} inactive for this project`, {
+				action: "export.provider",
+				extra: { agent, skipped: true },
+			});
 			continue;
 		}
 
@@ -82,18 +151,33 @@ export async function runExport(
 			sessions = await provider.listSessions(cwd);
 		} catch (err) {
 			summary.errors.push({ agent: provider.agent, message: String(err) });
+			logWarn(`provider ${agent} failed to read sessions`, {
+				action: "export.provider",
+				outcome: "failure",
+				err,
+				extra: { agent },
+			});
 			continue;
 		}
 
 		if (sessions.length === 0) {
 			summary.skipped.push(provider.agent);
+			logDebug(`provider ${agent} has no sessions for this project`, {
+				action: "export.provider",
+				extra: { agent, skipped: true },
+			});
 			continue;
 		}
 
 		onStatus(`Writing ${provider.agent} (${sessions.length})...`);
 		const agentDir = join(outDir, provider.agent);
 		mkdirSync(agentDir, { recursive: true });
+		// Read the tool's CoDev-managed config once and inject baseUrl into every
+		// session from this provider. The worker uses base_url in the session
+		// comment to determine internal vs external model usage.
+		const agentConfig = readAgentConfig(provider.agent);
 		for (const session of sessions) {
+			session.baseUrl = agentConfig.baseUrl;
 			const filename = buildFilename(session);
 			const filePath = join(agentDir, filename);
 			const md = renderMarkdown(session);
@@ -103,6 +187,11 @@ export async function runExport(
 			summary.byAgent[provider.agent] =
 				(summary.byAgent[provider.agent] ?? 0) + 1;
 		}
+		logInfo(`exported ${sessions.length} ${provider.agent} session(s)`, {
+			action: "export.provider",
+			outcome: "success",
+			extra: { agent: provider.agent, sessions: sessions.length },
+		});
 	}
 
 	stats.flush(join(outDir, "statistics.json"));

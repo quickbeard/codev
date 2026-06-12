@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { logout } from "@/lib/auth.js";
 import { runCodegraphUninstall } from "@/lib/codegraph.js";
 import { restoreTool, type Tool } from "@/lib/configure.js";
+import { logError, logInfo, logWarn } from "@/lib/log.js";
 import { uninstallShims } from "@/lib/shims.js";
 
 // "warning" is non-fatal: it surfaces a ▲ note to the user but does NOT count
@@ -57,15 +58,30 @@ const TOOL_LABEL: Record<Tool, string> = {
 export async function runRemove(): Promise<RemoveResult> {
 	const steps: StepResult[] = [];
 
-	steps.push(await runLogout());
-	steps.push(runUnhook());
-	steps.push(await runCodegraphRemoval());
+	steps.push(recordStep(await runLogout()));
+	steps.push(recordStep(runUnhook()));
+	steps.push(recordStep(await runCodegraphRemoval()));
 	for (const tool of TOOLS) {
-		steps.push(runRestoreOrDelete(tool));
+		steps.push(recordStep(runRestoreOrDelete(tool)));
 	}
-	steps.push(runWipeCodevDir());
+	steps.push(recordStep(runWipeCodevDir()));
 
 	return { steps, anyFailed: steps.some((s) => s.status === "failed") };
+}
+
+// Diagnostic-log mirror of each step's TUI row, leveled by status.
+function recordStep(step: StepResult): StepResult {
+	const message = `remove step ${step.label}: ${step.status} — ${step.detail}`;
+	const fields = {
+		action: "task.result",
+		outcome:
+			step.status === "failed" ? ("failure" as const) : ("success" as const),
+		extra: { label: step.label, detail: step.detail, status: step.status },
+	};
+	if (step.status === "failed") logError(message, fields);
+	else if (step.status === "warning") logWarn(message, fields);
+	else logInfo(message, fields);
+	return step;
 }
 
 // Best-effort: revert CodeGraph's MCP wiring across all agents. If the

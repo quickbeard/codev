@@ -14,6 +14,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import open from "open";
 import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
+import { logDebug, logError, loggedFetch, logWarn } from "@/lib/log.js";
 import { fetchCodevConfig } from "@/lib/proxy.js";
 
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
@@ -281,7 +282,7 @@ async function revokeToken(
 	tokenTypeHint: "access_token" | "refresh_token",
 ): Promise<void> {
 	try {
-		await fetch(endpoint, {
+		await loggedFetch("sso.revoke", endpoint, {
 			method: "POST",
 			headers: { "Content-Type": "application/x-www-form-urlencoded" },
 			body: new URLSearchParams({
@@ -328,7 +329,13 @@ export async function login(
 	onLog: (msg: string) => void,
 	onReady: OnLoginReady,
 ): Promise<AuthData> {
-	onLog("Starting SSO login...");
+	// Tee every status line into the diagnostic log so login problems can be
+	// reconstructed without the TUI transcript.
+	const log = (msg: string) => {
+		logDebug(msg, { extra: { flow: "login" } });
+		onLog(msg);
+	};
+	log("Starting SSO login...");
 
 	// Dev escape hatch: when CODEV_BYPASS_LOGIN=1 is set, skip the OAuth flow
 	// entirely and persist a stub session. Useful when the SSO wrapper is down
@@ -338,7 +345,7 @@ export async function login(
 	// the upload daemon also see a "logged in" state — clear it with
 	// `codev logout` or by unsetting the env var + `codev remove`.
 	if (process.env.CODEV_BYPASS_LOGIN === "1") {
-		onLog("CODEV_BYPASS_LOGIN=1 — skipping SSO, using stub session.");
+		log("CODEV_BYPASS_LOGIN=1 — skipping SSO, using stub session.");
 		const authData: AuthData = {
 			access_token: "codev-bypass-no-sso",
 			id_token: "codev-bypass-no-sso",
@@ -351,20 +358,20 @@ export async function login(
 		};
 		saveAuth(authData);
 		clearForceLogin();
-		onLog(`Logged in as ${authData.user.email}`);
+		log(`Logged in as ${authData.user.email}`);
 		return authData;
 	}
 
 	const existing = loadAuth();
 	if (existing) {
-		onLog(`Already logged in as ${existing.user.email}`);
+		log(`Already logged in as ${existing.user.email}`);
 		return existing;
 	}
 
 	const stale = readAuthFile();
 	if (stale?.refresh_token) {
 		try {
-			onLog("Refreshing session...");
+			log("Refreshing session...");
 			const refreshed = await refreshTokens(stale.refresh_token);
 			const user = await fetchUserInfo(refreshed.access_token);
 			const authData: AuthData = {
@@ -379,33 +386,33 @@ export async function login(
 				},
 			};
 			saveAuth(authData);
-			onLog(`Logged in as ${authData.user.email}`);
+			log(`Logged in as ${authData.user.email}`);
 			return authData;
-		} catch {
-			onLog("Refresh failed, starting full login...");
+		} catch (err) {
+			logWarn("silent token refresh failed; starting full login", { err });
+			log("Refresh failed, starting full login...");
 		}
 	}
 
 	// Force re-auth via the IdP login form (prompt=login) when:
-	//   1. ~/.codev/ doesn't exist — typically the user just ran `codev remove`
-	//      (which wipes the dir), or this is a truly fresh install. We have no
-	//      record of prior consent on this machine, so don't silently ride any
-	//      IdP browser-session cookie that might still be valid from another
-	//      app on the same SSO realm.
+	//   1. ~/.codev/auth.json doesn't exist — typically the user just ran
+	//      `codev remove` (which wipes the dir), or this is a truly fresh
+	//      install. We have no record of prior auth on this machine, so don't
+	//      silently ride any IdP browser-session cookie that might still be
+	//      valid from another app on the same SSO realm.
 	//   2. The force-login sentinel is set — `codev logout` writes it because
 	//      revoking tokens does not terminate the IdP's session cookie.
 	//
-	// KNOWN LIMITATION: condition #1 is unreliable when login is preceded by
-	// code that incidentally creates ~/.codev/. The clearest case is
-	// `codev upload`: runUpload() calls runExport() before ensureAuth(), and
-	// runExport mkdirs ~/.codev/logs/ (recursive: true → side-effect-creates
-	// ~/.codev/). So a fresh-install `codev upload` sees forceLogin === false
-	// and goes straight to /authorize, defeating the stale-cookie protection
-	// the dir check is meant to provide. Hardening this would mean keying off
-	// ~/.codev/auth.json instead of the dir, or running the dir probe in a
-	// dedicated init step before any other code touches the home dir.
+	// Keyed off auth.json rather than the ~/.codev/ dir: unrelated code creates
+	// the dir as a side effect before login can run — diagnostic logging
+	// (lib/log.ts) at the entry of every command, runExport during
+	// `codev upload` — and a dir-existence probe would misread those as "prior
+	// auth on this machine" and skip the forced credential form.
 	const forceLogin =
-		!existsSync(join(homedir(), ".codev")) || existsSync(forceLoginPath());
+		!existsSync(authFilePath()) || existsSync(forceLoginPath());
+	logDebug(`starting authorization code flow (force-login: ${forceLogin})`, {
+		extra: { flow: "login", force_login: forceLogin },
+	});
 
 	const verifier = generateCodeVerifier();
 	const challenge = await generateCodeChallenge(verifier);
@@ -413,7 +420,7 @@ export async function login(
 	const nonce = crypto.randomUUID();
 
 	const { code, redirectUri } = await getAuthCode(
-		onLog,
+		log,
 		onReady,
 		state,
 		challenge,
@@ -438,7 +445,7 @@ export async function login(
 
 	saveAuth(authData);
 	clearForceLogin();
-	onLog(`Logged in as ${authData.user.email}`);
+	log(`Logged in as ${authData.user.email}`);
 	return authData;
 }
 
@@ -464,6 +471,7 @@ export async function refreshCodevConfig(
 		saveCodevConfig(config);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
+		logWarn("could not refresh CoDev config", { err });
 		onLog(`Warning: could not refresh CoDev config: ${message}`);
 	}
 }
@@ -572,6 +580,7 @@ async function getAuthCode(
 		const failWith = (err: Error) => {
 			if (settled) return;
 			settled = true;
+			logError("login failed", { err, extra: { flow: "login" } });
 			finish();
 			server.close();
 			reject(err);
@@ -714,7 +723,7 @@ async function exchangeCode(
 	redirectUri: string,
 	codeVerifier: string,
 ): Promise<TokenResponse> {
-	const res = await fetch(`${SSO_URL}/token`, {
+	const res = await loggedFetch("sso.token", `${SSO_URL}/token`, {
 		method: "POST",
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({
@@ -736,7 +745,7 @@ async function exchangeCode(
 }
 
 async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
-	const res = await fetch(`${SSO_URL}/token`, {
+	const res = await loggedFetch("sso.refresh", `${SSO_URL}/token`, {
 		method: "POST",
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({
@@ -755,7 +764,7 @@ async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
 }
 
 async function fetchUserInfo(accessToken: string) {
-	const res = await fetch(`${SSO_URL}/userinfo`, {
+	const res = await loggedFetch("sso.userinfo", `${SSO_URL}/userinfo`, {
 		headers: { Authorization: `Bearer ${accessToken}` },
 		signal: AbortSignal.timeout(SSO_FETCH_TIMEOUT_MS),
 	});

@@ -429,6 +429,91 @@ describe("claudeCodeProvider.listSessions", () => {
 		expect(sessions).toEqual([]);
 	});
 
+	test("folds isSidechain turns into subagentChars without rendering them", async () => {
+		// The parent session has one user prompt and one Task spawn (inline).
+		// The subagent's own turns are written to the same file flagged with
+		// isSidechain — they must not appear in the exported transcript, but
+		// their character volume is rolled into subagentChars*.
+		const sessionId = "abcdefab-1234-5678-9abc-def012345678";
+		const lines = [
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:00Z",
+				sessionId,
+				message: { role: "user", content: "Explore the codebase" },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				timestamp: "2026-04-27T18:32:05Z",
+				sessionId,
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "t-task",
+							name: "Task",
+							input: { description: "Find files", prompt: "List all ts files" },
+						},
+					],
+				},
+			}),
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:10Z",
+				sessionId,
+				message: {
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t-task",
+							text: "src/index.ts",
+						},
+					],
+				},
+			}),
+			// Sidechain records — the subagent's own conversation. Must be skipped.
+			JSON.stringify({
+				type: "user",
+				timestamp: "2026-04-27T18:32:06Z",
+				sessionId,
+				isSidechain: true,
+				message: { role: "user", content: "List all ts files" },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				timestamp: "2026-04-27T18:32:09Z",
+				sessionId,
+				isSidechain: true,
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "Found: src/index.ts" }],
+				},
+			}),
+		];
+		writeFileSync(join(claudeProjectDir, "session.jsonl"), lines.join("\n"));
+
+		const sessions = await claudeCodeProvider.listSessions(projectCwd);
+		expect(sessions.length).toBe(1);
+		const s = sessions[0];
+		if (!s) throw new Error("expected one session");
+		// Only the parent's two messages (user prompt + assistant with Task spawn).
+		expect(s.messages.length).toBe(2);
+		expect(s.messages[0]?.content).toBe("Explore the codebase");
+		// Task tool-use rendered inline in the parent.
+		expect(s.messages[1]?.content).toContain(
+			'data-tool-type="task" data-tool-name="task"',
+		);
+		expect(s.messages[1]?.content).toContain("src/index.ts");
+		// Subagent's own text must not leak into the parent body...
+		expect(s.messages[1]?.content).not.toContain("Found: src/index.ts");
+		// ...but its character volume is rolled into subagentChars* (matching the
+		// OpenCode descendant rollup) so the parent reflects the subagent's cost.
+		expect(s.subagentCharsIn).toBe("List all ts files".length);
+		expect(s.subagentCharsOut).toBe("Found: src/index.ts".length);
+	});
+
 	test('marks orphan tool_use as data-edit-status="aborted", not rejected', async () => {
 		// Session ends with a tool_use that never received a tool_result —
 		// the kind of interruption an analytics consumer must NOT count as

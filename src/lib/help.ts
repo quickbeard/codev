@@ -18,10 +18,17 @@ Commands:
   model               Switch the default model
   restore [agent]     Restore an agent's pre-CoDev config from its *.backup
                       (no arg processes every agent)
+  logs                Show the last run from the diagnostic log
+                      (--path prints the newest file, --trace <id> shows one run)
   login               Sign in to SSO (--force to bypass cached session)
   logout              Sign out of SSO
   remove              Revert this machine to its pre-CoDev state (--yes to skip prompt)
   --version, -v       Show version
   --help, -h          Show this help
+
+Diagnostics:
+  Every run appends a structured log to ~/.codev/logs/codev-YYYYMMDD.ndjson
+  (kept 14 days / 50 MB; no prompts or credentials are ever written).
+  Set CODEV_LOG_LEVEL=silent to disable, CODEV_LOG_DIR to relocate.
 `);
 }

@@ -18,6 +18,16 @@ export interface Session {
 	title?: string;
 	firstUserMessage?: string;
 	messages: Message[];
+	/** Base URL the tool used for this session. Read from CoDev-managed config at export time. */
+	baseUrl?: string;
+	/**
+	 * Aggregated character counts from all descendant subagent sessions (normal
+	 * mode only, where subagents have parent_id set and are not uploaded as
+	 * standalone sessions). Used to produce accurate token estimates for the
+	 * parent session even though the child sessions are folded in.
+	 */
+	subagentCharsIn?: number;
+	subagentCharsOut?: number;
 }
 
 export interface Provider {

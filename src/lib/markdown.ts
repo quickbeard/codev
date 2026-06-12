@@ -34,8 +34,15 @@ export function renderMarkdown(session: Session): string {
 		formatTitleTimestamp(session.createdAt);
 	lines.push(`# ${title}`);
 	lines.push("");
+	// Embed base_url when available so the worker can determine internal vs
+	// external model usage from the session comment alone.
+	const baseUrlTag = session.baseUrl ? ` base_url=${session.baseUrl}` : "";
+	const subagentTag =
+		session.subagentCharsIn || session.subagentCharsOut
+			? ` subagent_chars_in=${session.subagentCharsIn ?? 0} subagent_chars_out=${session.subagentCharsOut ?? 0}`
+			: "";
 	lines.push(
-		`<!-- ${AGENT_LABEL[session.agent]} Session ${session.id} (${session.createdAt.toISOString()}) -->`,
+		`<!-- ${AGENT_LABEL[session.agent]} Session ${session.id} (${session.createdAt.toISOString()})${baseUrlTag}${subagentTag} -->`,
 	);
 	lines.push("");
 
