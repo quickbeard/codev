@@ -22,6 +22,7 @@ import {
 	refreshCodevConfig,
 	saveApiKey,
 	saveCodevConfig,
+	silentSso,
 } from "@/lib/auth.js";
 import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
 
@@ -104,6 +105,62 @@ describe("loadAuth", () => {
 		writeFileSync(join(dir, "auth.json"), "not valid json{{{");
 		const result = loadAuth();
 		expect(result).toBeNull();
+	});
+});
+
+describe("silentSso", () => {
+	let fetchSpy: MockInstance;
+	afterEach(() => fetchSpy?.mockRestore());
+
+	test("reuses a non-expired cached session without any network call", async () => {
+		writeAuthFile(VALID_AUTH);
+		fetchSpy = mockAuthFetch();
+		const result = await silentSso();
+		expect(result?.access_token).toBe("test-access-token");
+		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+
+	test("silently refreshes via the refresh_token when the session expired", async () => {
+		writeAuthFile({ ...EXPIRED_AUTH, refresh_token: "test-refresh" });
+		fetchSpy = mockAuthFetch({
+			"/token": async () =>
+				new Response(
+					JSON.stringify({
+						access_token: "refreshed-access",
+						id_token: "refreshed-id",
+						expires_in: 3600,
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			"/userinfo": async () =>
+				new Response(
+					JSON.stringify({
+						sub: "u",
+						email: "e@example.com",
+						displayName: "E",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+		});
+		const result = await silentSso();
+		expect(result?.access_token).toBe("refreshed-access");
+		// Persisted, so the next loadAuth() sees the refreshed session.
+		expect(loadAuth()?.access_token).toBe("refreshed-access");
+	});
+
+	test("returns null (no interactive fallback) when there is no refresh_token", async () => {
+		writeAuthFile(EXPIRED_AUTH);
+		fetchSpy = mockAuthFetch();
+		expect(await silentSso()).toBeNull();
+		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+
+	test("returns null when the refresh attempt fails", async () => {
+		writeAuthFile({ ...EXPIRED_AUTH, refresh_token: "test-refresh" });
+		fetchSpy = mockAuthFetch({
+			"/token": async () => new Response("nope", { status: 401 }),
+		});
+		expect(await silentSso()).toBeNull();
 	});
 });
 

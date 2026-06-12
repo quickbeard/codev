@@ -8,6 +8,7 @@ import { printHelp, printVersion } from "@/lib/help.js";
 import { initLogging } from "@/lib/log.js";
 import { runLogs } from "@/lib/logs.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
+import { ensureFreshGatewayKey } from "@/lib/refresh.js";
 import {
 	RESTORE_AGENTS,
 	type RestoreAgent,
@@ -226,14 +227,17 @@ switch (command) {
 	}
 	case "claude":
 		spawnUploadDaemon();
+		await ensureFreshGatewayKey("claude-code");
 		process.exit(await runAgent("claude", args));
 		break;
 	case "codex":
 		spawnUploadDaemon();
+		await ensureFreshGatewayKey("codex");
 		process.exit(await runAgent("codex", args));
 		break;
 	case "opencode":
 		spawnUploadDaemon();
+		await ensureFreshGatewayKey("opencode");
 		process.exit(await runAgent("opencode", args));
 		break;
 	// Transparent passthrough to CodeGraph: `codev codegraph <args>` ≡
