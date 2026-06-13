@@ -359,19 +359,7 @@ export async function login(
 	if (stale?.refresh_token) {
 		try {
 			log("Refreshing session...");
-			const refreshed = await refreshTokens(stale.refresh_token);
-			const user = await fetchUserInfo(refreshed.access_token);
-			const authData: AuthData = {
-				access_token: refreshed.access_token,
-				id_token: refreshed.id_token,
-				refresh_token: refreshed.refresh_token || stale.refresh_token,
-				expires_at: Date.now() + refreshed.expires_in * 1000,
-				user: {
-					sub: user.sub,
-					email: user.email,
-					displayName: user.displayName || user.name || user.sub,
-				},
-			};
+			const authData = await refreshToAuthData(stale.refresh_token);
 			saveAuth(authData);
 			log(`Logged in as ${authData.user.email}`);
 			return authData;
@@ -434,6 +422,44 @@ export async function login(
 	clearForceLogin();
 	log(`Logged in as ${authData.user.email}`);
 	return authData;
+}
+
+// Build a fresh AuthData from a refresh_token (token refresh + userinfo). Shared
+// by login()'s silent-refresh branch and silentSso(); it does NOT persist — the
+// callers saveAuth() so the write stays at the call site.
+async function refreshToAuthData(refreshToken: string): Promise<AuthData> {
+	const refreshed = await refreshTokens(refreshToken);
+	const user = await fetchUserInfo(refreshed.access_token);
+	return {
+		access_token: refreshed.access_token,
+		id_token: refreshed.id_token,
+		refresh_token: refreshed.refresh_token || refreshToken,
+		expires_at: Date.now() + refreshed.expires_in * 1000,
+		user: {
+			sub: user.sub,
+			email: user.email,
+			displayName: user.displayName || user.name || user.sub,
+		},
+	};
+}
+
+// Non-interactive SSO: return a usable session WITHOUT ever prompting — reuse a
+// non-expired cached session, else silently refresh via the stored
+// refresh_token. Returns null when neither works (no browser/paste fallback), so
+// background callers like the agent-launch key auto-refresh can never hijack a
+// launch with a login flow. `login()` is the interactive counterpart.
+export async function silentSso(): Promise<AuthData | null> {
+	const cached = loadAuth();
+	if (cached) return cached;
+	const stale = readAuthFile();
+	if (!stale?.refresh_token) return null;
+	try {
+		const authData = await refreshToAuthData(stale.refresh_token);
+		saveAuth(authData);
+		return authData;
+	} catch {
+		return null;
+	}
 }
 
 // Best-effort: pull the latest Supabase coordinates from the backend and

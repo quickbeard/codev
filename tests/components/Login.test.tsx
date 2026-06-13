@@ -191,7 +191,7 @@ describe("Login", () => {
 
 		const output = lastFrame() ?? "";
 		expect(output).toContain("Browser didn't open? Sign in here");
-		expect(output).toContain("press c to copy");
+		expect(output).toContain("press C to copy");
 		expect(output).toContain(url);
 	});
 

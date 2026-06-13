@@ -189,7 +189,7 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 							{copied ? (
 								<Text color="green">{"(copied!)"}</Text>
 							) : (
-								<Text dimColor>{"(press c to copy)"}</Text>
+								<Text dimColor>{"(press C to copy)"}</Text>
 							)}
 							<Text dimColor>{":"}</Text>
 						</Box>
