@@ -8,16 +8,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { claudeCodeProvider } from "@/providers/claude-code.js";
+import {
+	claudeCodeProvider,
+	claudeProjectDirName,
+} from "@/providers/claude-code.js";
 
 let tempHome: string;
 let projectCwd: string;
 let claudeProjectDir: string;
-
-function mungeCwd(cwd: string): string {
-	const dashed = cwd.replace(/[^a-zA-Z0-9-]/g, "-");
-	return dashed.startsWith("-") ? dashed : `-${dashed}`;
-}
 
 beforeEach(() => {
 	tempHome = realpathSync(mkdtempSync(join(tmpdir(), "codev-claude-")));
@@ -31,7 +29,7 @@ beforeEach(() => {
 		tempHome,
 		".claude",
 		"projects",
-		mungeCwd(realpathSync(projectCwd)),
+		claudeProjectDirName(realpathSync(projectCwd)),
 	);
 	mkdirSync(claudeProjectDir, { recursive: true });
 });
@@ -39,6 +37,26 @@ beforeEach(() => {
 afterEach(() => {
 	vi.unstubAllEnvs();
 	rmSync(tempHome, { recursive: true, force: true });
+});
+
+describe("claudeProjectDirName", () => {
+	test("encodes a POSIX path with a leading dash from the root slash", () => {
+		expect(claudeProjectDirName("/Users/minh/works/repos/codev")).toBe(
+			"-Users-minh-works-repos-codev",
+		);
+	});
+
+	// Regression: a Windows drive-letter path has no leading separator, so the
+	// folder name must start with the drive letter — matching what Claude Code
+	// actually writes (`E--QUANPV2-...`). The old logic prepended a stray dash
+	// (`-E--QUANPV2-...`), which made detect() miss every Windows project.
+	test("encodes a Windows drive-letter path with no leading dash", () => {
+		expect(
+			claudeProjectDirName(
+				"E:\\QUANPV2\\GITLAB_NEW\\vmp\\vmp_integration\\vmp-email-service",
+			),
+		).toBe("E--QUANPV2-GITLAB-NEW-vmp-vmp-integration-vmp-email-service");
+	});
 });
 
 describe("claudeCodeProvider.detect", () => {

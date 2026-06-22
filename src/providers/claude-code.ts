@@ -7,7 +7,19 @@ import type { Message, Provider, Session } from "@/providers/types.js";
 
 // Claude Code stores sessions under ~/.claude/projects/<munged-cwd>/, where the
 // directory name is the absolute (symlink-resolved) cwd with every
-// non-alphanumeric character replaced by a dash, prefixed with a leading dash.
+// non-alphanumeric character replaced by a dash. On POSIX the leading slash
+// becomes that dash naturally (`/Users/x` -> `-Users-x`); we must NOT prepend
+// one ourselves, because Windows paths start with a drive letter and have no
+// leading separator (`E:\x` -> `E--x`, matching Claude Code), so an extra dash
+// would mismatch the real on-disk folder and make detect() miss the project.
+//
+// Exported (pure, no realpath) so the encoding can be unit-tested with literal
+// paths on any OS — notably the Windows drive-letter case the leading-dash bug
+// used to break.
+export function claudeProjectDirName(realCwd: string): string {
+	return realCwd.replace(/[^a-zA-Z0-9-]/g, "-");
+}
+
 function mungeCwd(cwd: string): string {
 	let real: string;
 	try {
@@ -15,8 +27,7 @@ function mungeCwd(cwd: string): string {
 	} catch {
 		real = cwd;
 	}
-	const dashed = real.replace(/[^a-zA-Z0-9-]/g, "-");
-	return dashed.startsWith("-") ? dashed : `-${dashed}`;
+	return claudeProjectDirName(real);
 }
 
 function projectDir(cwd: string): string {
