@@ -12,22 +12,18 @@ import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { migrateLegacyAgentLogs, runExport } from "@/lib/export.js";
+import { claudeProjectDirName } from "@/providers/claude-code.js";
 
 let tempHome: string;
 let projectCwd: string;
 let cwdSpy: MockInstance;
-
-function mungeCwd(cwd: string): string {
-	const dashed = cwd.replace(/[^a-zA-Z0-9-]/g, "-");
-	return dashed.startsWith("-") ? dashed : `-${dashed}`;
-}
 
 function seedClaudeSession(): void {
 	const claudeDir = join(
 		tempHome,
 		".claude",
 		"projects",
-		mungeCwd(realpathSync(projectCwd)),
+		claudeProjectDirName(realpathSync(projectCwd)),
 	);
 	mkdirSync(claudeDir, { recursive: true });
 	const lines = [
