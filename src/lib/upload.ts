@@ -34,7 +34,7 @@ import {
 } from "@/lib/log.js";
 import { projectLogsDir } from "@/lib/paths.js";
 import { getSupabaseConfig, type SupabaseConfig } from "@/lib/supabase.js";
-import { AGENTS } from "@/providers/types.js";
+import { AGENTS, type Agent } from "@/providers/types.js";
 
 export interface UploadOptions {
 	cwd?: string;
@@ -72,6 +72,11 @@ export interface UploadSummary {
 	skipped: number;
 	failed: number;
 	errors: { file: string; message: string }[];
+	// Populated only when `found === 0`: the per-provider locations export looked
+	// in for this project. Lets the UI explain an empty result ("looked in X, Y,
+	// Z — launch your agent from this directory") instead of a bare "Uploaded
+	// 0/0". Empty/omitted on every non-empty upload.
+	targets?: { agent: Agent; path: string }[];
 }
 
 interface PresignResponse {
@@ -112,11 +117,13 @@ export async function runUpload({
 		onStatus(message);
 	};
 	status("Exporting local conversations...");
-	await runExport(status);
+	const exportSummary = await runExport(status);
 
 	const outDir = projectLogsDir(cwd);
 	const files = listMarkdownLogs(outDir);
 	if (files.length === 0) {
+		// Nothing to upload — carry the per-provider search paths so the UI can
+		// explain *where* we looked instead of a bare "Uploaded 0/0".
 		return {
 			outDir,
 			found: 0,
@@ -124,6 +131,7 @@ export async function runUpload({
 			skipped: 0,
 			failed: 0,
 			errors: [],
+			targets: exportSummary.targets,
 		};
 	}
 

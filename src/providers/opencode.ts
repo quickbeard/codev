@@ -476,6 +476,12 @@ function buildSession(
 export const openCodeProvider: Provider = {
 	agent: "opencode",
 
+	// OpenCode stores all sessions in a single SQLite db, keyed by project path
+	// inside the db rather than by folder — the db file is the location to report.
+	describeTarget(_cwd: string): string {
+		return dbPath();
+	},
+
 	async detect(cwd: string): Promise<boolean> {
 		const path = dbPath();
 		if (!existsSync(path)) return false;

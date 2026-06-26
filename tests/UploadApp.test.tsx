@@ -112,6 +112,36 @@ describe("UploadApp", () => {
 		expect(lastFrame() ?? "").not.toContain("authorization code");
 	});
 
+	test("explains where it looked when no conversations are found", async () => {
+		vi.spyOn(upload, "runUpload").mockResolvedValue({
+			...EMPTY_SUMMARY,
+			found: 0,
+			targets: [
+				{
+					agent: "claude-code",
+					path: "C:\\Users\\me\\.claude\\projects\\D--x",
+				},
+				{ agent: "codex", path: "C:\\Users\\me\\.codex\\sessions" },
+			],
+		});
+
+		// The component exit()s the moment the summary renders, which can unmount
+		// before lastFrame() is next polled — so assert against the captured frame
+		// history, where the summary frame persists regardless of unmount timing.
+		const { frames } = render(<UploadApp />);
+		const painted = () => frames.join("\n");
+		await waitFor(() => painted().includes("No conversations found"));
+		const out = painted();
+		expect(out).toContain("codev looked in:");
+		expect(out).toContain(
+			"claude-code: C:\\Users\\me\\.claude\\projects\\D--x",
+		);
+		expect(out).toContain("codex: C:\\Users\\me\\.codex\\sessions");
+		expect(out).toContain("launched it from this directory");
+		// The empty result is not dressed up as a successful upload.
+		expect(out).not.toContain("Uploaded 0/0");
+	});
+
 	test("dismisses the login prompt once login completes via the browser", async () => {
 		// Browser-login path: onLoginUrl raises the prompt, then onLoginDone fires
 		// when the loopback callback completes — without any paste. The URL +

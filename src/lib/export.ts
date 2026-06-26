@@ -28,6 +28,11 @@ export interface ExportSummary {
 	byAgent: Partial<Record<Agent, number>>;
 	skipped: Agent[];
 	errors: { agent: Agent; message: string }[];
+	// Where each inactive provider looked for this project's sessions, captured
+	// from Provider.describeTarget. `codev upload` surfaces these when nothing was
+	// found at all, so the user can see every path checked and spot a wrong-dir
+	// or wrong-tool mistake (the original Windows "Uploaded 0/0" confusion).
+	targets: { agent: Agent; path: string }[];
 }
 
 export type StatusReporter = (message: string) => void;
@@ -106,6 +111,7 @@ export async function runExport(
 		byAgent: {},
 		skipped: [],
 		errors: [],
+		targets: [],
 	};
 
 	for (const { agent, load } of PROVIDER_LOADERS) {
@@ -138,9 +144,16 @@ export async function runExport(
 		}
 		if (!active) {
 			summary.skipped.push(provider.agent);
-			logDebug(`provider ${agent} inactive for this project`, {
+			// Surface where we looked. Detection misses are almost always a
+			// path-encoding mismatch (notably Windows project-dir munging), and the
+			// only way to debug that remotely is to see the exact path the provider
+			// inspected — so it goes in the message, visible in plain `codev logs`,
+			// not just behind --verbose.
+			const target = provider.describeTarget(cwd);
+			summary.targets.push({ agent: provider.agent, path: target });
+			logDebug(`provider ${agent} inactive for this project (${target})`, {
 				action: "export.provider",
-				extra: { agent, skipped: true },
+				extra: { agent, skipped: true, target },
 			});
 			continue;
 		}
