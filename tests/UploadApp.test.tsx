@@ -133,7 +133,9 @@ describe("UploadApp", () => {
 		await waitFor(() => painted().includes("No conversations found"));
 		const out = painted();
 		expect(out).toContain("codev looked in:");
-		expect(out).toContain("claude-code: C:\\Users\\me\\.claude\\projects\\D--x");
+		expect(out).toContain(
+			"claude-code: C:\\Users\\me\\.claude\\projects\\D--x",
+		);
 		expect(out).toContain("codex: C:\\Users\\me\\.codex\\sessions");
 		expect(out).toContain("launched it from this directory");
 		// The empty result is not dressed up as a successful upload.
