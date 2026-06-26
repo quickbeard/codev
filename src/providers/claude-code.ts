@@ -351,6 +351,10 @@ async function parseSessionFile(filePath: string): Promise<Session | null> {
 export const claudeCodeProvider: Provider = {
 	agent: "claude-code",
 
+	describeTarget(cwd: string): string {
+		return projectDir(cwd);
+	},
+
 	async detect(cwd: string): Promise<boolean> {
 		const dir = projectDir(cwd);
 		try {

@@ -87,6 +87,34 @@ export function UploadApp({ force = false }: { force?: boolean }) {
 	}
 
 	if (!summary) return null;
+	// Nothing was found to upload. A bare "Uploaded 0/0" reads as a failure and
+	// hides the most common cause — the agent was launched from a different
+	// directory, or a tool codev doesn't read. Show exactly where we looked.
+	if (summary.found === 0) {
+		const targets = summary.targets ?? [];
+		return (
+			<Box flexDirection="column">
+				<Text color="yellow">No conversations found for this project.</Text>
+				{targets.length > 0 && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text dimColor>codev looked in:</Text>
+						{targets.map((t) => (
+							<Text key={t.agent} dimColor>
+								{"  • "}
+								{t.agent}: {t.path}
+							</Text>
+						))}
+					</Box>
+				)}
+				<Box marginTop={1}>
+					<Text dimColor>
+						If you used an AI agent here, make sure you launched it from this
+						directory.
+					</Text>
+				</Box>
+			</Box>
+		);
+	}
 	return (
 		<Box flexDirection="column">
 			<Text color={summary.failed > 0 ? "yellow" : "green"}>

@@ -19,6 +19,7 @@ interface DiagDoc {
 	"@timestamp"?: string;
 	log?: { level?: string };
 	message?: string;
+	service?: { name?: string; version?: string };
 	trace?: { id?: string };
 	// command + parent_trace_id are read explicitly; the index signature lets
 	// --verbose enumerate the rest of the codev.* context (api_key, endpoint,
@@ -88,7 +89,12 @@ function printRun(run: DiagDoc[], allDocs: DiagDoc[], verbose = false): void {
 	const traceId = first?.trace?.id ?? "?";
 	const command = first?.codev?.command ?? "?";
 	const startedAt = first?.["@timestamp"] ?? "?";
-	console.log(`Run ${traceId} — codev ${command} — ${startedAt}`);
+	// The codev version that produced the run — the first thing to check when a
+	// bug report's behavior doesn't match current source (e.g. a since-fixed
+	// path-encoding issue). Every doc carries it via service.version.
+	const version = first?.service?.version;
+	const versionTag = version ? ` v${version}` : "";
+	console.log(`Run ${traceId} — codev ${command}${versionTag} — ${startedAt}`);
 	console.log("");
 	for (const doc of run) {
 		// "HH:MM:SS.mmm" from the ISO timestamp; dates are in the header/file.

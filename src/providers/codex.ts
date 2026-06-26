@@ -434,6 +434,13 @@ async function parseSession(preview: CodexPreview): Promise<Session | null> {
 export const codexProvider: Provider = {
 	agent: "codex",
 
+	// Codex doesn't key sessions by a per-project folder — it scans every file
+	// under the sessions root and filters by the cwd recorded inside. The root is
+	// the only meaningful location to report.
+	describeTarget(_cwd: string): string {
+		return sessionsRoot();
+	},
+
 	async detect(cwd: string): Promise<boolean> {
 		const root = sessionsRoot();
 		try {

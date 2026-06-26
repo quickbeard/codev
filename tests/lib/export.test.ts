@@ -133,6 +133,14 @@ describe("runExport", () => {
 		const summary = await runExport();
 		expect(summary.exported).toBe(0);
 		expect(summary.skipped).toEqual(["claude-code", "codex", "opencode"]);
+		// Each skipped provider records where it looked, so `codev upload` can
+		// explain an empty result instead of a bare "0/0".
+		expect(summary.targets.map((t) => t.agent)).toEqual([
+			"claude-code",
+			"codex",
+			"opencode",
+		]);
+		expect(summary.targets.every((t) => t.path.length > 0)).toBe(true);
 	});
 
 	test("calls the status reporter with progress messages", async () => {

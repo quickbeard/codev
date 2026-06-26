@@ -41,6 +41,7 @@ interface DocOpts {
 	parent?: string;
 	errMessage?: string;
 	codevExtra?: Record<string, unknown>;
+	version?: string;
 }
 
 function doc(traceId: string, message: string, opts: DocOpts = {}): string {
@@ -48,6 +49,9 @@ function doc(traceId: string, message: string, opts: DocOpts = {}): string {
 		"@timestamp": opts.ts ?? "2026-06-11T08:00:00.000Z",
 		log: { level: opts.level ?? "info" },
 		message,
+		...(opts.version
+			? { service: { name: "codev", version: opts.version } }
+			: {}),
 		trace: { id: traceId },
 		codev: {
 			command: opts.command ?? "upload",
@@ -84,6 +88,26 @@ describe("codev logs (bare)", () => {
 		expect(out).toContain("↳ presign-upload failed (401): denied");
 		expect(out).not.toContain("trace-viewer");
 		expect(out).not.toContain("codev install started");
+	});
+
+	test("includes the codev version in the run header when present", () => {
+		writeLogFile("codev-20260611.ndjson", [
+			doc("trace-ver", "codev upload started", { version: "0.3.8" }),
+		]);
+
+		expect(runLogs([])).toBe(0);
+		expect(output()).toContain("Run trace-ver — codev upload v0.3.8 —");
+	});
+
+	test("omits the version tag when no document carries one", () => {
+		writeLogFile("codev-20260611.ndjson", [
+			doc("trace-nover", "codev upload started"),
+		]);
+
+		expect(runLogs([])).toBe(0);
+		const out = output();
+		expect(out).toContain("Run trace-nover — codev upload —");
+		expect(out).not.toContain("codev upload v");
 	});
 
 	test("prefers the top-level run over its later-writing child and lists the child", () => {

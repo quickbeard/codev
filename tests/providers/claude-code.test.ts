@@ -59,6 +59,24 @@ describe("claudeProjectDirName", () => {
 	});
 });
 
+describe("claudeCodeProvider.describeTarget", () => {
+	test("reports the project session dir detect() looks for", () => {
+		expect(claudeCodeProvider.describeTarget(projectCwd)).toBe(
+			claudeProjectDir,
+		);
+	});
+
+	// The whole point of surfacing the target: when a Windows user's upload finds
+	// nothing, the inactive log shows the exact munged folder so the path can be
+	// compared against what's on disk.
+	test("reports the munged folder for a non-existent cwd without throwing", () => {
+		const cwd = join(tempHome, "never", "created");
+		expect(claudeCodeProvider.describeTarget(cwd)).toBe(
+			join(tempHome, ".claude", "projects", claudeProjectDirName(cwd)),
+		);
+	});
+});
+
 describe("claudeCodeProvider.detect", () => {
 	test("returns true when the project directory exists", async () => {
 		expect(await claudeCodeProvider.detect(projectCwd)).toBe(true);

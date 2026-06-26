@@ -34,4 +34,13 @@ export interface Provider {
 	agent: Agent;
 	detect(cwd: string): Promise<boolean>;
 	listSessions(cwd: string): Promise<Session[]>;
+	/**
+	 * Human-readable filesystem location this provider inspects for `cwd` — the
+	 * project session dir (Claude Code), the sessions root (Codex), or the db
+	 * file (OpenCode). Surfaced in the "inactive for this project" log so a user
+	 * (or we, reading their `codev logs`) can see exactly where detection looked
+	 * and compare it against what's actually on disk. Pure path computation, no
+	 * I/O — safe to call even when detect() returned false.
+	 */
+	describeTarget(cwd: string): string;
 }
