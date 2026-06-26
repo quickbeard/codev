@@ -57,6 +57,41 @@ describe("claudeProjectDirName", () => {
 			),
 		).toBe("E--QUANPV2-GITLAB-NEW-vmp-vmp-integration-vmp-email-service");
 	});
+
+	// Unicode word characters (Vietnamese diacritics here) are stripped to
+	// dashes, exactly as Claude Code's own `[^a-zA-Z0-9]` munge does — verified
+	// against the Claude Code binary. We must NOT preserve them: a
+	// Unicode-preserving name would not match the folder Claude writes on disk.
+	test("strips non-ASCII characters to dashes, matching Claude Code", () => {
+		expect(
+			claudeProjectDirName("D:\\Viettel\\Đánh giá Quý II_2026\\Gỡ băng"),
+		).toBe("D--Viettel---nh-gi--Qu--II-2026-G--b-ng");
+	});
+
+	// Claude caps the folder name at 200 chars: longer munges are truncated to
+	// 200 and suffixed with `-<base36 Java-hash of the original path>`. The hash
+	// (`4u7n1z`) is the exact value Claude Code's binary produces for this input.
+	test("truncates a >200-char munge to 200 chars plus a hash suffix", () => {
+		const cwd = `/Users/minh/${Array.from(
+			{ length: 30 },
+			(_, i) => `segment_number_${i}`,
+		).join("/")}`;
+		const out = claudeProjectDirName(cwd);
+		// 200-char prefix + "-" + 6-char base36 hash.
+		expect(out.length).toBe(207);
+		expect(out.endsWith("-4u7n1z")).toBe(true);
+		expect(out.slice(0, 200)).toBe(
+			cwd.replace(/[^a-zA-Z0-9]/g, "-").slice(0, 200),
+		);
+	});
+
+	// A munge of exactly the cap is left untouched — no spurious hash suffix.
+	test("does not truncate or hash a name at the 200-char boundary", () => {
+		const cwd = `/${"a".repeat(199)}`; // munges to "-" + 199 a's = 200 chars
+		const out = claudeProjectDirName(cwd);
+		expect(out.length).toBe(200);
+		expect(out).toBe(`-${"a".repeat(199)}`);
+	});
 });
 
 describe("claudeCodeProvider.describeTarget", () => {

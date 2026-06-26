@@ -13,11 +13,40 @@ import type { Message, Provider, Session } from "@/providers/types.js";
 // leading separator (`E:\x` -> `E--x`, matching Claude Code), so an extra dash
 // would mismatch the real on-disk folder and make detect() miss the project.
 //
+// The munge is ASCII-only by design — Claude Code uses `[^a-zA-Z0-9]`, which
+// strips Unicode word characters (Vietnamese diacritics, CJK, …) to dashes too.
+// We deliberately mirror that rather than preserve Unicode: a Unicode-preserving
+// munge would NOT match the folder Claude actually writes, breaking detect() for
+// every non-ASCII path.
+//
+// Long paths: Claude caps the name at 200 characters. A munged name longer than
+// that is truncated to 200 chars and suffixed with `-<hash>`, where the hash is
+// a 32-bit Java-style string hash (`h = h*31 + c`, kept signed via `| 0`) of the
+// *original* (pre-munge) path, rendered in base36. Verified against the Claude
+// Code binary (functions `ab` / `y$`, v2.1.x). We replicate it exactly so a
+// deeply-nested or long-localized project still resolves to the right folder.
+//
 // Exported (pure, no realpath) so the encoding can be unit-tested with literal
 // paths on any OS — notably the Windows drive-letter case the leading-dash bug
 // used to break.
+const CLAUDE_PROJECT_DIR_CAP = 200;
+
+function claudeStringHash(value: string): number {
+	let hash = 0;
+	for (let i = 0; i < value.length; i++) {
+		hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0;
+	}
+	return hash;
+}
+
 export function claudeProjectDirName(realCwd: string): string {
-	return realCwd.replace(/[^a-zA-Z0-9-]/g, "-");
+	const munged = realCwd.replace(/[^a-zA-Z0-9]/g, "-");
+	if (munged.length <= CLAUDE_PROJECT_DIR_CAP) return munged;
+	// Hash the same (realpath-resolved) string we munge — the closest we can get
+	// to Claude's input without knowing whether it realpaths its own cwd. For the
+	// common case (realpath == cwd) the suffix matches byte-for-byte.
+	const suffix = Math.abs(claudeStringHash(realCwd)).toString(36);
+	return `${munged.slice(0, CLAUDE_PROJECT_DIR_CAP)}-${suffix}`;
 }
 
 function mungeCwd(cwd: string): string {
