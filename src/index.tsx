@@ -3,6 +3,7 @@ import { ConfigApp } from "@/ConfigApp.js";
 import { InstallApp } from "@/InstallApp.js";
 import { LoginApp } from "@/LoginApp.js";
 import { logout } from "@/lib/auth.js";
+import { runClearLogs } from "@/lib/clear-logs.js";
 import { forwardToCodegraph } from "@/lib/codegraph.js";
 import { printHelp, printVersion } from "@/lib/help.js";
 import { initLogging } from "@/lib/log.js";
@@ -146,52 +147,6 @@ switch (command) {
 		}
 		break;
 	}
-	// Hidden: not surfaced in --help or README. Installs/removes PATH shims
-	// that route `claude`/`codex`/`opencode` through codev.
-	case "hook": {
-		let agents: readonly ShimAgent[];
-		if (args.length === 0) {
-			agents = detectCodevTools();
-			if (agents.length === 0) {
-				console.log(
-					"No CoDev-installed tools found. Run `codev install` first, " +
-						"or specify agents explicitly: `codev hook claude|codex|opencode`.",
-				);
-				process.exit(0);
-			}
-		} else {
-			const invalid = args.filter(
-				(a) => !(SHIM_AGENTS as readonly string[]).includes(a),
-			);
-			if (invalid.length > 0) {
-				console.error(
-					`Unknown agent(s): ${invalid.join(", ")}. Valid: ${SHIM_AGENTS.join(", ")}.`,
-				);
-				process.exit(1);
-			}
-			agents = args as ShimAgent[];
-		}
-		const r = installShims(agents);
-		console.log(`Installed shims in ${r.shimDir}`);
-		for (const path of r.rcFilesUpdated) console.log(`  patched ${path}`);
-		if (r.windowsUserPathUpdated) console.log("  updated user PATH");
-		console.log(activationHint());
-		process.exit(0);
-		break;
-	}
-	case "unhook": {
-		const r = uninstallShims();
-		if (r.shimsRemoved.length === 0 && r.rcFilesUpdated.length === 0) {
-			console.log("No codev shims installed.");
-		} else {
-			console.log(`Removed ${r.shimsRemoved.length} shim(s) from ${r.shimDir}`);
-			for (const path of r.rcFilesUpdated) console.log(`  cleaned ${path}`);
-			if (r.windowsUserPathUpdated) console.log("  updated user PATH");
-			console.log(activationHint());
-		}
-		process.exit(0);
-		break;
-	}
 	case "upload": {
 		await gateSqlite();
 		if (args.includes("--daemon")) {
@@ -246,6 +201,62 @@ switch (command) {
 	case "codegraph":
 		process.exit(await forwardToCodegraph(args));
 		break;
+	// ── Hidden commands ──────────────────────────────────────────────────
+	// Intentionally not surfaced in --help, README, or AGENTS.md. Kept
+	// grouped at the end of the switch, after every documented command.
+	//
+	// `hook`/`unhook`: install/remove the PATH shims that route
+	// `claude`/`codex`/`opencode` through codev.
+	case "hook": {
+		let agents: readonly ShimAgent[];
+		if (args.length === 0) {
+			agents = detectCodevTools();
+			if (agents.length === 0) {
+				console.log(
+					"No CoDev-installed tools found. Run `codev install` first, " +
+						"or specify agents explicitly: `codev hook claude|codex|opencode`.",
+				);
+				process.exit(0);
+			}
+		} else {
+			const invalid = args.filter(
+				(a) => !(SHIM_AGENTS as readonly string[]).includes(a),
+			);
+			if (invalid.length > 0) {
+				console.error(
+					`Unknown agent(s): ${invalid.join(", ")}. Valid: ${SHIM_AGENTS.join(", ")}.`,
+				);
+				process.exit(1);
+			}
+			agents = args as ShimAgent[];
+		}
+		const r = installShims(agents);
+		console.log(`Installed shims in ${r.shimDir}`);
+		for (const path of r.rcFilesUpdated) console.log(`  patched ${path}`);
+		if (r.windowsUserPathUpdated) console.log("  updated user PATH");
+		console.log(activationHint());
+		process.exit(0);
+		break;
+	}
+	case "unhook": {
+		const r = uninstallShims();
+		if (r.shimsRemoved.length === 0 && r.rcFilesUpdated.length === 0) {
+			console.log("No codev shims installed.");
+		} else {
+			console.log(`Removed ${r.shimsRemoved.length} shim(s) from ${r.shimDir}`);
+			for (const path of r.rcFilesUpdated) console.log(`  cleaned ${path}`);
+			if (r.windowsUserPathUpdated) console.log("  updated user PATH");
+			console.log(activationHint());
+		}
+		process.exit(0);
+		break;
+	}
+	// `clear-logs`: deletes both ~/.codev log homes — the CLI diagnostics
+	// (cliLogsDir) and the conversation exports (agentLogsDir).
+	case "clear-logs": {
+		process.exit(runClearLogs());
+		break;
+	}
 	default:
 		console.error(`Unknown command: ${command}\n`);
 		printHelp();
