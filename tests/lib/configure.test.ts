@@ -19,6 +19,15 @@ beforeEach(() => {
 	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
 	// hit the temp home on every platform.
 	vi.stubEnv("USERPROFILE", tempDir);
+	// The configure* functions fall back to AI_GATEWAY_URL()/AI_GATEWAY_OPENAI_URL()
+	// whenever creds carry no baseUrl (the SSO-key path), and those accessors read
+	// gateway_url out of ~/.codev/auth.json. Seed it so the fallback resolves.
+	const codevDir = join(tempDir, ".codev");
+	mkdirSync(codevDir, { recursive: true });
+	writeFileSync(
+		join(codevDir, "auth.json"),
+		JSON.stringify({ gateway_url: "https://gw.test/gateway" }),
+	);
 });
 
 afterEach(() => {
@@ -266,7 +275,7 @@ describe("configureClaudeCode", () => {
 			"https://json.schemastore.org/claude-code-settings.json",
 		);
 		expect(config.env).toEqual({
-			ANTHROPIC_BASE_URL: AI_GATEWAY_URL,
+			ANTHROPIC_BASE_URL: AI_GATEWAY_URL(),
 			ANTHROPIC_API_KEY: "sk-abc",
 			ANTHROPIC_MODEL: "chosen-model",
 			ANTHROPIC_DEFAULT_OPUS_MODEL: "chosen-model",
@@ -383,7 +392,7 @@ describe("configureOpenCode", () => {
 		expect(config.$schema).toBe("https://opencode.ai/config.json");
 		expect(config.provider.aigateway.npm).toBe("@ai-sdk/openai-compatible");
 		expect(config.provider.aigateway.options.baseURL).toBe(
-			AI_GATEWAY_OPENAI_URL,
+			AI_GATEWAY_OPENAI_URL(),
 		);
 		expect(config.provider.aigateway.options.apiKey).toBe("sk-xyz");
 		expect(config.provider.aigateway.models["chosen-model"].name).toBe(
@@ -540,7 +549,7 @@ describe("configureCodex", () => {
 		expect(config.model_providers.aigateway).toBeDefined();
 		expect(config.model_providers.aigateway?.name).toBe("AI Gateway");
 		expect(config.model_providers.aigateway?.base_url).toBe(
-			AI_GATEWAY_OPENAI_URL,
+			AI_GATEWAY_OPENAI_URL(),
 		);
 		expect(config.model_providers.aigateway?.wire_api).toBe("responses");
 		expect(config.model_providers.aigateway?.experimental_bearer_token).toBe(
@@ -677,7 +686,7 @@ describe("configureContinue", () => {
 		expect(raw).toContain("CoDev (AI Gateway)");
 		// OpenAI-compatible provider entry pinned to the gateway's /v1 endpoint.
 		expect(raw).toContain(`provider: "openai"`);
-		expect(raw).toContain(`apiBase: "${AI_GATEWAY_OPENAI_URL}"`);
+		expect(raw).toContain(`apiBase: "${AI_GATEWAY_OPENAI_URL()}"`);
 		expect(raw).toContain(`apiKey: "sk-vscode"`);
 		expect(raw).toContain(`name: "chosen-model"`);
 		expect(raw).toContain(`model: "chosen-model"`);
@@ -1257,7 +1266,7 @@ describe("detectConfiguredTools", () => {
 			join(dir, "settings.json"),
 			JSON.stringify({
 				env: {
-					ANTHROPIC_BASE_URL: AI_GATEWAY_URL,
+					ANTHROPIC_BASE_URL: AI_GATEWAY_URL(),
 					ANTHROPIC_API_KEY: "sk",
 					ANTHROPIC_MODEL: "m",
 					ANTHROPIC_DEFAULT_OPUS_MODEL: "m",

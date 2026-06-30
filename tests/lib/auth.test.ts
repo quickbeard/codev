@@ -261,6 +261,7 @@ describe("logout", () => {
 				...VALID_AUTH,
 				supabase_url: "https://keep.supabase.co",
 				supabase_anon_key: "keep-anon",
+				gateway_url: "https://keep.example.com/gateway",
 			}),
 		);
 		expect(await logout()).toBe(true);
@@ -270,6 +271,7 @@ describe("logout", () => {
 		) as Record<string, unknown>;
 		expect(after.supabase_url).toBe("https://keep.supabase.co");
 		expect(after.supabase_anon_key).toBe("keep-anon");
+		expect(after.gateway_url).toBe("https://keep.example.com/gateway");
 		expect(after.access_token).toBeUndefined();
 		expect(after.refresh_token).toBeUndefined();
 	});
@@ -296,16 +298,18 @@ describe("logout", () => {
 });
 
 describe("saveCodevConfig", () => {
-	test("round-trips the Supabase fields through auth.json", () => {
+	test("round-trips the Supabase and gateway fields through auth.json", () => {
 		saveCodevConfig({
 			supabaseUrl: "https://x.supabase.co",
 			supabaseAnonKey: "anon-x",
+			gatewayUrl: "https://gw.example.com/gateway",
 		});
 		const file = JSON.parse(
 			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
 		) as Record<string, unknown>;
 		expect(file.supabase_url).toBe("https://x.supabase.co");
 		expect(file.supabase_anon_key).toBe("anon-x");
+		expect(file.gateway_url).toBe("https://gw.example.com/gateway");
 	});
 
 	test("does not clobber SSO fields when saving codev config", () => {
@@ -313,6 +317,7 @@ describe("saveCodevConfig", () => {
 		saveCodevConfig({
 			supabaseUrl: "https://x.supabase.co",
 			supabaseAnonKey: "anon-x",
+			gatewayUrl: "https://gw.example.com/gateway",
 		});
 		expect(loadAuth()?.access_token).toBe("test-access-token");
 	});
@@ -322,6 +327,7 @@ describe("saveCodevConfig", () => {
 		saveCodevConfig({
 			supabaseUrl: "https://x.supabase.co",
 			supabaseAnonKey: "anon-x",
+			gatewayUrl: "https://gw.example.com/gateway",
 		});
 		expect(loadApiKey()?.apiKey).toBe("sk-merged");
 	});
@@ -335,6 +341,7 @@ describe("saveCodevConfig", () => {
 			saveCodevConfig({
 				supabaseUrl: "u",
 				supabaseAnonKey: "a",
+				gatewayUrl: "g",
 			});
 			const stat = statSync(join(tempDir, ".codev", "auth.json"));
 			expect(stat.mode & 0o777).toBe(0o600);
@@ -343,13 +350,14 @@ describe("saveCodevConfig", () => {
 });
 
 describe("refreshCodevConfig", () => {
-	test("fetches /config and writes Supabase coords into auth.json", async () => {
+	test("fetches /config and writes Supabase coords and gateway URL into auth.json", async () => {
 		const fetchSpy = mockAuthFetch({
 			"/codev-proxy/config": async () =>
 				new Response(
 					JSON.stringify({
 						supabaseUrl: "https://fresh.supabase.co",
 						supabaseAnonKey: "fresh-anon",
+						gatewayUrl: "https://fresh.example.com/gateway",
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				),
@@ -361,6 +369,7 @@ describe("refreshCodevConfig", () => {
 			) as Record<string, unknown>;
 			expect(saved.supabase_url).toBe("https://fresh.supabase.co");
 			expect(saved.supabase_anon_key).toBe("fresh-anon");
+			expect(saved.gateway_url).toBe("https://fresh.example.com/gateway");
 		} finally {
 			fetchSpy.mockRestore();
 		}

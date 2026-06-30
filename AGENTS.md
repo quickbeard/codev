@@ -116,7 +116,7 @@ The install flow's "Skip configuration" auth choice routes Configure through `ba
 
 ## Config refresh and upload self-healing
 
-Supabase coordinates (`supabase_url`, `supabase_anon_key`) are not baked into the source — they're fetched from the backend's `POST /config` endpoint and cached in `~/.codev/auth.json`. Two invariants keep that cache fresh:
+Supabase coordinates (`supabase_url`, `supabase_anon_key`) and the public gateway base URL (`gateway_url`) are not baked into the source — they're fetched together from the backend's `POST /config` endpoint and cached in `~/.codev/auth.json`. `gateway_url` is read back via `AI_GATEWAY_URL()` / `AI_GATEWAY_OPENAI_URL()` in `src/lib/const.ts` (the latter derives the `<base>/v1` endpoint), which `configure.ts` and `backend.ts` fall back to whenever a flow has no explicit `baseUrl` (the SSO-key path). Like the Supabase accessors they hard-fail with a "run `codev install`" message if the cache was never populated. Two invariants keep that cache fresh:
 
 1. **Every command that consumes Supabase coords refreshes config after a successful login.** `login()` itself does not call `refreshCodevConfig` — callers run it explicitly so the timing fits each flow. Today:
    - `InstallApp` awaits `refreshCodevConfig` inline between the install and key-choice steps. The `refreshing-config` Phase still exists as an internal state to block forward progress, but renders no visible Step.

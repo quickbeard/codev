@@ -169,6 +169,7 @@ describe("runUpload", () => {
 					JSON.stringify({
 						supabaseUrl: "https://test.supabase.co",
 						supabaseAnonKey: "anon",
+						gatewayUrl: "https://gw.test/gateway",
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				);
@@ -380,6 +381,7 @@ describe("runUpload", () => {
 					JSON.stringify({
 						supabaseUrl: "https://test.supabase.co",
 						supabaseAnonKey: "anon",
+						gatewayUrl: "https://gw.test/gateway",
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				);
@@ -505,6 +507,7 @@ describe("runUpload", () => {
 					JSON.stringify({
 						supabaseUrl: "https://fresh.supabase.co",
 						supabaseAnonKey: "fresh-anon",
+						gatewayUrl: "https://fresh.example.com/gateway",
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				);
@@ -701,6 +704,7 @@ describe("runUpload", () => {
 					JSON.stringify({
 						supabaseUrl: "https://test.supabase.co",
 						supabaseAnonKey: "anon",
+						gatewayUrl: "https://gw.test/gateway",
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				);

@@ -89,11 +89,13 @@ interface AuthFileContents {
 	model?: string;
 	supabase_url?: string;
 	supabase_anon_key?: string;
+	gateway_url?: string;
 }
 
 export interface CodevConfig {
 	supabaseUrl: string;
 	supabaseAnonKey: string;
+	gatewayUrl: string;
 }
 
 interface TokenResponse {
@@ -208,6 +210,7 @@ export function saveCodevConfig(config: CodevConfig): void {
 		...existing,
 		supabase_url: config.supabaseUrl,
 		supabase_anon_key: config.supabaseAnonKey,
+		gateway_url: config.gatewayUrl,
 	});
 }
 
@@ -233,6 +236,7 @@ export async function logout(): Promise<boolean> {
 			model: raw.model,
 			supabase_url: raw.supabase_url,
 			supabase_anon_key: raw.supabase_anon_key,
+			gateway_url: raw.gateway_url,
 		};
 		const hasAnything = Object.values(preserved).some((v) => v !== undefined);
 		if (hasAnything) {

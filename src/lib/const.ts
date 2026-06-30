@@ -8,10 +8,6 @@ export const BACKEND_URL = `${BASE_URL}/codev-proxy`;
 export const SSO_URL = `${BASE_URL}/sso-wrapper`;
 export const LOGIN_SUCCESS_URL = `${BASE_URL}/codev-landing-page`;
 
-// TODO: will be fetched from backend
-export const AI_GATEWAY_URL = `${BASE_URL}/gateway`;
-export const AI_GATEWAY_OPENAI_URL = `${AI_GATEWAY_URL}/v1`;
-
 export const FALLBACK_MODEL = atob("TWluaU1heC9NaW5pTWF4LU0yLjc=");
 
 // The self-hosted gateway model has a 196608-token window. Each agent is told
@@ -39,6 +35,7 @@ export const HAPPY_CODING = "Happy coding! 🎉";
 interface CodevAuthFile {
 	supabase_url?: string;
 	supabase_anon_key?: string;
+	gateway_url?: string;
 }
 
 function readCodevAuthFile(): CodevAuthFile | null {
@@ -67,4 +64,19 @@ export function SUPABASE_URL(): string {
 
 export function SUPABASE_ANON_KEY(): string {
 	return readField("supabase_anon_key", "supabase_anon_key");
+}
+
+// The public gateway base URL, fetched from the backend's POST /config endpoint
+// and cached in ~/.codev/auth.json (see refreshCodevConfig). Like the Supabase
+// accessors, this hard-fails with an actionable message if the cache was never
+// populated — every consumer runs after a login that refreshes config.
+export function AI_GATEWAY_URL(): string {
+	return readField("gateway_url", "gateway_url");
+}
+
+// The OpenAI-compatible gateway endpoint, derived from the base URL — the same
+// `<base>/v1` relationship the two consts used to encode. Kept as a derivation
+// so the backend only has to serve (and the cache only has to store) one URL.
+export function AI_GATEWAY_OPENAI_URL(): string {
+	return `${AI_GATEWAY_URL()}/v1`;
 }
