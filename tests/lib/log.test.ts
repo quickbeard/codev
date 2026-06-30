@@ -345,7 +345,7 @@ describe("loggedFetch", () => {
 		try {
 			const res = await loggedFetch(
 				"backend.config",
-				"https://proxy.example.com/codev-proxy/config?x=1",
+				"https://proxy.example.com/codev-backend/config?x=1",
 				{
 					method: "POST",
 					headers: { Authorization: "Bearer topsecrettokenvalue" },
@@ -377,7 +377,7 @@ describe("loggedFetch", () => {
 			expect(start.event?.type).toEqual(["start"]);
 			expect(start.codev?.endpoint).toBe("backend.config");
 			expect(start.url?.domain).toBe("proxy.example.com");
-			expect(start.url?.path).toBe("/codev-proxy/config");
+			expect(start.url?.path).toBe("/codev-backend/config");
 			expect(end.event?.type).toEqual(["end"]);
 			expect(end.event?.outcome).toBe("success");
 			expect(end.http?.request?.method).toBe("POST");

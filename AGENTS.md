@@ -121,7 +121,7 @@ Supabase coordinates (`supabase_url`, `supabase_anon_key`) and the public gatewa
 1. **Every command that consumes Supabase coords refreshes config after a successful login.** `login()` itself does not call `refreshCodevConfig` — callers run it explicitly so the timing fits each flow. Today:
    - `InstallApp` awaits `refreshCodevConfig` inline between the install and key-choice steps. The `refreshing-config` Phase still exists as an internal state to block forward progress, but renders no visible Step.
    - `src/lib/upload.ts`'s `ensureAuth` calls `refreshCodevConfig` on the fresh-login branch (so the first Supabase attempt doesn't have to fail and retry just to populate the cache).
-   - Tests that exercise real `login()` must mock `POST /codev-proxy/config` if (and only if) the caller also calls `refreshCodevConfig`.
+   - Tests that exercise real `login()` must mock `POST /codev-backend/config` if (and only if) the caller also calls `refreshCodevConfig`.
 2. **`runUpload` retries once on a "refreshable" error.** `isRefreshableError` (in `src/lib/upload.ts`) is deliberately narrow: `Missing supabase_…` from the cache accessors, or HTTP `401`/`403` from any Supabase or backend fetch. `5xx`, `404`, network errors, and timeouts are NOT retried — refreshing won't help and we'd amplify the outage. Per-file upload errors stay in `summary.errors` and don't trigger the pipeline-level retry. If you change `runSupabaseUpload`'s shape, keep that boundary intact.
 
 ## Diagnostic logging

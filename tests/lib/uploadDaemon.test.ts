@@ -93,7 +93,7 @@ function mockUploadHappyPath() {
 			typeof input === "string" || input instanceof URL
 				? String(input)
 				: input.url;
-		if (url.includes("/codev-proxy/supabase/exchange")) {
+		if (url.includes("/codev-backend/supabase/exchange")) {
 			return new Response(
 				JSON.stringify({
 					access_token: "supabase-upload-token",
@@ -231,7 +231,7 @@ describe("runUploadDaemon", () => {
 				typeof input === "string" || input instanceof URL
 					? String(input)
 					: input.url;
-			if (url.includes("/codev-proxy/supabase/exchange")) {
+			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(JSON.stringify({ error: "nope" }), {
 					status: 401,
 				});
@@ -301,7 +301,7 @@ describe("runUploadDaemon", () => {
 				typeof input === "string" || input instanceof URL
 					? String(input)
 					: input.url;
-			if (url.includes("/codev-proxy/supabase/exchange")) {
+			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "x",

@@ -41,7 +41,7 @@ function reconfigure(tool: Tool, creds: Credentials): void {
 }
 
 // Self-heal a dead gateway API key before launching an agent. The gateway issues
-// keys whose lifetime CoDev doesn't control (codev-proxy delegates to the
+// keys whose lifetime CoDev doesn't control (codev-backend delegates to the
 // gateway's add_user_and_generate_key endpoint); when one expires or is evicted,
 // every agent call 401/403s and the CLI otherwise keeps using the dead key until
 // the user re-runs `codev install`.
