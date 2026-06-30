@@ -31,10 +31,6 @@ export const GATEWAY_COMPACT_RESERVED =
 // Max output tokens advertised to OpenCode (required whenever `limit` is set).
 export const GATEWAY_MAX_OUTPUT_TOKENS = 65536;
 
-// Claude Code reads its window/percentage as env-var strings (see configure.ts).
-export const CLAUDE_AUTO_COMPACT_WINDOW = String(GATEWAY_CONTEXT_WINDOW);
-export const CLAUDE_AUTOCOMPACT_PCT = String(GATEWAY_COMPACT_PCT);
-
 export const VERSION: string = pkg.version;
 
 export const HELP_HINT = "Run `codev --help` to see all commands.";

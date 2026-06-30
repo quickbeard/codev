@@ -3,8 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
-	CLAUDE_AUTO_COMPACT_WINDOW,
-	CLAUDE_AUTOCOMPACT_PCT,
 	FALLBACK_MODEL,
 	GATEWAY_COMPACT_RESERVED,
 	GATEWAY_COMPACT_TRIGGER,
@@ -107,10 +105,5 @@ describe("gateway compaction constants", () => {
 		expect(GATEWAY_COMPACT_TRIGGER).toBe(167117);
 		expect(GATEWAY_COMPACT_RESERVED).toBe(GATEWAY_CONTEXT_WINDOW - 167117);
 		expect(GATEWAY_COMPACT_RESERVED).toBe(29491);
-	});
-
-	test("Claude Code reads the same window/percentage as env-var strings", () => {
-		expect(CLAUDE_AUTO_COMPACT_WINDOW).toBe("196608");
-		expect(CLAUDE_AUTOCOMPACT_PCT).toBe("85");
 	});
 });

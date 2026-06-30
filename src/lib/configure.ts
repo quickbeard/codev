@@ -14,8 +14,7 @@ import TOML from "@iarna/toml";
 import {
 	AI_GATEWAY_OPENAI_URL,
 	AI_GATEWAY_URL,
-	CLAUDE_AUTO_COMPACT_WINDOW,
-	CLAUDE_AUTOCOMPACT_PCT,
+	GATEWAY_COMPACT_PCT,
 	GATEWAY_COMPACT_RESERVED,
 	GATEWAY_COMPACT_TRIGGER,
 	GATEWAY_CONTEXT_WINDOW,
@@ -527,8 +526,9 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 			[CLAUDE_K.sonnet]: model,
 			[CLAUDE_K.haiku]: model,
 			[CLAUDE_K.agentTeams]: "1",
-			[CLAUDE_K.autoCompactWindow]: CLAUDE_AUTO_COMPACT_WINDOW,
-			[CLAUDE_K.autoCompactPct]: CLAUDE_AUTOCOMPACT_PCT,
+			// Env-var values are strings; the shared window/percentage are numeric.
+			[CLAUDE_K.autoCompactWindow]: String(GATEWAY_CONTEXT_WINDOW),
+			[CLAUDE_K.autoCompactPct]: String(GATEWAY_COMPACT_PCT),
 		},
 	});
 
