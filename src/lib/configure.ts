@@ -14,8 +14,11 @@ import TOML from "@iarna/toml";
 import {
 	AI_GATEWAY_OPENAI_URL,
 	AI_GATEWAY_URL,
-	CLAUDE_AUTO_COMPACT_WINDOW,
-	CLAUDE_AUTOCOMPACT_PCT,
+	GATEWAY_COMPACT_PCT,
+	GATEWAY_COMPACT_RESERVED,
+	GATEWAY_COMPACT_TRIGGER,
+	GATEWAY_CONTEXT_WINDOW,
+	GATEWAY_MAX_OUTPUT_TOKENS,
 } from "@/lib/const.js";
 import { logInfo } from "@/lib/log.js";
 import type { Agent } from "@/providers/types.js";
@@ -107,6 +110,8 @@ const CLAUDE_K = {
 const CODEX_K = {
 	model: atob("bW9kZWw="),
 	modelProvider: atob("bW9kZWxfcHJvdmlkZXI="),
+	modelContextWindow: atob("bW9kZWxfY29udGV4dF93aW5kb3c="),
+	autoCompactTokenLimit: atob("bW9kZWxfYXV0b19jb21wYWN0X3Rva2VuX2xpbWl0"),
 	modelProviders: atob("bW9kZWxfcHJvdmlkZXJz"),
 	providerId: atob("YWlnYXRld2F5"),
 	name: atob("bmFtZQ=="),
@@ -133,6 +138,12 @@ const OPENCODE_K = {
 	baseURL: atob("YmFzZVVSTA=="),
 	apiKey: atob("YXBpS2V5"),
 	models: atob("bW9kZWxz"),
+	limit: atob("bGltaXQ="),
+	context: atob("Y29udGV4dA=="),
+	output: atob("b3V0cHV0"),
+	compaction: atob("Y29tcGFjdGlvbg=="),
+	auto: atob("YXV0bw=="),
+	reserved: atob("cmVzZXJ2ZWQ="),
 };
 
 // The base URL CoDev writes to each tool's config. Read back at export time so
@@ -515,8 +526,9 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 			[CLAUDE_K.sonnet]: model,
 			[CLAUDE_K.haiku]: model,
 			[CLAUDE_K.agentTeams]: "1",
-			[CLAUDE_K.autoCompactWindow]: CLAUDE_AUTO_COMPACT_WINDOW,
-			[CLAUDE_K.autoCompactPct]: CLAUDE_AUTOCOMPACT_PCT,
+			// Env-var values are strings; the shared window/percentage are numeric.
+			[CLAUDE_K.autoCompactWindow]: String(GATEWAY_CONTEXT_WINDOW),
+			[CLAUDE_K.autoCompactPct]: String(GATEWAY_COMPACT_PCT),
 		},
 	});
 
@@ -599,6 +611,11 @@ export function configureCodex(creds: Credentials): ConfigureResult[] {
 	writeToml(sourcePath, {
 		[CODEX_K.model]: model,
 		[CODEX_K.modelProvider]: CODEX_K.providerId,
+		// The gateway model isn't in Codex's catalog, so Codex would otherwise
+		// assume a 272K fallback window — larger than the real 196608 ceiling.
+		// Pin the true window and compact at ~85% of it, mirroring Claude Code.
+		[CODEX_K.modelContextWindow]: GATEWAY_CONTEXT_WINDOW,
+		[CODEX_K.autoCompactTokenLimit]: GATEWAY_COMPACT_TRIGGER,
 		[CODEX_K.modelProviders]: {
 			[CODEX_K.providerId]: {
 				[CODEX_K.name]: CODEX_K.displayName,
@@ -660,8 +677,21 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 	const allModels =
 		creds.models && creds.models.length > 0 ? creds.models : [defaultModel];
 
+	// A custom-provider model with no `limit` defaults to context 0, which both
+	// mis-sizes the window and disables OpenCode's auto-compaction entirely.
+	// Declare the gateway's real window so compaction works; `output` is required
+	// whenever a `limit` object is present.
 	const modelsMap = Object.fromEntries(
-		allModels.map((id) => [id, { [OPENCODE_K.name]: id }]),
+		allModels.map((id) => [
+			id,
+			{
+				[OPENCODE_K.name]: id,
+				[OPENCODE_K.limit]: {
+					[OPENCODE_K.context]: GATEWAY_CONTEXT_WINDOW,
+					[OPENCODE_K.output]: GATEWAY_MAX_OUTPUT_TOKENS,
+				},
+			},
+		]),
 	);
 
 	writeJson(sourcePath, {
@@ -669,6 +699,13 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 		// Top-level `model` pins the initial active model OpenCode uses on
 		// launch. Format is `<provider>/<modelId>` per OpenCode's schema.
 		[OPENCODE_K.model]: `${OPENCODE_K.providerKey}/${defaultModel}`,
+		// OpenCode has no percentage trigger; it compacts at `context − reserved`.
+		// Reserve the headroom that lands the trigger at ~85% of the window, to
+		// match Claude Code and Codex.
+		[OPENCODE_K.compaction]: {
+			[OPENCODE_K.auto]: true,
+			[OPENCODE_K.reserved]: GATEWAY_COMPACT_RESERVED,
+		},
 		[OPENCODE_K.provider]: {
 			[OPENCODE_K.providerKey]: {
 				[OPENCODE_K.npm]: OPENCODE_K.npmPkg,

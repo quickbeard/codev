@@ -391,6 +391,16 @@ describe("configureOpenCode", () => {
 		);
 		// Top-level `model` pins the active default in <provider>/<modelId> form.
 		expect(config.model).toBe("aigateway/chosen-model");
+		// Declares the gateway window so OpenCode sizes context correctly and its
+		// auto-compaction fires (a model with no `limit` defaults to context 0,
+		// which disables compaction). `output` is required alongside `context`.
+		expect(config.provider.aigateway.models["chosen-model"].limit).toEqual({
+			context: 196608,
+			output: 65536,
+		});
+		// Reserve lands the compaction trigger at ~85% of the window (196608 −
+		// 29491 ≈ 167K), matching Claude Code and Codex.
+		expect(config.compaction).toEqual({ auto: true, reserved: 29491 });
 	});
 
 	test("writes every fetched model into the provider's models map", async () => {
@@ -407,6 +417,7 @@ describe("configureOpenCode", () => {
 		expect(Object.keys(map).sort()).toEqual(["model-a", "model-b", "model-c"]);
 		for (const id of ["model-a", "model-b", "model-c"]) {
 			expect(map[id].name).toBe(id);
+			expect(map[id].limit).toEqual({ context: 196608, output: 65536 });
 		}
 		// Top-level default still points at the chosen one.
 		expect(config.model).toBe("aigateway/model-a");
@@ -502,6 +513,8 @@ describe("configureCodex", () => {
 		) as {
 			model: string;
 			model_provider: string;
+			model_context_window: number;
+			model_auto_compact_token_limit: number;
 			model_providers: Record<
 				string,
 				{
@@ -533,6 +546,15 @@ describe("configureCodex", () => {
 		expect(config.model_providers.aigateway?.experimental_bearer_token).toBe(
 			"sk-codex",
 		);
+	});
+
+	test("pins the gateway window and compaction trigger (Codex would otherwise assume a larger fallback window)", async () => {
+		const { configureCodex } = await import("@/lib/configure.js");
+		configureCodex({ apiKey: "sk-codex", model: "m" });
+
+		const config = readCodexToml();
+		expect(config.model_context_window).toBe(196608);
+		expect(config.model_auto_compact_token_limit).toBe(167117); // ≈85% of the window
 	});
 
 	test("does not touch ~/.claude.json (Codex-only install)", async () => {

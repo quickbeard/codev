@@ -14,11 +14,22 @@ export const AI_GATEWAY_OPENAI_URL = `${AI_GATEWAY_URL}/v1`;
 
 export const FALLBACK_MODEL = atob("TWluaU1heC9NaW5pTWF4LU0yLjc=");
 
-// Self-hosted gateway model has a 196608-token window. Telling Claude Code
-// to treat that as its effective window and to fire auto-compaction at 85%
-// of it (≈167K) keeps compaction well below the hard limit.
-export const CLAUDE_AUTO_COMPACT_WINDOW = "196608";
-export const CLAUDE_AUTOCOMPACT_PCT = "85";
+// The self-hosted gateway model has a 196608-token window. Each agent is told
+// to treat that as its effective window and to fire auto-compaction at ~85% of
+// it (≈167K), keeping compaction well below the hard limit.
+export const GATEWAY_CONTEXT_WINDOW = 196608;
+export const GATEWAY_COMPACT_PCT = 85;
+// Compaction trigger and reserve, derived from the window and percentage above.
+// Codex's `model_auto_compact_token_limit` is an absolute token threshold (≈167K);
+// OpenCode has no percentage knob — it compacts at `context − reserved`, so the
+// reserve is the headroom that lands the trigger at the same ~85% point.
+export const GATEWAY_COMPACT_TRIGGER = Math.round(
+	GATEWAY_CONTEXT_WINDOW * (GATEWAY_COMPACT_PCT / 100),
+);
+export const GATEWAY_COMPACT_RESERVED =
+	GATEWAY_CONTEXT_WINDOW - GATEWAY_COMPACT_TRIGGER;
+// Max output tokens advertised to OpenCode (required whenever `limit` is set).
+export const GATEWAY_MAX_OUTPUT_TOKENS = 65536;
 
 export const VERSION: string = pkg.version;
 

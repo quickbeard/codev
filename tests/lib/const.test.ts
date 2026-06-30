@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	FALLBACK_MODEL,
+	GATEWAY_COMPACT_RESERVED,
+	GATEWAY_COMPACT_TRIGGER,
+	GATEWAY_CONTEXT_WINDOW,
+	GATEWAY_MAX_OUTPUT_TOKENS,
 	SUPABASE_ANON_KEY,
 	SUPABASE_URL,
 } from "@/lib/const.js";
@@ -88,5 +92,18 @@ describe("Supabase const accessors", () => {
 describe("FALLBACK_MODEL", () => {
 	test("decodes to the expected model id", () => {
 		expect(FALLBACK_MODEL).toBe("MiniMax/MiniMax-M2.7");
+	});
+});
+
+describe("gateway compaction constants", () => {
+	test("window and percentage are the gateway's real values", () => {
+		expect(GATEWAY_CONTEXT_WINDOW).toBe(196608);
+		expect(GATEWAY_MAX_OUTPUT_TOKENS).toBe(65536);
+	});
+
+	test("trigger is ~85% of the window and reserve is the remaining headroom", () => {
+		expect(GATEWAY_COMPACT_TRIGGER).toBe(167117);
+		expect(GATEWAY_COMPACT_RESERVED).toBe(GATEWAY_CONTEXT_WINDOW - 167117);
+		expect(GATEWAY_COMPACT_RESERVED).toBe(29491);
 	});
 });
