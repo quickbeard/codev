@@ -17,6 +17,13 @@ beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-shims-test-"));
 	vi.stubEnv("HOME", tempDir);
 	vi.stubEnv("USERPROFILE", tempDir);
+	// configureClaudeCode (exercised below) falls back to AI_GATEWAY_URL() when
+	// creds carry no baseUrl; that reads gateway_url from ~/.codev/auth.json.
+	mkdirSync(join(tempDir, ".codev"), { recursive: true });
+	writeFileSync(
+		join(tempDir, ".codev", "auth.json"),
+		JSON.stringify({ gateway_url: "https://gw.test/gateway" }),
+	);
 });
 
 afterEach(() => {

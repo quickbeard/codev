@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+	AI_GATEWAY_OPENAI_URL,
+	AI_GATEWAY_URL,
 	FALLBACK_MODEL,
 	GATEWAY_COMPACT_RESERVED,
 	GATEWAY_COMPACT_TRIGGER,
@@ -37,6 +39,8 @@ const ACCESSORS: ReadonlyArray<
 > = [
 	["SUPABASE_URL", () => SUPABASE_URL(), "supabase_url"],
 	["SUPABASE_ANON_KEY", () => SUPABASE_ANON_KEY(), "supabase_anon_key"],
+	["AI_GATEWAY_URL", () => AI_GATEWAY_URL(), "gateway_url"],
+	["AI_GATEWAY_OPENAI_URL", () => AI_GATEWAY_OPENAI_URL(), "gateway_url"],
 ];
 
 describe("Supabase const accessors", () => {
@@ -86,6 +90,18 @@ describe("Supabase const accessors", () => {
 			supabase_anon_key: "a2",
 		});
 		expect(SUPABASE_URL()).toBe("https://second.supabase.co");
+	});
+});
+
+describe("gateway URL accessors", () => {
+	test("AI_GATEWAY_URL returns gateway_url from auth.json", () => {
+		writeAuthJson({ gateway_url: "https://gw.example.com/gateway" });
+		expect(AI_GATEWAY_URL()).toBe("https://gw.example.com/gateway");
+	});
+
+	test("AI_GATEWAY_OPENAI_URL derives the /v1 endpoint from gateway_url", () => {
+		writeAuthJson({ gateway_url: "https://gw.example.com/gateway" });
+		expect(AI_GATEWAY_OPENAI_URL()).toBe("https://gw.example.com/gateway/v1");
 	});
 });
 

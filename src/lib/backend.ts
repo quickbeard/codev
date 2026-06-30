@@ -18,6 +18,7 @@ interface ExchangeResponse {
 interface ConfigResponse {
 	supabaseUrl: string;
 	supabaseAnonKey: string;
+	gatewayUrl: string;
 }
 
 interface ErrorResponse {
@@ -66,9 +67,10 @@ export async function fetchApiKey(accessToken: string): Promise<string> {
 	return data.api_key ?? "";
 }
 
-// Pulls the Supabase coordinates the CLI doesn't bake into its source. Called
-// from auth.ts on every successful SSO login (fresh + refresh) and persisted
-// into ~/.codev/auth.json by saveCodevConfig.
+// Pulls the runtime coordinates the CLI doesn't bake into its source — the
+// Supabase URL/anon key and the public gateway base URL. Called from auth.ts on
+// every successful SSO login (fresh + refresh) and persisted into
+// ~/.codev/auth.json by saveCodevConfig.
 export async function fetchCodevConfig(
 	accessToken: string,
 ): Promise<CodevConfig> {
@@ -85,7 +87,7 @@ export async function fetchCodevConfig(
 	}
 
 	const data = (await res.json()) as ConfigResponse;
-	if (!data.supabaseUrl || !data.supabaseAnonKey) {
+	if (!data.supabaseUrl || !data.supabaseAnonKey || !data.gatewayUrl) {
 		throw new Error(
 			`Backend /config returned incomplete payload: ${JSON.stringify(data)}`,
 		);
@@ -93,6 +95,7 @@ export async function fetchCodevConfig(
 	return {
 		supabaseUrl: data.supabaseUrl,
 		supabaseAnonKey: data.supabaseAnonKey,
+		gatewayUrl: data.gatewayUrl,
 	};
 }
 
@@ -101,7 +104,7 @@ export async function fetchCodevConfig(
 // back to AI_GATEWAY_URL when the saved key has no base_url (SSO-fetched
 // keys don't store one).
 function keyInfoUrl(baseUrl?: string): string {
-	const base = baseUrl ?? AI_GATEWAY_URL;
+	const base = baseUrl ?? AI_GATEWAY_URL();
 	const stripped = base.replace(/\/?v1\/?$/, "");
 	const trailing = stripped.endsWith("/") ? stripped : `${stripped}/`;
 	return `${trailing}key/info`;
@@ -139,7 +142,7 @@ export function isInvalidKeyError(err: unknown): boolean {
 // in /v1; manual baseUrls may or may not — normalize either way so we always
 // end up with exactly one /v1 segment before the suffix.
 function gatewayV1Url(baseUrl: string | undefined, suffix: string): string {
-	const base = baseUrl ?? AI_GATEWAY_OPENAI_URL;
+	const base = baseUrl ?? AI_GATEWAY_OPENAI_URL();
 	const withV1 = /\/v1\/?$/.test(base)
 		? base.replace(/\/$/, "")
 		: `${base.replace(/\/$/, "")}/v1`;

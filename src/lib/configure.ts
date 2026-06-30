@@ -513,7 +513,7 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 
 	const baseUrl = creds.baseUrl
 		? normalizeClaudeBaseUrl(creds.baseUrl)
-		: AI_GATEWAY_URL;
+		: AI_GATEWAY_URL();
 	const model = requireModel(creds);
 
 	writeJson(sourcePath, {
@@ -605,7 +605,7 @@ export function configureCodex(creds: Credentials): ConfigureResult[] {
 
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
-		: AI_GATEWAY_OPENAI_URL;
+		: AI_GATEWAY_OPENAI_URL();
 	const model = requireModel(creds);
 
 	writeToml(sourcePath, {
@@ -638,7 +638,7 @@ export function configureContinue(creds: Credentials): ConfigureResult[] {
 	// same normalization as Codex/OpenCode.
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
-		: AI_GATEWAY_OPENAI_URL;
+		: AI_GATEWAY_OPENAI_URL();
 	const defaultModel = requireModel(creds);
 	const allModels =
 		creds.models && creds.models.length > 0 ? creds.models : [defaultModel];
@@ -669,7 +669,7 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
-		: AI_GATEWAY_OPENAI_URL;
+		: AI_GATEWAY_OPENAI_URL();
 	const defaultModel = requireModel(creds);
 	// Fall back to [defaultModel] when `models` is unset so callers that don't
 	// know about the list (e.g. older fixtures, the fallback path with no
