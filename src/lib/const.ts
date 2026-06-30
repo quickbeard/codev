@@ -6,7 +6,7 @@ import pkg from "../../package.json" with { type: "json" };
 const BASE_URL = atob("aHR0cHM6Ly9uZXRtaW5kLnZpZXR0ZWwudm4=");
 export const BACKEND_URL = `${BASE_URL}/codev-proxy`;
 export const SSO_URL = `${BASE_URL}/sso-wrapper`;
-export const LOGIN_SUCCESS_URL = `${BASE_URL}/codev-landing-page`;
+export const LOGIN_SUCCESS_URL = `${BASE_URL}/codev-landing-page/oauth/success`;
 
 export const FALLBACK_MODEL = atob("TWluaU1heC9NaW5pTWF4LU0yLjc=");
 
