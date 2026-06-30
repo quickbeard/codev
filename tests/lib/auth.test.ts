@@ -352,7 +352,7 @@ describe("saveCodevConfig", () => {
 describe("refreshCodevConfig", () => {
 	test("fetches /config and writes Supabase coords and gateway URL into auth.json", async () => {
 		const fetchSpy = mockAuthFetch({
-			"/codev-proxy/config": async () =>
+			"/codev-backend/config": async () =>
 				new Response(
 					JSON.stringify({
 						supabaseUrl: "https://fresh.supabase.co",
@@ -377,7 +377,7 @@ describe("refreshCodevConfig", () => {
 
 	test("logs a warning and does not throw on failure", async () => {
 		const fetchSpy = mockAuthFetch({
-			"/codev-proxy/config": async () =>
+			"/codev-backend/config": async () =>
 				new Response(JSON.stringify({ error: "boom" }), { status: 502 }),
 		});
 		const logs: string[] = [];
@@ -480,7 +480,7 @@ describe("login", () => {
 		const logs: string[] = [];
 		const onReady = vi.fn();
 
-		// login() no longer refreshes CoDev config — every /codev-proxy/config
+		// login() no longer refreshes CoDev config — every /codev-backend/config
 		// call would be a violation. Spy on fetch so any stray call is visible.
 		const fetchSpy = mockAuthFetch({});
 
@@ -494,7 +494,7 @@ describe("login", () => {
 			expect(onReady).not.toHaveBeenCalled();
 
 			const configCalls = fetchSpy.mock.calls.filter((c: unknown[]) =>
-				String(c[0]).includes("/codev-proxy/config"),
+				String(c[0]).includes("/codev-backend/config"),
 			);
 			expect(configCalls).toHaveLength(0);
 		} finally {
@@ -573,7 +573,7 @@ describe("login refresh-token path", () => {
 
 		expect(result.access_token).toBe("refreshed-access");
 		const configCalls = fetchSpy.mock.calls.filter((c: unknown[]) =>
-			String(c[0]).includes("/codev-proxy/config"),
+			String(c[0]).includes("/codev-backend/config"),
 		);
 		expect(configCalls).toHaveLength(0);
 	});
@@ -779,7 +779,7 @@ describe("login full OAuth flow", () => {
 		);
 
 		const configCalls = fetchSpy.mock.calls.filter((c: unknown[]) =>
-			String(c[0]).includes("/codev-proxy/config"),
+			String(c[0]).includes("/codev-backend/config"),
 		);
 		expect(configCalls).toHaveLength(0);
 		const saved = JSON.parse(

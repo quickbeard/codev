@@ -164,7 +164,7 @@ describe("runUpload", () => {
 				typeof input === "string" || input instanceof URL
 					? String(input)
 					: input.url;
-			if (url.includes("/codev-proxy/config")) {
+			if (url.includes("/codev-backend/config")) {
 				return new Response(
 					JSON.stringify({
 						supabaseUrl: "https://test.supabase.co",
@@ -174,7 +174,7 @@ describe("runUpload", () => {
 					{ headers: { "Content-Type": "application/json" } },
 				);
 			}
-			if (url.includes("/codev-proxy/supabase/exchange")) {
+			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -231,7 +231,7 @@ describe("runUpload", () => {
 					? String(input)
 					: input.url;
 			calls.push(url);
-			if (url.includes("/codev-proxy/supabase/exchange")) {
+			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -303,7 +303,7 @@ describe("runUpload", () => {
 				typeof input === "string" || input instanceof URL
 					? String(input)
 					: input.url;
-			if (url.includes("/codev-proxy/supabase/exchange")) {
+			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -375,7 +375,7 @@ describe("runUpload", () => {
 					: input.url;
 
 			// backend /config: hand back fresh Supabase coords on refresh.
-			if (url.includes("/codev-proxy/config")) {
+			if (url.includes("/codev-backend/config")) {
 				configCalls++;
 				return new Response(
 					JSON.stringify({
@@ -386,7 +386,7 @@ describe("runUpload", () => {
 					{ headers: { "Content-Type": "application/json" } },
 				);
 			}
-			if (url.includes("/codev-proxy/supabase/exchange")) {
+			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -447,13 +447,13 @@ describe("runUpload", () => {
 				typeof input === "string" || input instanceof URL
 					? String(input)
 					: input.url;
-			if (url.includes("/codev-proxy/config")) {
+			if (url.includes("/codev-backend/config")) {
 				configCalls++;
 				return new Response("{}", {
 					headers: { "Content-Type": "application/json" },
 				});
 			}
-			if (url.includes("/codev-proxy/supabase/exchange")) {
+			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -501,7 +501,7 @@ describe("runUpload", () => {
 				typeof input === "string" || input instanceof URL
 					? String(input)
 					: input.url;
-			if (url.includes("/codev-proxy/config")) {
+			if (url.includes("/codev-backend/config")) {
 				configCalls++;
 				return new Response(
 					JSON.stringify({
@@ -512,7 +512,7 @@ describe("runUpload", () => {
 					{ headers: { "Content-Type": "application/json" } },
 				);
 			}
-			if (url.includes("/codev-proxy/supabase/exchange")) {
+			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -570,13 +570,13 @@ describe("runUpload", () => {
 				typeof input === "string" || input instanceof URL
 					? String(input)
 					: input.url;
-			if (url.includes("/codev-proxy/config")) {
+			if (url.includes("/codev-backend/config")) {
 				configCalls++;
 				return new Response("{}", {
 					headers: { "Content-Type": "application/json" },
 				});
 			}
-			if (url.includes("/codev-proxy/supabase/exchange")) {
+			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -630,7 +630,7 @@ describe("runUpload", () => {
 				typeof input === "string" || input instanceof URL
 					? String(input)
 					: input.url;
-			if (url.includes("/codev-proxy/supabase/exchange")) {
+			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
@@ -698,7 +698,7 @@ describe("runUpload", () => {
 				typeof input === "string" || input instanceof URL
 					? String(input)
 					: input.url;
-			if (url.includes("/codev-proxy/config")) {
+			if (url.includes("/codev-backend/config")) {
 				configCalls++;
 				return new Response(
 					JSON.stringify({
@@ -709,7 +709,7 @@ describe("runUpload", () => {
 					{ headers: { "Content-Type": "application/json" } },
 				);
 			}
-			if (url.includes("/codev-proxy/supabase/exchange")) {
+			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
 						access_token: "supabase-upload-token",
