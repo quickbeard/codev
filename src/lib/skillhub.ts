@@ -24,26 +24,33 @@ export interface SkillhubUser {
 	role: string;
 }
 
-// Pick the credential for an authenticated SkillHub request. A stored admin
-// cookie (local ADMIN/SUPERADMIN accounts from `codev login --admin`) wins;
-// otherwise we ride the SSO session, auto-refreshing the access token via
-// silentSso() so a background call never triggers an interactive login.
-async function skillhubAuthHeaders(): Promise<Record<string, string>> {
+// Pick the credential for a SkillHub request. A stored admin cookie (local
+// ADMIN/SUPERADMIN accounts from `codev login --admin`) wins; otherwise we ride
+// the SSO session, auto-refreshing the access token via silentSso() so a
+// background call never triggers an interactive login. When `optional` is set
+// (public endpoints like the hub listing), missing credentials yield no auth
+// header rather than an error.
+async function skillhubAuthHeaders(
+	optional: boolean,
+): Promise<Record<string, string>> {
 	const cookie = loadSkillhubCookie();
 	if (cookie) return { Cookie: cookie };
 
 	const auth = await silentSso();
-	if (!auth) {
-		throw new SkillhubAuthError(
-			"Not logged in to SkillHub. Run `codev login` (SSO) or `codev login --admin`.",
-		);
-	}
-	return { Authorization: `Bearer ${auth.access_token}` };
+	if (auth) return { Authorization: `Bearer ${auth.access_token}` };
+
+	if (optional) return {};
+	throw new SkillhubAuthError(
+		"Not logged in to SkillHub. Run `codev login` (SSO) or `codev login --admin`.",
+	);
 }
 
 export interface SkillhubFetchOptions extends RequestInit {
 	// Short label for the diagnostic log's `endpoint` field. Defaults to the path.
 	label?: string;
+	// Public endpoint: attach a credential if one is available, but don't require
+	// login. Default false — most endpoints need auth.
+	optionalAuth?: boolean;
 }
 
 // Authenticated fetch against the SkillHub registry. Prepends SKILLHUB_URL,
@@ -54,8 +61,8 @@ export async function skillhubFetch(
 	path: string,
 	opts: SkillhubFetchOptions = {},
 ): Promise<Response> {
-	const { label, headers, signal, ...rest } = opts;
-	const authHeaders = await skillhubAuthHeaders();
+	const { label, headers, signal, optionalAuth, ...rest } = opts;
+	const authHeaders = await skillhubAuthHeaders(optionalAuth ?? false);
 	const url = `${SKILLHUB_URL}${path.startsWith("/") ? path : `/${path}`}`;
 
 	const res = await loggedFetch(label ?? "skillhub.request", url, {
@@ -125,4 +132,55 @@ function extractSessionCookie(headers: Headers): string | null {
 		}
 	}
 	return null;
+}
+
+// A public skill as returned by GET /api/v1/hub/skills. The endpoint carries
+// more fields (metadata, author, counts, zipUrl); we type only what search
+// renders and ignore the rest.
+export interface HubSkill {
+	id: string;
+	name: string;
+	provider: string;
+	description: string;
+	version: string;
+	publishedAt: string | null;
+}
+
+export interface HubSearchResult {
+	// Total matches server-side (may exceed items.length when capped by limit).
+	total: number;
+	items: HubSkill[];
+}
+
+// Browse/search the public hub. Authentication is optional — the listing is
+// public — so a logged-out user can search; a stored session is attached when
+// present (e.g. so private-namespace context could apply server-side later).
+export async function listHubSkills(
+	opts: { search?: string; limit?: number } = {},
+): Promise<HubSearchResult> {
+	const params = new URLSearchParams();
+	if (opts.search) params.set("search", opts.search);
+	if (opts.limit) params.set("limit", String(opts.limit));
+	const qs = params.toString();
+
+	const res = await skillhubFetch(`/api/v1/hub/skills${qs ? `?${qs}` : ""}`, {
+		label: "skillhub.hub-skills",
+		optionalAuth: true,
+	});
+	if (!res.ok) {
+		throw new Error(`Skill search failed (${res.status}).`);
+	}
+
+	const body = (await res.json().catch(() => ({}))) as {
+		success?: boolean;
+		data?: HubSkill[];
+		pagination?: { total?: number };
+	};
+	if (!body.success || !body.data) {
+		throw new Error("SkillHub returned an unexpected response.");
+	}
+	return {
+		total: body.pagination?.total ?? body.data.length,
+		items: body.data,
+	};
 }

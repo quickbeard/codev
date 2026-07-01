@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { SKILLHUB_URL } from "@/lib/const.js";
 import {
+	listHubSkills,
 	SkillhubAuthError,
 	skillhubFetch,
 	skillhubSignIn,
@@ -174,5 +175,78 @@ describe("skillhubSignIn", () => {
 		await expect(skillhubSignIn("root", "pw")).rejects.toThrow(
 			/no session cookie/i,
 		);
+	});
+});
+
+describe("listHubSkills", () => {
+	const HUB = {
+		success: true,
+		data: [
+			{
+				id: "id-1",
+				name: "pg-tuner",
+				provider: "viettel",
+				description: "Tune Postgres",
+				version: "1.2.0",
+				publishedAt: "2026-06-01",
+			},
+		],
+		pagination: { total: 7 },
+	};
+
+	test("works logged out (optional auth) and passes search + limit", async () => {
+		seedAuth({}); // no cookie, no SSO session
+		const spy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, HUB));
+
+		const result = await listHubSkills({ search: "postgres", limit: 5 });
+
+		expect(spy).toHaveBeenCalledTimes(1);
+		const url = new URL(String(spy.mock.calls[0]?.[0]));
+		expect(url.pathname).toBe("/netmindhub/api/v1/hub/skills");
+		expect(url.searchParams.get("search")).toBe("postgres");
+		expect(url.searchParams.get("limit")).toBe("5");
+		// No credential available → no auth header, but no throw either.
+		const h = headersOf(lastInit());
+		expect(h.Authorization).toBeUndefined();
+		expect(h.Cookie).toBeUndefined();
+
+		expect(result.total).toBe(7);
+		expect(result.items).toHaveLength(1);
+		expect(result.items[0]?.name).toBe("pg-tuner");
+	});
+
+	test("attaches a stored session when one exists", async () => {
+		seedAuth({ skillhub_cookie: "skill-hub-session=abc" });
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(200, HUB));
+
+		await listHubSkills();
+
+		expect(headersOf(lastInit()).Cookie).toBe("skill-hub-session=abc");
+	});
+
+	test("falls back to items.length when pagination.total is absent", async () => {
+		seedAuth({});
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, { success: true, data: HUB.data }),
+		);
+		expect((await listHubSkills()).total).toBe(1);
+	});
+
+	test("throws on a non-2xx response", async () => {
+		seedAuth({});
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(500, { success: false }),
+		);
+		await expect(listHubSkills()).rejects.toThrow(/failed \(500\)/);
+	});
+
+	test("throws on an unexpected body shape", async () => {
+		seedAuth({});
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, { success: false }),
+		);
+		await expect(listHubSkills()).rejects.toThrow(/unexpected response/i);
 	});
 });
