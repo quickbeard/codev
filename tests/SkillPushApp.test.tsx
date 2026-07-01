@@ -96,7 +96,6 @@ describe("SkillPushApp login gate", () => {
 
 		expect(authSpy).toHaveBeenCalled();
 		expect(loginSpy).not.toHaveBeenCalled();
-		expect(frameText(lastFrame)).not.toContain("Sign in to publish");
 	});
 
 	test("logged out: confirm triggers the login step, then publishes", async () => {
@@ -107,18 +106,31 @@ describe("SkillPushApp login gate", () => {
 
 		const { stdin, lastFrame } = renderApp();
 
-		await answerConfirm(
-			stdin,
-			lastFrame,
-			"y",
-			() =>
-				pub.mock.calls.length > 0 ||
-				frameText(lastFrame).includes("Sign in to publish"),
-		);
+		await answerConfirm(stdin, lastFrame, "y", () => pub.mock.calls.length > 0);
 		await waitFor(() => pub.mock.calls.length > 0);
 		await waitFor(() => frameText(lastFrame).includes("Published skill sk-1"));
 
 		expect(loginSpy).toHaveBeenCalled();
+	});
+
+	test("keeps the preview visible when the login step appears", async () => {
+		vi.spyOn(skillhub, "hasSkillhubAuth").mockResolvedValue(false);
+		// Hold login pending so the app stays in the login phase.
+		vi.spyOn(auth, "login").mockReturnValue(
+			new Promise<auth.AuthData>(() => {}),
+		);
+
+		const { stdin, lastFrame } = renderApp();
+
+		await answerConfirm(stdin, lastFrame, "y", () =>
+			frameText(lastFrame).includes("Login"),
+		);
+
+		const frame = frameText(lastFrame);
+		// Both steps on screen at once: the archive preview AND the login step.
+		expect(frame).toContain("pg-tuner.zip");
+		expect(frame).toContain("Upload and submit for review.");
+		expect(frame).toContain("Login");
 	});
 
 	test("cancelling at the confirm never checks auth or publishes", async () => {

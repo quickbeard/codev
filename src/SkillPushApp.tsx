@@ -3,8 +3,9 @@ import Spinner from "ink-spinner";
 import { useCallback, useEffect, useState } from "react";
 import { Banner } from "@/components/Banner.js";
 import { Frame } from "@/components/Frame.js";
-import { Login } from "@/components/Login.js";
+import { Login, loginTitle } from "@/components/Login.js";
 import { Step } from "@/components/Step.js";
+import type { AuthData } from "@/lib/auth.js";
 import {
 	formatPublishResult,
 	type PublishArchive,
@@ -73,6 +74,10 @@ export function SkillPushApp({
 	const [archive, setArchive] = useState<PublishArchive | null>(null);
 	const [result, setResult] = useState<PublishResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	// Whether the flow fell into the login step (so it stays rendered afterwards),
+	// and the email to show once signed in.
+	const [neededLogin, setNeededLogin] = useState(false);
+	const [loginEmail, setLoginEmail] = useState<string | null>(null);
 
 	const opts: PublishOpts = { draftOnly, autoApprove };
 	const steps = plannedSteps(opts);
@@ -138,6 +143,16 @@ export function SkillPushApp({
 		}
 	}, [archive, draftOnly, autoApprove, finish]);
 
+	// Login succeeded: record who, then publish. login() has already persisted
+	// the session, so the upcoming skillhubFetch calls pick it up.
+	const handleLoginDone = useCallback(
+		(authData: AuthData) => {
+			setLoginEmail(authData.user.email);
+			void start();
+		},
+		[start],
+	);
+
 	useInput(
 		(input, key) => {
 			if (phase !== "confirm") return;
@@ -162,32 +177,47 @@ export function SkillPushApp({
 		hasSkillhubAuth()
 			.then((ok) => {
 				if (cancelled) return;
-				if (ok) void start();
-				else setPhase("login");
+				if (ok) {
+					void start();
+				} else {
+					setNeededLogin(true);
+					setPhase("login");
+				}
 			})
 			.catch(() => {
-				if (!cancelled) setPhase("login");
+				if (cancelled) return;
+				setNeededLogin(true);
+				setPhase("login");
 			});
 		return () => {
 			cancelled = true;
 		};
 	}, [phase, start]);
 
+	// Whether publishing has begun (any step left "pending"), so the progress
+	// step stays rendered even after an error mid-pipeline.
+	const started = Object.values(stepState).some((s) => s !== "pending");
+
 	return (
 		<Box flexDirection="column" padding={1}>
 			<Banner />
 			<Frame tag="CoDev">
-				<Step active title={<Text bold>Publish skill to the hub</Text>}>
-					{phase === "preparing" && (
+				{/* Step 1 — archive preview + confirm. Stays visible (dimmed) through
+				    login and publishing so the user always sees what they're shipping. */}
+				<Step
+					active={
+						phase === "preparing" || phase === "confirm" || phase === "authing"
+					}
+					title={<Text bold>Publish skill to the hub</Text>}
+				>
+					{phase === "preparing" ? (
 						<Box>
 							<Text color="cyan">
 								<Spinner />
 							</Text>
 							<Text>{" Preparing archive..."}</Text>
 						</Box>
-					)}
-
-					{phase === "confirm" && archive && (
+					) : archive ? (
 						<Box flexDirection="column">
 							<Text>
 								{`${archive.fileName}  (${archive.files.length} file${
@@ -211,63 +241,83 @@ export function SkillPushApp({
 							)}
 							<Box marginTop={1} flexDirection="column">
 								<Text dimColor>{actionSummary(opts)}</Text>
-								<Text>
-									Publish this skill? <Text color="cyan">(y/N)</Text>
-								</Text>
+								{phase === "confirm" && (
+									<Text>
+										Publish this skill? <Text color="cyan">(y/N)</Text>
+									</Text>
+								)}
+								{phase === "authing" && (
+									<Box>
+										<Text color="cyan">
+											<Spinner />
+										</Text>
+										<Text>{" Checking sign-in..."}</Text>
+									</Box>
+								)}
 							</Box>
 						</Box>
-					)}
-
-					{phase === "authing" && (
-						<Box>
-							<Text color="cyan">
-								<Spinner />
-							</Text>
-							<Text>{" Checking sign-in..."}</Text>
-						</Box>
-					)}
-
-					{phase === "login" && (
-						<Box flexDirection="column">
-							<Text dimColor>Sign in to publish to the hub:</Text>
-							<Login onDone={() => void start()} />
-						</Box>
-					)}
-
-					{(phase === "publishing" || phase === "done") && (
-						<Box flexDirection="column">
-							{steps.map((step) => {
-								const state = stepState[step];
-								return (
-									<Box key={step}>
-										{state === "running" ? (
-											<Text color="cyan">
-												<Spinner />
-											</Text>
-										) : (
-											<Text color={state === "done" ? "green" : "gray"}>
-												{state === "done" ? "✓" : "○"}
-											</Text>
-										)}
-										<Text
-											color={state === "pending" ? "gray" : undefined}
-										>{` ${STEP_LABELS[step]}`}</Text>
-									</Box>
-								);
-							})}
-							{phase === "done" && result && (
-								<Box marginTop={1}>
-									<Text color={json ? undefined : "green"}>
-										{formatPublishResult(result, json)}
-									</Text>
-								</Box>
-							)}
-						</Box>
-					)}
-
-					{phase === "cancelled" && <Text dimColor>Cancelled.</Text>}
-					{phase === "error" && error && <Text color="red">{error}</Text>}
+					) : null}
 				</Step>
+
+				{/* Step 2 — login, only when the user wasn't already signed in. Once
+				    done it stays as a "✓ Signed in" line above the publish progress. */}
+				{neededLogin && (
+					<Step active={phase === "login"} title={loginTitle()}>
+						{phase === "login" ? (
+							<Login onDone={handleLoginDone} />
+						) : (
+							<Text color="green">
+								{`✓ Signed in${loginEmail ? ` as ${loginEmail}` : ""}`}
+							</Text>
+						)}
+					</Step>
+				)}
+
+				{/* Step 3 — publish progress + result. */}
+				{(phase === "publishing" || phase === "done" || started) && (
+					<Step
+						active={phase === "publishing"}
+						title={<Text bold>Publishing</Text>}
+					>
+						{steps.map((step) => {
+							const state = stepState[step];
+							return (
+								<Box key={step}>
+									{state === "running" ? (
+										<Text color="cyan">
+											<Spinner />
+										</Text>
+									) : (
+										<Text color={state === "done" ? "green" : "gray"}>
+											{state === "done" ? "✓" : "○"}
+										</Text>
+									)}
+									<Text
+										color={state === "pending" ? "gray" : undefined}
+									>{` ${STEP_LABELS[step]}`}</Text>
+								</Box>
+							);
+						})}
+						{phase === "done" && result && (
+							<Box marginTop={1}>
+								<Text color={json ? undefined : "green"}>
+									{formatPublishResult(result, json)}
+								</Text>
+							</Box>
+						)}
+					</Step>
+				)}
+
+				{phase === "cancelled" && (
+					<Box marginTop={1}>
+						<Text dimColor>Cancelled.</Text>
+					</Box>
+				)}
+				{phase === "error" && error && (
+					<Box marginTop={1}>
+						<Text color="red">{error}</Text>
+					</Box>
+				)}
 			</Frame>
 		</Box>
 	);
