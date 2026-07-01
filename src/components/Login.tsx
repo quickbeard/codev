@@ -27,8 +27,10 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 	// Set once login() resolves. The parent advances but keeps this Step mounted
 	// as read-only history, so without this the pre-URL / waiting spinner would
 	// keep animating (and flickering) forever — and misleadingly say "Starting
-	// sign-in..." after we're already done.
+	// sign-in..." after we're already done. `doneAuth` carries the resolved
+	// identity so the completed frame shows a green "Signed in as <email>" line.
 	const [completed, setCompleted] = useState(false);
+	const [doneAuth, setDoneAuth] = useState<AuthData | null>(null);
 
 	// The paste field goes live with the fallback. Until then keystrokes are
 	// ignored, so the lone-"c" copy shortcut and the paste input never compete
@@ -50,6 +52,7 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 		setShowFallback(false);
 		setCopied(false);
 		setCompleted(false);
+		setDoneAuth(null);
 		paste.reset();
 
 		login(addLog, (openBrowserFn, url, submitManualCode) => {
@@ -61,8 +64,9 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 			openBrowserFn();
 		})
 			.then((auth) => {
-				// Freeze the UI to a static log history before handing off, so the
-				// kept-mounted Step stops spinning once we're done.
+				// Freeze the UI to a static "signed in" line before handing off, so
+				// the kept-mounted Step stops spinning once we're done.
+				setDoneAuth(auth);
 				setCompleted(true);
 				onDone(auth);
 			})
@@ -118,19 +122,17 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 		);
 	}
 
-	// Login resolved: render the log history statically (no spinner). Covers the
-	// already-logged-in path (onReady never fires, so authUrl stays null) and
-	// the normal success path alike — in both, the parent keeps this Step
-	// mounted as history and a live spinner would just churn.
+	// Login resolved: render a static green "Signed in as <email>" line (no
+	// spinner, no transient log history). Covers the already-logged-in path
+	// (onReady never fires, so authUrl stays null) and the normal success path
+	// alike — in both, the parent keeps this Step mounted and a live spinner
+	// would just churn. Every caller (install, config, standalone login) gets
+	// this line for free instead of hand-rolling its own.
 	if (completed) {
 		return (
-			<Box flexDirection="column">
-				{logs.map((log, i) => (
-					<Text key={`login-${i.toString()}`} dimColor>
-						{log}
-					</Text>
-				))}
-			</Box>
+			<Text color="green">
+				{`✓ Signed in${doneAuth ? ` as ${doneAuth.user.email}` : ""}`}
+			</Text>
 		);
 	}
 

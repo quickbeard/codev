@@ -41,8 +41,8 @@ describe("LoginApp", () => {
 		await new Promise((r) => setTimeout(r, 200));
 
 		const history = allFrames(frames);
-		expect(history).toContain("Already logged in as test@example.com");
-		expect(history).toContain("✓ Logged in as test@example.com");
+		// <Login>'s completed state renders the green signed-in line.
+		expect(history).toContain("✓ Signed in as test@example.com");
 	});
 
 	test("refreshes the Supabase config with the new access token", async () => {

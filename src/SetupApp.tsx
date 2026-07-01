@@ -610,15 +610,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 					step !== "editor-select" &&
 					step !== "confirm" && (
 						<Step active={step === "login"} title={loginTitle()}>
-							{step === "login" ? (
-								<Login onDone={handleLoginDone} />
-							) : (
-								auth && (
-									<Text color="green">
-										{`✓ Signed in as ${auth.user.email}`}
-									</Text>
-								)
-							)}
+							<Login onDone={handleLoginDone} />
 						</Step>
 					)}
 				{(mode === "install" ||
