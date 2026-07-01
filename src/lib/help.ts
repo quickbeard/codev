@@ -26,5 +26,10 @@ Commands:
   remove              Revert this machine to its pre-CoDev state (--yes to skip prompt)
   --version, -v       Show version
   --help, -h          Show this help
+
+Skill hub:
+  skill search [q]    Search the public skill hub
+                      (--json for machine-readable output,
+                      --limit <n> to cap results, default 20)
 `);
 }

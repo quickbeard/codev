@@ -26,6 +26,7 @@ import {
 	type ShimAgent,
 	uninstallShims,
 } from "@/lib/shims.js";
+import { runSkillSearch } from "@/lib/skill-search.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
 import { ModelApp } from "@/ModelApp.js";
 import { RemoveApp } from "@/RemoveApp.js";
@@ -181,6 +182,22 @@ switch (command) {
 			process.exit(1);
 		}
 		process.exit(runRestore(toolForRestoreAgent(agent as RestoreAgent)));
+		break;
+	}
+	// `skill <subcommand>`: operations against the SkillHub registry. Namespaced
+	// so it doesn't collide with `codev install` (which installs agents). Only
+	// `search` today; install/publish/whoami migrate here next.
+	case "skill": {
+		const [sub, ...rest] = args;
+		if (sub === "search") {
+			process.exit(await runSkillSearch(rest));
+		}
+		console.error(
+			sub === undefined
+				? "Usage: codev skill search [query] [--json] [--limit <n>]"
+				: `Unknown skill subcommand: ${sub}. Valid: search.`,
+		);
+		process.exit(1);
 		break;
 	}
 	case "claude":
