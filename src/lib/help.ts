@@ -22,7 +22,7 @@ Commands:
                       (--path newest file, --trace <id> one run, --verbose extra detail)
   login               Sign in to SSO (--force to bypass cached session,
                       --admin for admin username/password sign-in)
-  logout              Sign out of SSO
+  logout              Sign out (SSO and admin session)
   remove              Revert this machine to its pre-CoDev state (--yes to skip prompt)
   --version, -v       Show version
   --help, -h          Show this help
