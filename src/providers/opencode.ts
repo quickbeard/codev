@@ -56,6 +56,23 @@ function canonical(p: string): string {
 	}
 }
 
+// OpenCode records project/session paths POSIX-style — forward slashes even on
+// Windows (e.g. it stores "C:/Users/me/project" while Node's realpathSync
+// returns "C:\\Users\\me\\project"). It can also capture a different
+// drive-letter case than the shell the user later runs `codev upload` from. A
+// raw `worktree = ?` / `directory = ?` equality check therefore misses, and the
+// provider reports "No conversations found" for a project that was in fact used.
+// Normalize both sides for comparison: unify separators, uppercase a leading
+// drive letter, and NFC-normalize Unicode. This is match-only — the actual
+// stored string is still used for the follow-up session query so it stays exact.
+function normalizePathForMatch(p: string): string {
+	const unified = p.normalize("NFC").replace(/\\/g, "/");
+	return unified.replace(
+		/^([a-zA-Z]):/,
+		(_m, drive: string) => `${drive.toUpperCase()}:`,
+	);
+}
+
 interface ProjectMatch {
 	projectId: string;
 	directoryFilter: string;
@@ -94,21 +111,37 @@ interface PartRow {
 // sessions under a "global" project, distinguished by the session's own
 // `directory` column.
 function resolveProject(db: DB, cwd: string): ProjectMatch | null {
-	const target = canonical(cwd);
-	const direct = db
-		.prepare<[string], { id: string }>(
-			"SELECT id FROM project WHERE worktree = ?",
-		)
-		.get(target);
-	if (direct?.id) return { projectId: direct.id, directoryFilter: "" };
+	const target = normalizePathForMatch(canonical(cwd));
 
-	const fallback = db
-		.prepare<[string], { count: number }>(
-			"SELECT COUNT(*) as count FROM session WHERE project_id = 'global' AND directory = ?",
+	// Compare normalized worktrees in JS rather than via `worktree = ?` — the
+	// stored value may use forward slashes / a different drive-letter case than
+	// realpathSync yields. The project table is tiny, so scanning it is cheap.
+	const projects = db
+		.prepare<[], { id: string; worktree: string | null }>(
+			"SELECT id, worktree FROM project",
 		)
-		.get(target);
-	if (fallback && fallback.count > 0) {
-		return { projectId: "global", directoryFilter: target };
+		.all();
+	for (const project of projects) {
+		if (
+			project.worktree &&
+			normalizePathForMatch(project.worktree) === target
+		) {
+			return { projectId: project.id, directoryFilter: "" };
+		}
+	}
+
+	// Global fallback: VCS-less sessions live under project_id='global',
+	// distinguished by their own `directory`. Match on the normalized form but
+	// return the exact stored string so the follow-up session query stays exact.
+	const globalDirs = db
+		.prepare<[], { directory: string | null }>(
+			"SELECT DISTINCT directory FROM session WHERE project_id = 'global'",
+		)
+		.all();
+	for (const row of globalDirs) {
+		if (row.directory && normalizePathForMatch(row.directory) === target) {
+			return { projectId: "global", directoryFilter: row.directory };
+		}
 	}
 	return null;
 }

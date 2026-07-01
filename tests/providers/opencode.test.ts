@@ -172,6 +172,60 @@ describe("openCodeProvider.detect", () => {
 		db.close();
 		expect(await openCodeProvider.detect(projectCwd)).toBe(true);
 	});
+
+	// Regression: OpenCode records paths POSIX-style (forward slashes) even on
+	// Windows, while realpathSync returns native separators — so on the user's
+	// machine session.directory was "D:/Viettel/…" while codev queried with
+	// "D:\\Viettel\\…" and the exact `directory = ?` match missed. We can't make
+	// realpathSync emit backslashes on POSIX CI, so simulate the inverse: store
+	// the directory with the separator flipped from what canonical(cwd) yields.
+	test("falls back to global project when stored directory uses a different path separator", async () => {
+		const db = new Database(dbPath);
+		createSchema(db);
+		run(db, "INSERT INTO project (id, worktree) VALUES (?, ?)", [
+			"global",
+			"/",
+		]);
+		run(
+			db,
+			"INSERT INTO session (id, project_id, slug, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			[
+				"ses-global",
+				"global",
+				"slug",
+				"Title",
+				projectCwd.replace(/\//g, "\\"),
+				Math.floor(Date.UTC(2026, 3, 27, 18, 32, 5) / 1000),
+				Math.floor(Date.UTC(2026, 3, 27, 18, 32, 5) / 1000),
+			],
+		);
+		db.close();
+		expect(await openCodeProvider.detect(projectCwd)).toBe(true);
+	});
+
+	test("matches a project worktree despite path-separator differences", async () => {
+		const db = new Database(dbPath);
+		createSchema(db);
+		run(db, "INSERT INTO project (id, worktree) VALUES (?, ?)", [
+			"proj-1",
+			projectCwd.replace(/\//g, "\\"),
+		]);
+		run(
+			db,
+			"INSERT INTO session (id, project_id, slug, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			[
+				"ses-1",
+				"proj-1",
+				"slug",
+				"Title",
+				projectCwd,
+				Math.floor(Date.UTC(2026, 3, 27, 18, 32, 5) / 1000),
+				Math.floor(Date.UTC(2026, 3, 27, 18, 32, 5) / 1000),
+			],
+		);
+		db.close();
+		expect(await openCodeProvider.detect(projectCwd)).toBe(true);
+	});
 });
 
 describe("openCodeProvider.listSessions", () => {

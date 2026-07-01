@@ -110,6 +110,18 @@ describe("claudeCodeProvider.describeTarget", () => {
 			join(tempHome, ".claude", "projects", claudeProjectDirName(cwd)),
 		);
 	});
+
+	// Claude munges NFC(realpath(cwd)); an NFD path (decomposed accents, as some
+	// filesystems surface) must resolve to the same folder as its NFC form, or a
+	// non-ASCII project silently misses. Both cwds are non-existent, so mungeCwd
+	// falls back to normalizing the raw path.
+	test("normalizes an NFD cwd to NFC so it matches the folder Claude writes", () => {
+		const nfd = join(tempHome, "proj", "café".normalize("NFD"));
+		const nfc = join(tempHome, "proj", "café".normalize("NFC"));
+		expect(claudeCodeProvider.describeTarget(nfd)).toBe(
+			claudeCodeProvider.describeTarget(nfc),
+		);
+	});
 });
 
 describe("claudeCodeProvider.detect", () => {
@@ -121,6 +133,39 @@ describe("claudeCodeProvider.detect", () => {
 		const otherCwd = join(tempHome, "other");
 		mkdirSync(otherCwd, { recursive: true });
 		expect(await claudeCodeProvider.detect(otherCwd)).toBe(false);
+	});
+
+	// Claude preserves the drive-letter case realpath yielded when the session
+	// ran, which can differ from the case reported at upload time (`D:\x` vs
+	// `d:\x` -> `D--x` vs `d--x`). Detection must still find it. Windows/macOS
+	// resolve this via their case-insensitive FS; on case-sensitive filesystems
+	// the provider's case-insensitive scan of the projects root covers it.
+	// Claude stores sessions under `CLAUDE_CONFIG_DIR/projects` when that env var
+	// is set; codev must look there too rather than hardcoding ~/.claude. Use a
+	// cwd whose folder exists ONLY under the override, so the test fails if the
+	// env var is ignored (the default ~/.claude has no folder for it).
+	test("honors CLAUDE_CONFIG_DIR when locating the projects dir", async () => {
+		const altConfig = join(tempHome, "alt-claude-config");
+		vi.stubEnv("CLAUDE_CONFIG_DIR", altConfig);
+		const altCwd = join(tempHome, "works", "AltApp");
+		mkdirSync(altCwd, { recursive: true });
+		mkdirSync(
+			join(altConfig, "projects", claudeProjectDirName(realpathSync(altCwd))),
+			{ recursive: true },
+		);
+		expect(await claudeCodeProvider.detect(altCwd)).toBe(true);
+	});
+
+	test("detects a project whose folder name differs only by case", async () => {
+		const otherCwd = join(tempHome, "works", "CaseApp");
+		mkdirSync(otherCwd, { recursive: true });
+		const expected = claudeProjectDirName(realpathSync(otherCwd));
+		// Store the folder under a case-swapped name (all-caps differs from the
+		// mixed-case munge, since the temp path contributes lowercase segments).
+		mkdirSync(join(tempHome, ".claude", "projects", expected.toUpperCase()), {
+			recursive: true,
+		});
+		expect(await claudeCodeProvider.detect(otherCwd)).toBe(true);
 	});
 });
 
