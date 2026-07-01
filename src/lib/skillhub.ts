@@ -184,3 +184,56 @@ export async function listHubSkills(
 		items: body.data,
 	};
 }
+
+export interface SkillMeta {
+	id: string;
+	name: string;
+	version?: string;
+}
+
+// Resolve a skill's canonical metadata by id OR name — the server's
+// GET /api/v1/skills/<target> accepts either. Public for PUBLIC skills (optional
+// auth). Used to show the real name (never a raw UUID) before download and to
+// name the install directory.
+export async function getSkillMeta(target: string): Promise<SkillMeta> {
+	const res = await skillhubFetch(
+		`/api/v1/skills/${encodeURIComponent(target)}`,
+		{ label: "skillhub.detail", optionalAuth: true },
+	);
+	if (res.status === 404) {
+		throw new Error(`Skill "${target}" not found or not public.`);
+	}
+	if (!res.ok) {
+		throw new Error(`Skill lookup failed (${res.status}).`);
+	}
+	const body = (await res.json().catch(() => ({}))) as {
+		success?: boolean;
+		data?: { id?: string; name?: string; version?: string };
+	};
+	if (!body.success || !body.data?.id || !body.data.name) {
+		throw new Error("SkillHub returned an unexpected response.");
+	}
+	return {
+		id: body.data.id,
+		name: body.data.name,
+		version: body.data.version,
+	};
+}
+
+// Download a skill's ZIP by id. Public for PUBLIC skills (optional auth); a
+// stored session is attached when present so a private-namespace skill the user
+// can see also downloads. Returns the raw ZIP bytes; 404 → a clear
+// not-found/not-public error.
+export async function downloadSkill(id: string): Promise<Buffer> {
+	const res = await skillhubFetch(`/api/v1/skills/${id}/download`, {
+		label: "skillhub.download",
+		optionalAuth: true,
+	});
+	if (res.status === 404) {
+		throw new Error(`Skill "${id}" not found or not public.`);
+	}
+	if (!res.ok) {
+		throw new Error(`Download failed (${res.status}).`);
+	}
+	return Buffer.from(await res.arrayBuffer());
+}

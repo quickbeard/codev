@@ -26,10 +26,12 @@ import {
 	type ShimAgent,
 	uninstallShims,
 } from "@/lib/shims.js";
+import { parsePullArgs, runSkillInstall } from "@/lib/skill-install.js";
 import { runSkillSearch } from "@/lib/skill-search.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
 import { ModelApp } from "@/ModelApp.js";
 import { RemoveApp } from "@/RemoveApp.js";
+import { SkillPullApp } from "@/SkillPullApp.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
 
@@ -185,17 +187,54 @@ switch (command) {
 		break;
 	}
 	// `skill <subcommand>`: operations against the SkillHub registry. Namespaced
-	// so it doesn't collide with `codev install` (which installs agents). Only
-	// `search` today; install/publish/whoami migrate here next.
+	// so it doesn't collide with `codev install` (which installs agents).
+	// `pull` downloads/installs a skill (not `install`, to avoid that confusion);
+	// publish/whoami migrate here next.
 	case "skill": {
 		const [sub, ...rest] = args;
 		if (sub === "search") {
 			process.exit(await runSkillSearch(rest));
 		}
+		if (sub === "pull") {
+			const parsed = parsePullArgs(rest);
+			if (parsed.error) {
+				console.error(parsed.error);
+				process.exit(1);
+			}
+			if (!parsed.target) {
+				console.error(
+					"Usage: codev skill pull <name|id> [--dir <path>] [--force] [--json]",
+				);
+				process.exit(1);
+			}
+			// Interactive + no explicit --dir: prompt for the location (Ink).
+			// Otherwise (--dir given, or piped/CI) go the plain non-interactive path.
+			const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+			if (parsed.dir === undefined && interactive) {
+				let ok = true;
+				const { waitUntilExit } = render(
+					<SkillPullApp
+						target={parsed.target}
+						force={parsed.force}
+						json={parsed.json}
+						onDone={(v) => {
+							ok = v;
+						}}
+					/>,
+				);
+				try {
+					await waitUntilExit();
+				} catch {
+					process.exit(1);
+				}
+				process.exit(ok ? 0 : 1);
+			}
+			process.exit(await runSkillInstall(rest));
+		}
 		console.error(
 			sub === undefined
-				? "Usage: codev skill search [query] [--json] [--limit <n>]"
-				: `Unknown skill subcommand: ${sub}. Valid: search.`,
+				? "Usage: codev skill <search|pull> ..."
+				: `Unknown skill subcommand: ${sub}. Valid: search, pull.`,
 		);
 		process.exit(1);
 		break;

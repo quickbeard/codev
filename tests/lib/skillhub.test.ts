@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { SKILLHUB_URL } from "@/lib/const.js";
 import {
+	downloadSkill,
 	listHubSkills,
 	SkillhubAuthError,
 	skillhubFetch,
@@ -248,5 +249,42 @@ describe("listHubSkills", () => {
 			jsonResponse(200, { success: false }),
 		);
 		await expect(listHubSkills()).rejects.toThrow(/unexpected response/i);
+	});
+});
+
+describe("downloadSkill", () => {
+	test("returns the raw ZIP bytes on 200 (public, logged out)", async () => {
+		seedAuth({});
+		const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04]); // "PK\x03\x04"
+		const spy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response(bytes, { status: 200 }));
+
+		const buf = await downloadSkill("id-1");
+
+		expect(String(spy.mock.calls[0]?.[0])).toBe(
+			`${SKILLHUB_URL}/api/v1/skills/id-1/download`,
+		);
+		expect(Buffer.isBuffer(buf)).toBe(true);
+		expect([...buf]).toEqual([0x50, 0x4b, 0x03, 0x04]);
+		expect(headersOf(lastInit()).Authorization).toBeUndefined();
+	});
+
+	test("gives a not-found/not-public message on 404", async () => {
+		seedAuth({});
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response("", { status: 404 }),
+		);
+		await expect(downloadSkill("missing")).rejects.toThrow(
+			/not found or not public/i,
+		);
+	});
+
+	test("throws on other non-2xx", async () => {
+		seedAuth({});
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response("", { status: 500 }),
+		);
+		await expect(downloadSkill("x")).rejects.toThrow(/failed \(500\)/);
 	});
 });
