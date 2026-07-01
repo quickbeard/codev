@@ -8,9 +8,17 @@ import AdmZip from "adm-zip";
 const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES = 10_000;
 
-// Directories never bundled into a skill archive: VCS metadata and dependency
-// trees. Excluded wholesale (their contents are not walked).
-const IGNORED_DIRS = new Set([".git", ".svn", ".hg", "node_modules"]);
+// Directories never bundled into a skill archive: VCS metadata, dependency
+// trees, and local test/log output. Excluded wholesale (their contents are not
+// walked).
+const IGNORED_DIRS = new Set([
+	".git",
+	".svn",
+	".hg",
+	"node_modules",
+	"tests",
+	"logs",
+]);
 
 // Files never bundled: OS junk plus common secret-bearing files. Publishing a
 // skill dir must not silently ship a `.env`, private key, or npm token to a hub

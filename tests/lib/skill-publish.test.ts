@@ -124,6 +124,8 @@ describe("preparePublishArchive", () => {
 			"scripts/run.sh": "echo hi",
 			".env": "SECRET=1",
 			".DS_Store": "junk",
+			"tests/run.test.sh": "echo test",
+			"logs/run.log": "log line",
 		});
 		mkdirSync(join(dir, ".git"), { recursive: true });
 		writeFileSync(join(dir, ".git", "config"), "[core]");
@@ -136,6 +138,8 @@ describe("preparePublishArchive", () => {
 		expect(a.skipped).toContain(".env");
 		expect(a.skipped).toContain(".DS_Store");
 		expect(a.skipped).toContain(".git/");
+		expect(a.skipped).toContain("tests/");
+		expect(a.skipped).toContain("logs/");
 
 		// The excluded files really are absent from the produced archive.
 		const names = new AdmZip(a.zipBuffer).getEntries().map((e) => e.entryName);
@@ -143,6 +147,8 @@ describe("preparePublishArchive", () => {
 		expect(names).toContain("pg-tuner/scripts/run.sh");
 		expect(names.some((n) => n.includes(".env"))).toBe(false);
 		expect(names.some((n) => n.includes(".git"))).toBe(false);
+		expect(names.some((n) => n.includes("tests/"))).toBe(false);
+		expect(names.some((n) => n.includes("logs/"))).toBe(false);
 	});
 
 	test("rejects a directory with no SKILL.md", async () => {
