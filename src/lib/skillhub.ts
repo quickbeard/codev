@@ -5,6 +5,8 @@ import { loggedFetch } from "@/lib/log.js";
 // SkillHub handshakes are quick JSON requests — cap them so a stalled registry
 // surfaces as an error instead of hanging the CLI.
 const SKILLHUB_TIMEOUT_MS = 15_000;
+// A skill upload ships an entire ZIP — allow much longer than a handshake.
+const SKILLHUB_UPLOAD_TIMEOUT_MS = 120_000;
 const SESSION_COOKIE_NAME = "skill-hub-session";
 
 // Thrown when SkillHub can't authenticate the request at all (no local
@@ -43,6 +45,20 @@ async function skillhubAuthHeaders(
 	throw new SkillhubAuthError(
 		"Not logged in to SkillHub. Run `codev login` (SSO) or `codev login --admin`.",
 	);
+}
+
+// True when a SkillHub credential is available without prompting the user — a
+// stored admin cookie, or an SSO session (refreshed silently if the access token
+// expired). Mirrors the credential selection in skillhubFetch, so `skill push`
+// can offer an interactive login only when the user is genuinely logged out.
+// Never throws.
+export async function hasSkillhubAuth(): Promise<boolean> {
+	if (loadSkillhubCookie()) return true;
+	try {
+		return (await silentSso()) !== null;
+	} catch {
+		return false;
+	}
 }
 
 export interface SkillhubFetchOptions extends RequestInit {
@@ -218,6 +234,103 @@ export async function getSkillMeta(target: string): Promise<SkillMeta> {
 		name: body.data.name,
 		version: body.data.version,
 	};
+}
+
+// Server response to a skill upload. The skill lands in PENDING; `skill_id`
+// identifies it for the metadata/submit steps that follow.
+export interface UploadResponse {
+	success: boolean;
+	skill_id?: string;
+	status?: string;
+	message?: string;
+	errors?: { code: string; message: string; field?: string }[];
+}
+
+// Upload a skill ZIP (multipart) — POST /api/v1/skills/upload. Auth is required.
+// Content-Type is intentionally left unset so fetch adds the multipart boundary;
+// a longer timeout than the JSON handshake accommodates a real archive.
+export async function uploadSkill(
+	zipBuffer: Buffer,
+	fileName: string,
+): Promise<UploadResponse> {
+	const blob = new Blob([new Uint8Array(zipBuffer)], {
+		type: "application/zip",
+	});
+	const form = new FormData();
+	form.append("file", blob, fileName);
+
+	const res = await skillhubFetch("/api/v1/skills/upload", {
+		label: "skillhub.upload",
+		method: "POST",
+		body: form,
+		signal: AbortSignal.timeout(SKILLHUB_UPLOAD_TIMEOUT_MS),
+	});
+	const body = (await res.json().catch(() => ({}))) as UploadResponse;
+	if (!res.ok || !body.success) {
+		throw new Error(body.message ?? `Upload failed (${res.status}).`);
+	}
+	return body;
+}
+
+// Save a skill's metadata — PATCH /api/v1/skills/<id>/metadata. An empty body is
+// enough to flip the freshly-uploaded skill from PENDING to DRAFT; the server
+// derives the real metadata from the ZIP's SKILL.md.
+export async function saveSkillMetadata(
+	skillId: string,
+	payload: Record<string, unknown> = {},
+): Promise<void> {
+	const res = await skillhubFetch(`/api/v1/skills/${skillId}/metadata`, {
+		label: "skillhub.metadata",
+		method: "PATCH",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(payload),
+	});
+	const body = (await res.json().catch(() => ({}))) as {
+		success?: boolean;
+		message?: string;
+	};
+	if (!res.ok || !body.success) {
+		throw new Error(body.message ?? `Saving metadata failed (${res.status}).`);
+	}
+}
+
+// Submit a DRAFT skill for review — PATCH /api/v1/skills/<id>/submit. Moves it
+// to SUBMITTED and notifies admins.
+export async function submitSkill(skillId: string): Promise<void> {
+	const res = await skillhubFetch(`/api/v1/skills/${skillId}/submit`, {
+		label: "skillhub.submit",
+		method: "PATCH",
+	});
+	const body = (await res.json().catch(() => ({}))) as {
+		success?: boolean;
+		message?: string;
+	};
+	if (!res.ok || !body.success) {
+		throw new Error(body.message ?? `Submit failed (${res.status}).`);
+	}
+}
+
+// Admin-only review action — POST /api/v1/admin/review. Approving a SUBMITTED
+// skill publishes it (PUBLIC). A non-admin caller gets a 403 here, surfaced as
+// the server's message.
+export async function adminReviewSkill(
+	skillId: string,
+	action: "APPROVE" | "REJECT",
+	feedback?: string,
+): Promise<void> {
+	const res = await skillhubFetch("/api/v1/admin/review", {
+		label: "skillhub.review",
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ skill_id: skillId, action, feedback }),
+	});
+	const body = (await res.json().catch(() => ({}))) as {
+		success?: boolean;
+		message?: string;
+	};
+	if (!res.ok || !body.success) {
+		throw new Error(body.message ?? `Review failed (${res.status}).`);
+	}
 }
 
 // Download a skill's ZIP by id. Public for PUBLIC skills (optional auth); a

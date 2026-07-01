@@ -27,11 +27,13 @@ import {
 	uninstallShims,
 } from "@/lib/shims.js";
 import { parsePullArgs, runSkillInstall } from "@/lib/skill-install.js";
+import { parsePublishArgs, runSkillPublish } from "@/lib/skill-publish.js";
 import { runSkillSearch } from "@/lib/skill-search.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
 import { ModelApp } from "@/ModelApp.js";
 import { RemoveApp } from "@/RemoveApp.js";
 import { SkillPullApp } from "@/SkillPullApp.js";
+import { SkillPushApp } from "@/SkillPushApp.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
 
@@ -189,11 +191,44 @@ switch (command) {
 	// `skill <subcommand>`: operations against the SkillHub registry. Namespaced
 	// so it doesn't collide with `codev install` (which installs agents).
 	// `pull` downloads/installs a skill (not `install`, to avoid that confusion);
-	// publish/whoami migrate here next.
+	// `push` publishes one; whoami migrates here next.
 	case "skill": {
 		const [sub, ...rest] = args;
 		if (sub === "search") {
 			process.exit(await runSkillSearch(rest));
+		}
+		if (sub === "push") {
+			const parsed = parsePublishArgs(rest);
+			if (!parsed.path) {
+				console.error(
+					"Usage: codev skill push <path> [--draft-only] [--auto-approve] [--json]",
+				);
+				process.exit(1);
+			}
+			// Interactive TTY (and not --json): preview + confirm before uploading
+			// (Ink). Otherwise (piped/CI, or --json) go the plain runner.
+			const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+			if (interactive && !parsed.json) {
+				let ok = true;
+				const { waitUntilExit } = render(
+					<SkillPushApp
+						path={parsed.path}
+						json={parsed.json}
+						draftOnly={parsed.draftOnly}
+						autoApprove={parsed.autoApprove}
+						onDone={(v) => {
+							ok = v;
+						}}
+					/>,
+				);
+				try {
+					await waitUntilExit();
+				} catch {
+					process.exit(1);
+				}
+				process.exit(ok ? 0 : 1);
+			}
+			process.exit(await runSkillPublish(rest));
 		}
 		if (sub === "pull") {
 			const parsed = parsePullArgs(rest);
@@ -233,8 +268,8 @@ switch (command) {
 		}
 		console.error(
 			sub === undefined
-				? "Usage: codev skill <search|pull> ..."
-				: `Unknown skill subcommand: ${sub}. Valid: search, pull.`,
+				? "Usage: codev skill <search|pull|push> ..."
+				: `Unknown skill subcommand: ${sub}. Valid: search, pull, push.`,
 		);
 		process.exit(1);
 		break;

@@ -34,5 +34,8 @@ Skill hub:
   skill pull <name>      Download and install a skill by name or id
                          (prompts for location; --dir <path> to set it explicitly,
                          --force to overwrite; --json for machine-readable output)
+  skill push <path>      Publish a skill (a directory with SKILL.md, or a .zip)
+                         (previews and confirms before upload; --draft-only to stop
+                         at DRAFT, --auto-approve for admins, --json for output)
 `);
 }
