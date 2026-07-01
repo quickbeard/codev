@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import AdmZip from "adm-zip";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { detectAndStripRoot, extractZip } from "@/lib/archive.js";
+import { detectAndStripRoot, extractZip, inspectZip } from "@/lib/archive.js";
 
 let tempDir: string;
 
@@ -54,6 +54,30 @@ describe("extractZip", () => {
 
 		await expect(extractZip(buf, tempDir)).rejects.toThrow(/unsafe zip entry/);
 		expect(existsSync(join(tempDir, "..", "evil.txt"))).toBe(false);
+	});
+
+	test("rejects an archive that decompresses past the size cap", async () => {
+		// 101 MB of zeros compresses tiny but inflates past the 100 MB cap.
+		const zip = new AdmZip();
+		zip.addFile("big.bin", Buffer.alloc(101 * 1024 * 1024));
+		await expect(extractZip(zip.toBuffer(), tempDir)).rejects.toThrow(/limit/i);
+		// Nothing was written before the cap tripped.
+		expect(existsSync(join(tempDir, "big.bin"))).toBe(false);
+	});
+});
+
+describe("inspectZip", () => {
+	test("accepts a normal archive and reports its files/total", () => {
+		const buf = makeZip({ "SKILL.md": "hello", "run.sh": "echo hi" });
+		const { files, totalBytes } = inspectZip(buf);
+		expect(files.sort()).toEqual(["SKILL.md", "run.sh"].sort());
+		expect(totalBytes).toBe("hello".length + "echo hi".length);
+	});
+
+	test("rejects an archive over the uncompressed size cap", () => {
+		const zip = new AdmZip();
+		zip.addFile("big.bin", Buffer.alloc(101 * 1024 * 1024));
+		expect(() => inspectZip(zip.toBuffer())).toThrow(/limit/i);
 	});
 });
 

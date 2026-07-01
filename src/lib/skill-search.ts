@@ -1,3 +1,4 @@
+import { stripControlChars } from "@/lib/sanitize.js";
 import { type HubSkill, listHubSkills } from "@/lib/skillhub.js";
 
 const DEFAULT_LIMIT = 20;
@@ -59,14 +60,18 @@ export async function runSkillSearch(args: string[]): Promise<number> {
 function formatResults(total: number, items: HubSkill[]): string {
 	const lines = [`Found ${total} skill(s) — showing ${items.length}:`, ""];
 	for (const s of items) {
-		lines.push(`  ${s.name}@${s.version} by ${s.provider}`);
-		const desc = s.description ?? "";
+		// Hub-sourced fields are sanitized before printing (see stripControlChars).
+		const name = stripControlChars(s.name);
+		const version = stripControlChars(s.version);
+		const provider = stripControlChars(s.provider);
+		lines.push(`  ${name}@${version} by ${provider}`);
+		const desc = stripControlChars(s.description ?? "");
 		const trimmed =
 			desc.length > DESCRIPTION_MAX
 				? `${desc.slice(0, DESCRIPTION_MAX - 3)}...`
 				: desc;
 		if (trimmed) lines.push(`    ${trimmed}`);
-		lines.push(`    id: ${s.id}`);
+		lines.push(`    id: ${stripControlChars(s.id)}`);
 		lines.push("");
 	}
 	return lines.join("\n").trimEnd();

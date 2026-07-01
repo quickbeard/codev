@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Banner } from "@/components/Banner.js";
 import { Frame } from "@/components/Frame.js";
 import { Step } from "@/components/Step.js";
+import { stripControlChars } from "@/lib/sanitize.js";
 import {
 	formatInstallResult,
 	type InstallLocation,
@@ -109,7 +110,9 @@ export function SkillPullApp({
 		{ isActive: phase === "select" },
 	);
 
-	const title = meta ? `Install ${meta.name} skill` : "Install skill";
+	// Sanitize the hub-sourced name before rendering it to the terminal.
+	const skillName = meta ? stripControlChars(meta.name) : null;
+	const title = skillName ? `Install ${skillName} skill` : "Install skill";
 
 	return (
 		<Box flexDirection="column" padding={1}>
@@ -126,7 +129,7 @@ export function SkillPullApp({
 					)}
 					{phase === "select" && meta && (
 						<Box flexDirection="column">
-							<Text dimColor>{`Install ${meta.name} to:`}</Text>
+							<Text dimColor>{`Install ${skillName} to:`}</Text>
 							{LOCATIONS.map((loc, i) => (
 								<Text key={loc.key} color={i === index ? "cyan" : undefined}>
 									{`${i === index ? "❯ " : "  "}${loc.label}`}

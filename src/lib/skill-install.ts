@@ -1,8 +1,34 @@
 import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
-import { detectAndStripRoot, extractZip, pathExists } from "@/lib/archive.js";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+	detectAndStripRoot,
+	extractZip,
+	inspectZip,
+	pathExists,
+} from "@/lib/archive.js";
+import { stripControlChars } from "@/lib/sanitize.js";
 import { downloadSkill, getSkillMeta, type SkillMeta } from "@/lib/skillhub.js";
+
+// The server's skill name becomes a directory under rootDir. Never trust it as
+// a path: require it to resolve to a single direct child of rootDir, rejecting
+// path separators, "..", and absolute paths. Without this, a hostile hub entry
+// named e.g. "../../../tmp/x" could write outside the skills dir — or, combined
+// with --force, delete an arbitrary directory via rm().
+function safeSkillDir(rootDir: string, name: string): string {
+	const root = resolve(rootDir);
+	const dir = resolve(root, name);
+	const rel = relative(root, dir);
+	if (
+		rel === "" ||
+		rel.startsWith("..") ||
+		isAbsolute(rel) ||
+		rel.includes(sep)
+	) {
+		throw new Error(`Refusing to install skill with unsafe name "${name}".`);
+	}
+	return dir;
+}
 
 export type InstallLocation = "current" | "global";
 
@@ -67,9 +93,15 @@ export async function installResolvedSkill(
 	meta: SkillMeta,
 	opts: { rootDir: string; force: boolean },
 ): Promise<InstallResult> {
+	// Validate the target path before any filesystem work (especially before the
+	// rm() below), so an unsafe server name can never write to — or delete — a
+	// location outside rootDir.
+	const skillDir = safeSkillDir(opts.rootDir, meta.name);
+
 	const zip = await downloadSkill(meta.id);
+	// Vet the archive's size/entry counts before inflating or extracting it.
+	inspectZip(zip);
 	const { buffer, stripped } = detectAndStripRoot(zip);
-	const skillDir = join(opts.rootDir, meta.name);
 
 	if (await pathExists(skillDir)) {
 		if (!opts.force) {
@@ -115,8 +147,12 @@ export function formatInstallResult(r: InstallResult, json: boolean): string {
 			strippedRoot: r.strippedRoot,
 		});
 	}
-	const versionSuffix = r.version ? `@${r.version}` : "";
-	return `Installed ${r.name}${versionSuffix} -> ${r.dir}`;
+	// Sanitize hub-sourced name/version for terminal display (dir is a local,
+	// already-validated path). JSON output above needs no scrubbing — stringify
+	// escapes control characters.
+	const name = stripControlChars(r.name);
+	const versionSuffix = r.version ? `@${stripControlChars(r.version)}` : "";
+	return `Installed ${name}${versionSuffix} -> ${r.dir}`;
 }
 
 // Non-interactive path (`--dir` given, or piped/CI). The interactive location
