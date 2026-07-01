@@ -4,11 +4,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { SKILLHUB_URL } from "@/lib/const.js";
 import {
+	adminReviewSkill,
 	downloadSkill,
 	listHubSkills,
 	SkillhubAuthError,
+	saveSkillMetadata,
 	skillhubFetch,
 	skillhubSignIn,
+	submitSkill,
+	uploadSkill,
 } from "@/lib/skillhub.js";
 
 let tempDir: string;
@@ -286,5 +290,125 @@ describe("downloadSkill", () => {
 			new Response("", { status: 500 }),
 		);
 		await expect(downloadSkill("x")).rejects.toThrow(/failed \(500\)/);
+	});
+});
+
+describe("uploadSkill", () => {
+	test("POSTs multipart form-data and returns the skill_id", async () => {
+		seedAuth({ skillhub_cookie: "skill-hub-session=abc" });
+		const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, {
+				success: true,
+				skill_id: "sk-1",
+				status: "PENDING",
+			}),
+		);
+
+		const res = await uploadSkill(Buffer.from("PK\x03\x04zip"), "pg-tuner.zip");
+
+		expect(res.skill_id).toBe("sk-1");
+		expect(String(spy.mock.calls[0]?.[0])).toBe(
+			`${SKILLHUB_URL}/api/v1/skills/upload`,
+		);
+		const init = lastInit();
+		expect(init.method).toBe("POST");
+		expect(init.body).toBeInstanceOf(FormData);
+		// Content-Type must NOT be set by us — fetch adds the multipart boundary.
+		expect(headersOf(init)["Content-Type"]).toBeUndefined();
+		// Cookie still rides along via skillhubFetch.
+		expect(headersOf(init).Cookie).toBe("skill-hub-session=abc");
+	});
+
+	test("throws the server message when success is false", async () => {
+		seedAuth({ skillhub_cookie: "skill-hub-session=abc" });
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(400, { success: false, message: "name already taken" }),
+		);
+		await expect(uploadSkill(Buffer.from("z"), "x.zip")).rejects.toThrow(
+			"name already taken",
+		);
+	});
+});
+
+describe("saveSkillMetadata", () => {
+	test("PATCHes the metadata endpoint with the JSON body", async () => {
+		seedAuth({ skillhub_cookie: "skill-hub-session=abc" });
+		const spy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, { success: true }));
+
+		await saveSkillMetadata("sk-1");
+
+		expect(String(spy.mock.calls[0]?.[0])).toBe(
+			`${SKILLHUB_URL}/api/v1/skills/sk-1/metadata`,
+		);
+		const init = lastInit();
+		expect(init.method).toBe("PATCH");
+		expect(init.body).toBe("{}");
+		expect(headersOf(init)["Content-Type"]).toBe("application/json");
+	});
+
+	test("throws on a failure response", async () => {
+		seedAuth({ skillhub_cookie: "skill-hub-session=abc" });
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(500, { success: false, message: "boom" }),
+		);
+		await expect(saveSkillMetadata("sk-1")).rejects.toThrow("boom");
+	});
+});
+
+describe("submitSkill", () => {
+	test("PATCHes the submit endpoint", async () => {
+		seedAuth({ skillhub_cookie: "skill-hub-session=abc" });
+		const spy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, { success: true }));
+
+		await submitSkill("sk-1");
+
+		expect(String(spy.mock.calls[0]?.[0])).toBe(
+			`${SKILLHUB_URL}/api/v1/skills/sk-1/submit`,
+		);
+		expect(lastInit().method).toBe("PATCH");
+	});
+
+	test("throws on a failure response", async () => {
+		seedAuth({ skillhub_cookie: "skill-hub-session=abc" });
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(409, { success: false, message: "wrong status" }),
+		);
+		await expect(submitSkill("sk-1")).rejects.toThrow("wrong status");
+	});
+});
+
+describe("adminReviewSkill", () => {
+	test("POSTs the review action with skill_id and feedback", async () => {
+		seedAuth({ skillhub_cookie: "skill-hub-session=abc" });
+		const spy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(jsonResponse(200, { success: true }));
+
+		await adminReviewSkill("sk-1", "APPROVE", "ok");
+
+		expect(String(spy.mock.calls[0]?.[0])).toBe(
+			`${SKILLHUB_URL}/api/v1/admin/review`,
+		);
+		const init = lastInit();
+		expect(init.method).toBe("POST");
+		expect(JSON.parse(String(init.body))).toEqual({
+			skill_id: "sk-1",
+			action: "APPROVE",
+			feedback: "ok",
+		});
+	});
+
+	test("throws the server message when a non-admin is forbidden (403)", async () => {
+		seedAuth({ skillhub_cookie: "skill-hub-session=abc" });
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(403, { success: false, message: "admin only" }),
+		);
+		await expect(adminReviewSkill("sk-1", "APPROVE")).rejects.toThrow(
+			"admin only",
+		);
 	});
 });
