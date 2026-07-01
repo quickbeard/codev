@@ -20,10 +20,10 @@ export const GATEWAY_COMPACT_PCT = 85;
 // OpenCode has no percentage knob — it compacts at `context − reserved`, so the
 // reserve is the headroom that lands the trigger at the same ~85% point.
 export const GATEWAY_COMPACT_TRIGGER = Math.round(
-	GATEWAY_CONTEXT_WINDOW * (GATEWAY_COMPACT_PCT / 100),
+  GATEWAY_CONTEXT_WINDOW * (GATEWAY_COMPACT_PCT / 100),
 );
 export const GATEWAY_COMPACT_RESERVED =
-	GATEWAY_CONTEXT_WINDOW - GATEWAY_COMPACT_TRIGGER;
+  GATEWAY_CONTEXT_WINDOW - GATEWAY_COMPACT_TRIGGER;
 // Max output tokens advertised to OpenCode (required whenever `limit` is set).
 export const GATEWAY_MAX_OUTPUT_TOKENS = 65536;
 
@@ -33,37 +33,37 @@ export const HELP_HINT = "Run `codev --help` to see all commands.";
 export const HAPPY_CODING = "Happy coding! 🎉";
 
 interface CodevAuthFile {
-	supabase_url?: string;
-	supabase_anon_key?: string;
-	gateway_url?: string;
+  supabase_url?: string;
+  supabase_anon_key?: string;
+  gateway_url?: string;
 }
 
 function readCodevAuthFile(): CodevAuthFile | null {
-	try {
-		return JSON.parse(
-			readFileSync(join(homedir(), ".codev", "auth.json"), "utf-8"),
-		) as CodevAuthFile;
-	} catch {
-		return null;
-	}
+  try {
+    return JSON.parse(
+      readFileSync(join(homedir(), ".codev", "auth.json"), "utf-8"),
+    ) as CodevAuthFile;
+  } catch {
+    return null;
+  }
 }
 
 function readField(field: keyof CodevAuthFile, label: string): string {
-	const value = readCodevAuthFile()?.[field];
-	if (!value) {
-		throw new Error(
-			`Missing ${label} in ~/.codev/auth.json. Run \`codev install\` (or log in again) to fetch the latest configuration.`,
-		);
-	}
-	return value;
+  const value = readCodevAuthFile()?.[field];
+  if (!value) {
+    throw new Error(
+      `Missing ${label} in ~/.codev/auth.json. Run \`codev install\` (or log in again) to fetch the latest configuration.`,
+    );
+  }
+  return value;
 }
 
 export function SUPABASE_URL(): string {
-	return readField("supabase_url", "supabase_url");
+  return readField("supabase_url", "supabase_url");
 }
 
 export function SUPABASE_ANON_KEY(): string {
-	return readField("supabase_anon_key", "supabase_anon_key");
+  return readField("supabase_anon_key", "supabase_anon_key");
 }
 
 // The public gateway base URL, fetched from the backend's POST /config endpoint
@@ -71,12 +71,9 @@ export function SUPABASE_ANON_KEY(): string {
 // accessors, this hard-fails with an actionable message if the cache was never
 // populated — every consumer runs after a login that refreshes config.
 export function AI_GATEWAY_URL(): string {
-	return readField("gateway_url", "gateway_url");
+  return readField("gateway_url", "gateway_url");
 }
 
-// The OpenAI-compatible gateway endpoint, derived from the base URL — the same
-// `<base>/v1` relationship the two consts used to encode. Kept as a derivation
-// so the backend only has to serve (and the cache only has to store) one URL.
 export function AI_GATEWAY_OPENAI_URL(): string {
-	return `${AI_GATEWAY_URL()}/v1`;
+  return `${AI_GATEWAY_URL()}/v1`;
 }
