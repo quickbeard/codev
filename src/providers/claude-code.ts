@@ -1,4 +1,4 @@
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -56,11 +56,50 @@ function mungeCwd(cwd: string): string {
 	} catch {
 		real = cwd;
 	}
-	return claudeProjectDirName(real);
+	// Claude Code munges NFC(realpath(cwd)), so normalize before munging — an NFD
+	// path (e.g. from an APFS/network filesystem) would otherwise decompose its
+	// accents into `char + combining mark`, munging to a different folder name
+	// than the one Claude actually wrote for the same directory.
+	return claudeProjectDirName(real.normalize("NFC"));
 }
 
+// Claude Code resolves its config home as `CLAUDE_CONFIG_DIR ?? ~/.claude` and
+// stores sessions under `<that>/projects`. Honor the override so users (commonly
+// managed/corporate setups) who redirect Claude's config are still detected —
+// hardcoding ~/.claude would look in the wrong place and report "No
+// conversations found" for a project that was in fact used.
+function claudeConfigDir(): string {
+	const override = process.env.CLAUDE_CONFIG_DIR?.trim();
+	return override ? override : join(homedir(), ".claude");
+}
+
+function projectsRoot(): string {
+	return join(claudeConfigDir(), "projects");
+}
+
+// Resolve the on-disk project folder for `cwd`. The name Claude wrote preserves
+// the drive-letter case realpath yielded when the session ran, which can differ
+// from the case the user's shell reports at upload time (e.g. `D:\x` vs `d:\x`
+// -> `D--x` vs `d--x`). Prefer the exact computed name, but fall back to a
+// case-insensitive scan of the projects root so a case-only drift still finds
+// the project. The munged name is ASCII (`[a-zA-Z0-9-]`), so toLowerCase only
+// folds the drive letter and any other case difference — never Unicode.
 function projectDir(cwd: string): string {
-	return join(homedir(), ".claude", "projects", mungeCwd(cwd));
+	const expected = mungeCwd(cwd);
+	const root = projectsRoot();
+	const exact = join(root, expected);
+	if (existsSync(exact)) return exact;
+	let entries: string[];
+	try {
+		entries = readdirSync(root);
+	} catch {
+		return exact;
+	}
+	const lower = expected.toLowerCase();
+	for (const name of entries) {
+		if (name.toLowerCase() === lower) return join(root, name);
+	}
+	return exact;
 }
 
 interface RawRecord {
