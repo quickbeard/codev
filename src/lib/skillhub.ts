@@ -184,3 +184,21 @@ export async function listHubSkills(
 		items: body.data,
 	};
 }
+
+// Download a skill's ZIP by id. Public for PUBLIC skills (optional auth); a
+// stored session is attached when present so a private-namespace skill the user
+// can see also downloads. Returns the raw ZIP bytes; 404 → a clear
+// not-found/not-public error.
+export async function downloadSkill(id: string): Promise<Buffer> {
+	const res = await skillhubFetch(`/api/v1/skills/${id}/download`, {
+		label: "skillhub.download",
+		optionalAuth: true,
+	});
+	if (res.status === 404) {
+		throw new Error(`Skill "${id}" not found or not public.`);
+	}
+	if (!res.ok) {
+		throw new Error(`Download failed (${res.status}).`);
+	}
+	return Buffer.from(await res.arrayBuffer());
+}
