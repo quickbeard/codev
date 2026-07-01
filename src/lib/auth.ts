@@ -90,6 +90,10 @@ interface AuthFileContents {
 	supabase_url?: string;
 	supabase_anon_key?: string;
 	gateway_url?: string;
+	// SkillHub session cookie (`skill-hub-session=…`), captured by
+	// `codev login --admin` for local ADMIN/SUPERADMIN accounts that can't use
+	// SSO. SSO users don't have one — skillhubFetch falls back to a Bearer token.
+	skillhub_cookie?: string;
 }
 
 export interface CodevConfig {
@@ -224,6 +228,38 @@ export function loadApiKey(): ApiKeyCreds | null {
 	};
 }
 
+// The SkillHub session cookie is stored as the raw `name=value` pair we send
+// back verbatim in the Cookie header (matching how the deprecated @skillhub/cli
+// persisted it). Written by `codev login --admin`; read by skillhubFetch.
+export function saveSkillhubCookie(cookie: string): void {
+	const existing = readAuthFile() ?? {};
+	writeAuthFile({ ...existing, skillhub_cookie: cookie });
+}
+
+export function loadSkillhubCookie(): string | null {
+	return readAuthFile()?.skillhub_cookie ?? null;
+}
+
+// Drops just the SkillHub cookie block, leaving SSO tokens and gateway config
+// intact. The `codev logout` command calls this alongside logout() for a full
+// sign-out; kept separate so the SSO-only logout() (reused by `login --force`)
+// never disturbs an admin cookie.
+export function clearSkillhubCookie(): boolean {
+	const raw = readAuthFile();
+	if (!raw?.skillhub_cookie) return false;
+	const { skillhub_cookie: _dropped, ...rest } = raw;
+	try {
+		if (Object.values(rest).some((v) => v !== undefined)) {
+			writeAuthFile(rest);
+		} else {
+			unlinkSync(authFilePath());
+		}
+	} catch {
+		return false;
+	}
+	return true;
+}
+
 export async function logout(): Promise<boolean> {
 	const raw = readAuthFile();
 	if (!raw) return false;
@@ -237,6 +273,7 @@ export async function logout(): Promise<boolean> {
 			supabase_url: raw.supabase_url,
 			supabase_anon_key: raw.supabase_anon_key,
 			gateway_url: raw.gateway_url,
+			skillhub_cookie: raw.skillhub_cookie,
 		};
 		const hasAnything = Object.values(preserved).some((v) => v !== undefined);
 		if (hasAnything) {

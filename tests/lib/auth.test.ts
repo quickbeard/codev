@@ -15,13 +15,16 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	type AuthData,
 	browserOpener,
+	clearSkillhubCookie,
 	loadApiKey,
 	loadAuth,
+	loadSkillhubCookie,
 	login,
 	logout,
 	refreshCodevConfig,
 	saveApiKey,
 	saveCodevConfig,
+	saveSkillhubCookie,
 	silentSso,
 } from "@/lib/auth.js";
 import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
@@ -437,6 +440,59 @@ describe("saveApiKey / loadApiKey", () => {
 			expect(stat.mode & 0o777).toBe(0o600);
 		},
 	);
+});
+
+describe("skillhub cookie storage", () => {
+	test("save then load round-trips the cookie", () => {
+		saveSkillhubCookie("skill-hub-session=abc");
+		expect(loadSkillhubCookie()).toBe("skill-hub-session=abc");
+	});
+
+	test("loadSkillhubCookie returns null when none is stored", () => {
+		expect(loadSkillhubCookie()).toBeNull();
+	});
+
+	test("saving the cookie preserves an existing api_key block", () => {
+		saveApiKey({ apiKey: "sk-keep", baseUrl: "https://gw/v1", model: "m1" });
+		saveSkillhubCookie("skill-hub-session=abc");
+		expect(loadApiKey()?.apiKey).toBe("sk-keep");
+		expect(loadSkillhubCookie()).toBe("skill-hub-session=abc");
+	});
+
+	test("clearSkillhubCookie drops only the cookie, keeping other blocks", () => {
+		saveApiKey({ apiKey: "sk-keep" });
+		saveSkillhubCookie("skill-hub-session=abc");
+		expect(clearSkillhubCookie()).toBe(true);
+		expect(loadSkillhubCookie()).toBeNull();
+		expect(loadApiKey()?.apiKey).toBe("sk-keep");
+	});
+
+	test("clearSkillhubCookie returns false when there is no cookie", () => {
+		expect(clearSkillhubCookie()).toBe(false);
+	});
+
+	test("clearSkillhubCookie removes the file when the cookie was the only field", () => {
+		saveSkillhubCookie("skill-hub-session=abc");
+		expect(clearSkillhubCookie()).toBe(true);
+		expect(existsSync(join(tempDir, ".codev", "auth.json"))).toBe(false);
+	});
+});
+
+describe("logout preserves the skillhub cookie", () => {
+	test("SSO logout keeps an admin cookie intact (login --force reuse)", async () => {
+		const dir = join(tempDir, ".codev");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({
+				...VALID_AUTH,
+				skillhub_cookie: "skill-hub-session=keep",
+			}),
+		);
+		expect(await logout()).toBe(true);
+		expect(loadAuth()).toBeNull();
+		expect(loadSkillhubCookie()).toBe("skill-hub-session=keep");
+	});
 });
 
 describe("login CODEV_BYPASS_LOGIN", () => {
