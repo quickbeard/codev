@@ -19,7 +19,7 @@ const LABEL_WIDTH = Math.max(...FIELDS.map((f) => f.label.length));
 type Phase = "input" | "submitting" | "error";
 
 // Interactive username/password form for `codev login --admin`. Only local
-// ADMIN/SUPERADMIN SkillHub accounts can use this — regular users are rejected
+// ADMIN/SUPERADMIN accounts can use this — regular users are rejected
 // server-side and must log in via SSO (`codev login`). On success it captures
 // the skill-hub-session cookie and persists it via saveSkillhubCookie.
 export function AdminLogin({ onDone }: AdminLoginProps) {
@@ -110,7 +110,7 @@ export function AdminLogin({ onDone }: AdminLoginProps) {
 				<Text color="cyan">
 					<Spinner />
 				</Text>
-				<Text>{" Signing in to SkillHub..."}</Text>
+				<Text>{" Signing in..."}</Text>
 			</Box>
 		);
 	}
@@ -154,5 +154,5 @@ export function AdminLogin({ onDone }: AdminLoginProps) {
 }
 
 export function adminLoginTitle() {
-	return <Text bold>{"SkillHub admin login"}</Text>;
+	return <Text bold>{"Admin login"}</Text>;
 }

@@ -12,7 +12,7 @@ type Phase = "preparing" | "login" | "refreshing-config" | "done";
 
 interface LoginAppProps {
 	force?: boolean;
-	// `codev login --admin`: local username/password sign-in for SkillHub
+	// `codev login --admin`: local username/password sign-in for
 	// ADMIN/SUPERADMIN accounts, instead of the default Viettel SSO flow.
 	admin?: boolean;
 }
@@ -22,7 +22,7 @@ export function LoginApp({ force = false, admin = false }: LoginAppProps) {
 	return <SsoLoginApp force={force} />;
 }
 
-// SkillHub admin (username/password) sign-in flow. Separate from the SSO app
+// Admin (username/password) sign-in flow. Separate from the SSO app
 // because it shares none of its state — no browser, no token refresh, no
 // codev-config fetch; it just captures and stores the session cookie.
 function AdminLoginApp() {
