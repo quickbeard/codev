@@ -324,6 +324,8 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const history = allFrames(frames);
 		expect(history).toContain("Failed to install");
+		// Once login completes, the Login step collapses to a green signed-in line.
+		expect(history).toContain("✓ Signed in as test@example.com");
 		expect(history).not.toContain("Get a new API Key");
 		expect(history).not.toContain("Configure tools");
 	});
