@@ -133,6 +133,34 @@ describe("SkillPushApp login gate", () => {
 		expect(frame).toContain("Login");
 	});
 
+	test("marks the in-flight step failed (✗) when publishing errors", async () => {
+		vi.spyOn(skillhub, "hasSkillhubAuth").mockResolvedValue(true);
+		// Fail mid-upload: the upload step starts, then throws.
+		vi.spyOn(publish, "publishSkill").mockImplementation(
+			async (_archive, _opts, onStep) => {
+				onStep?.("upload", "start");
+				throw new Error("A published skill named 'x' already exists.");
+			},
+		);
+		const onDone = vi.fn();
+
+		const { stdin, lastFrame } = renderApp(onDone);
+
+		await answerConfirm(
+			stdin,
+			lastFrame,
+			"y",
+			() => onDone.mock.calls.length > 0,
+		);
+
+		const frame = frameText(lastFrame);
+		// The failed step shows ✗ (not a frozen spinner), alongside the error.
+		expect(frame).toContain("✗");
+		expect(frame).toContain("Uploading");
+		expect(frame).toContain("already exists");
+		expect(onDone).toHaveBeenCalledWith(false);
+	});
+
 	test("cancelling at the confirm never checks auth or publishes", async () => {
 		const authSpy = vi
 			.spyOn(skillhub, "hasSkillhubAuth")

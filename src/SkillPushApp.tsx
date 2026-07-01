@@ -37,13 +37,28 @@ type Phase =
 	| "done"
 	| "cancelled"
 	| "error";
-type StepState = "pending" | "running" | "done";
+type StepState = "pending" | "running" | "done" | "failed";
 
 const STEP_LABELS: Record<PublishStep, string> = {
 	upload: "Uploading",
 	metadata: "Saving metadata",
 	submit: "Submitting for review",
 	approve: "Approving (admin)",
+};
+
+// Marker glyph/color for a non-running step ("running" renders a spinner
+// instead, so its entries here are unused placeholders).
+const MARK_GLYPH: Record<StepState, string> = {
+	pending: "○",
+	running: "",
+	done: "✓",
+	failed: "✗",
+};
+const MARK_COLOR: Record<StepState, string> = {
+	pending: "gray",
+	running: "cyan",
+	done: "green",
+	failed: "red",
 };
 
 const MAX_PREVIEW_FILES = 12;
@@ -137,6 +152,15 @@ export function SkillPushApp({
 			setPhase("done");
 			finish(true);
 		} catch (err) {
+			// Mark whichever step was in flight as failed, so it shows a ✗ instead
+			// of a frozen spinner next to the error.
+			setStepState((prev) => {
+				const next = { ...prev };
+				for (const k of Object.keys(next) as PublishStep[]) {
+					if (next[k] === "running") next[k] = "failed";
+				}
+				return next;
+			});
 			setError(err instanceof Error ? err.message : String(err));
 			setPhase("error");
 			finish(false);
@@ -276,7 +300,7 @@ export function SkillPushApp({
 				{/* Step 3 — publish progress + result. */}
 				{(phase === "publishing" || phase === "done" || started) && (
 					<Step
-						active={phase === "publishing"}
+						active={phase === "publishing" || phase === "error"}
 						title={<Text bold>Publishing</Text>}
 					>
 						{steps.map((step) => {
@@ -288,12 +312,16 @@ export function SkillPushApp({
 											<Spinner />
 										</Text>
 									) : (
-										<Text color={state === "done" ? "green" : "gray"}>
-											{state === "done" ? "✓" : "○"}
-										</Text>
+										<Text color={MARK_COLOR[state]}>{MARK_GLYPH[state]}</Text>
 									)}
 									<Text
-										color={state === "pending" ? "gray" : undefined}
+										color={
+											state === "failed"
+												? "red"
+												: state === "pending"
+													? "gray"
+													: undefined
+										}
 									>{` ${STEP_LABELS[step]}`}</Text>
 								</Box>
 							);
