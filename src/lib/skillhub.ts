@@ -47,6 +47,20 @@ async function skillhubAuthHeaders(
 	);
 }
 
+// True when a SkillHub credential is available without prompting the user — a
+// stored admin cookie, or an SSO session (refreshed silently if the access token
+// expired). Mirrors the credential selection in skillhubFetch, so `skill push`
+// can offer an interactive login only when the user is genuinely logged out.
+// Never throws.
+export async function hasSkillhubAuth(): Promise<boolean> {
+	if (loadSkillhubCookie()) return true;
+	try {
+		return (await silentSso()) !== null;
+	} catch {
+		return false;
+	}
+}
+
 export interface SkillhubFetchOptions extends RequestInit {
 	// Short label for the diagnostic log's `endpoint` field. Defaults to the path.
 	label?: string;

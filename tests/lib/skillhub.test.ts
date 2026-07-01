@@ -6,6 +6,7 @@ import { SKILLHUB_URL } from "@/lib/const.js";
 import {
 	adminReviewSkill,
 	downloadSkill,
+	hasSkillhubAuth,
 	listHubSkills,
 	SkillhubAuthError,
 	saveSkillMetadata,
@@ -410,5 +411,24 @@ describe("adminReviewSkill", () => {
 		await expect(adminReviewSkill("sk-1", "APPROVE")).rejects.toThrow(
 			"admin only",
 		);
+	});
+});
+
+describe("hasSkillhubAuth", () => {
+	test("true when an admin cookie is stored (no network)", async () => {
+		seedAuth({ skillhub_cookie: "skill-hub-session=abc" });
+		const spy = vi.spyOn(globalThis, "fetch");
+		expect(await hasSkillhubAuth()).toBe(true);
+		expect(spy).not.toHaveBeenCalled();
+	});
+
+	test("true when a valid SSO session exists", async () => {
+		seedAuth(VALID_SSO);
+		expect(await hasSkillhubAuth()).toBe(true);
+	});
+
+	test("false when logged out (no cookie, no SSO session)", async () => {
+		seedAuth({});
+		expect(await hasSkillhubAuth()).toBe(false);
 	});
 });

@@ -3,6 +3,7 @@ import Spinner from "ink-spinner";
 import { useCallback, useEffect, useState } from "react";
 import { Banner } from "@/components/Banner.js";
 import { Frame } from "@/components/Frame.js";
+import { Login } from "@/components/Login.js";
 import { Step } from "@/components/Step.js";
 import {
 	formatPublishResult,
@@ -14,6 +15,7 @@ import {
 	preparePublishArchive,
 	publishSkill,
 } from "@/lib/skill-publish.js";
+import { hasSkillhubAuth } from "@/lib/skillhub.js";
 
 interface SkillPushAppProps {
 	path: string;
@@ -28,6 +30,8 @@ interface SkillPushAppProps {
 type Phase =
 	| "preparing"
 	| "confirm"
+	| "authing"
+	| "login"
 	| "publishing"
 	| "done"
 	| "cancelled"
@@ -137,8 +141,10 @@ export function SkillPushApp({
 	useInput(
 		(input, key) => {
 			if (phase !== "confirm") return;
+			// Gate login at the commit point: only after the user confirms do we
+			// check credentials, so cancelling never triggers a browser login.
 			if (key.return || input.toLowerCase() === "y") {
-				void start();
+				setPhase("authing");
 			} else if (key.escape || input.toLowerCase() === "n") {
 				setPhase("cancelled");
 				finish(false);
@@ -146,6 +152,26 @@ export function SkillPushApp({
 		},
 		{ isActive: phase === "confirm" },
 	);
+
+	// After confirmation: publish straight away if a credential is available,
+	// otherwise fall into the interactive login step. A stored SSO/admin session
+	// means the user never sees a login prompt.
+	useEffect(() => {
+		if (phase !== "authing") return;
+		let cancelled = false;
+		hasSkillhubAuth()
+			.then((ok) => {
+				if (cancelled) return;
+				if (ok) void start();
+				else setPhase("login");
+			})
+			.catch(() => {
+				if (!cancelled) setPhase("login");
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [phase, start]);
 
 	return (
 		<Box flexDirection="column" padding={1}>
@@ -189,6 +215,22 @@ export function SkillPushApp({
 									Publish this skill? <Text color="cyan">(y/N)</Text>
 								</Text>
 							</Box>
+						</Box>
+					)}
+
+					{phase === "authing" && (
+						<Box>
+							<Text color="cyan">
+								<Spinner />
+							</Text>
+							<Text>{" Checking sign-in..."}</Text>
+						</Box>
+					)}
+
+					{phase === "login" && (
+						<Box flexDirection="column">
+							<Text dimColor>Sign in to publish to the hub:</Text>
+							<Login onDone={() => void start()} />
 						</Box>
 					)}
 
