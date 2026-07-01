@@ -109,7 +109,7 @@ export function SkillPullApp({
 		{ isActive: phase === "select" },
 	);
 
-	const title = meta ? `Install ${meta.name}` : "Install skill";
+	const title = meta ? `Install ${meta.name} skill` : "Install skill";
 
 	return (
 		<Box flexDirection="column" padding={1}>
