@@ -82,10 +82,11 @@ afterEach(() => {
 });
 
 describe("SkillPushApp login gate", () => {
-	test("already authenticated: confirm publishes without a login prompt", async () => {
+	test("already authenticated: shows a Signed-in step (no login prompt) and publishes", async () => {
 		const authSpy = vi
 			.spyOn(skillhub, "hasSkillhubAuth")
 			.mockResolvedValue(true);
+		vi.spyOn(auth, "loadAuth").mockReturnValue(fakeAuth());
 		const loginSpy = vi.spyOn(auth, "login");
 		const pub = vi.spyOn(publish, "publishSkill").mockResolvedValue(RESULT);
 
@@ -94,7 +95,11 @@ describe("SkillPushApp login gate", () => {
 		await answerConfirm(stdin, lastFrame, "y", () => pub.mock.calls.length > 0);
 		await waitFor(() => frameText(lastFrame).includes("Published skill sk-1"));
 
+		const frame = frameText(lastFrame);
 		expect(authSpy).toHaveBeenCalled();
+		// Login step is still shown — as an already-signed-in line, no interactive
+		// prompt (auth.login is never invoked).
+		expect(frame).toContain("✓ Signed in as test@example.com");
 		expect(loginSpy).not.toHaveBeenCalled();
 	});
 

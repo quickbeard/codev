@@ -5,7 +5,7 @@ import { Banner } from "@/components/Banner.js";
 import { Frame } from "@/components/Frame.js";
 import { Login, loginTitle } from "@/components/Login.js";
 import { Step } from "@/components/Step.js";
-import type { AuthData } from "@/lib/auth.js";
+import { type AuthData, loadAuth } from "@/lib/auth.js";
 import {
 	formatPublishResult,
 	type PublishArchive,
@@ -89,9 +89,8 @@ export function SkillPushApp({
 	const [archive, setArchive] = useState<PublishArchive | null>(null);
 	const [result, setResult] = useState<PublishResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	// Whether the flow fell into the login step (so it stays rendered afterwards),
-	// and the email to show once signed in.
-	const [neededLogin, setNeededLogin] = useState(false);
+	// The signed-in identity to show in the Login step (from a fresh login or an
+	// existing session). Null falls back to a plain "Signed in".
 	const [loginEmail, setLoginEmail] = useState<string | null>(null);
 
 	const opts: PublishOpts = { draftOnly, autoApprove };
@@ -192,9 +191,9 @@ export function SkillPushApp({
 		{ isActive: phase === "confirm" },
 	);
 
-	// After confirmation: publish straight away if a credential is available,
-	// otherwise fall into the interactive login step. A stored SSO/admin session
-	// means the user never sees a login prompt.
+	// After confirmation: if a credential is already available, record the
+	// identity and publish (the Login step still renders, showing "Signed in");
+	// otherwise fall into the interactive login step.
 	useEffect(() => {
 		if (phase !== "authing") return;
 		let cancelled = false;
@@ -202,16 +201,16 @@ export function SkillPushApp({
 			.then((ok) => {
 				if (cancelled) return;
 				if (ok) {
+					// SSO sessions carry an email; an admin-cookie session doesn't, so
+					// it falls back to a plain "Signed in".
+					setLoginEmail(loadAuth()?.user.email ?? null);
 					void start();
 				} else {
-					setNeededLogin(true);
 					setPhase("login");
 				}
 			})
 			.catch(() => {
-				if (cancelled) return;
-				setNeededLogin(true);
-				setPhase("login");
+				if (!cancelled) setPhase("login");
 			});
 		return () => {
 			cancelled = true;
@@ -229,9 +228,7 @@ export function SkillPushApp({
 				{/* Step 1 — archive preview + confirm. Stays visible (dimmed) through
 				    login and publishing so the user always sees what they're shipping. */}
 				<Step
-					active={
-						phase === "preparing" || phase === "confirm" || phase === "authing"
-					}
+					active={phase === "preparing" || phase === "confirm"}
 					title={<Text bold>Publish skill to the hub</Text>}
 				>
 					{phase === "preparing" ? (
@@ -270,24 +267,31 @@ export function SkillPushApp({
 										Publish this skill? <Text color="cyan">(y/N)</Text>
 									</Text>
 								)}
-								{phase === "authing" && (
-									<Box>
-										<Text color="cyan">
-											<Spinner />
-										</Text>
-										<Text>{" Checking sign-in..."}</Text>
-									</Box>
-								)}
 							</Box>
 						</Box>
 					) : null}
 				</Step>
 
-				{/* Step 2 — login, only when the user wasn't already signed in. Once
-				    done it stays as a "✓ Signed in" line above the publish progress. */}
-				{neededLogin && (
-					<Step active={phase === "login"} title={loginTitle()}>
-						{phase === "login" ? (
+				{/* Step 2 — login. Shown once the user commits (not on cancel): the
+				    credential check, the interactive sign-in (only when logged out),
+				    and then a persistent "✓ Signed in" line. */}
+				{(phase === "authing" ||
+					phase === "login" ||
+					phase === "publishing" ||
+					phase === "done" ||
+					(phase === "error" && started)) && (
+					<Step
+						active={phase === "authing" || phase === "login"}
+						title={loginTitle()}
+					>
+						{phase === "authing" ? (
+							<Box>
+								<Text color="cyan">
+									<Spinner />
+								</Text>
+								<Text>{" Checking sign-in..."}</Text>
+							</Box>
+						) : phase === "login" ? (
 							<Login onDone={handleLoginDone} />
 						) : (
 							<Text color="green">
