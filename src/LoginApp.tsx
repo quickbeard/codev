@@ -57,7 +57,6 @@ function AdminLoginApp() {
 function SsoLoginApp({ force = false }: { force?: boolean }) {
 	const { exit } = useApp();
 	const [phase, setPhase] = useState<Phase>(force ? "preparing" : "login");
-	const [auth, setAuth] = useState<AuthData | null>(null);
 	const didPrepRef = useRef(false);
 
 	// --force wipes the cached SSO session (and arms the force-login sentinel,
@@ -71,12 +70,11 @@ function SsoLoginApp({ force = false }: { force?: boolean }) {
 
 	const handleLoginDone = useCallback(
 		(authData: AuthData) => {
-			setAuth(authData);
 			setPhase("refreshing-config");
 			refreshCodevConfig(authData.access_token, () => {}).finally(() => {
 				setPhase("done");
-				// Hold the final frame on screen briefly so the success line is
-				// readable before terminal control returns. Matches UpdateApp.
+				// Hold the final frame on screen briefly so <Login>'s green
+				// "Signed in as …" line is readable before terminal control returns.
 				setTimeout(() => exit(), 500);
 			});
 		},
@@ -96,11 +94,6 @@ function SsoLoginApp({ force = false }: { force?: boolean }) {
 					<Step active={phase === "login"} title={loginTitle()}>
 						<Login onDone={handleLoginDone} />
 					</Step>
-				)}
-				{auth && phase === "done" && (
-					<Box marginTop={1}>
-						<Text color="green">{`✓ Logged in as ${auth.user.email}`}</Text>
-					</Box>
 				)}
 			</Frame>
 		</Box>
