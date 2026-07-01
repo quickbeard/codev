@@ -14,13 +14,10 @@ import * as skillhub from "@/lib/skillhub.js";
 
 let tempDir: string;
 
-const SKILL = {
+const META: skillhub.SkillMeta = {
 	id: "3f9a0000-0000-4000-8000-000000000000",
 	name: "pg-tuner",
-	provider: "viettel",
-	description: "Tune Postgres",
 	version: "1.2.0",
-	publishedAt: null,
 };
 
 // A ZIP wrapped in a `pg-tuner/` root folder, like the server publishes.
@@ -31,11 +28,11 @@ function skillZip(root = "pg-tuner"): Buffer {
 	return zip.toBuffer();
 }
 
-function mockHub(items: skillhub.HubSkill[]) {
-	vi.spyOn(skillhub, "listHubSkills").mockResolvedValue({
-		total: items.length,
-		items,
-	});
+function mockMeta(meta: skillhub.SkillMeta = META) {
+	return vi.spyOn(skillhub, "getSkillMeta").mockResolvedValue(meta);
+}
+function mockDownload(buf: Buffer = skillZip()) {
+	return vi.spyOn(skillhub, "downloadSkill").mockResolvedValue(buf);
 }
 
 function captureLog() {
@@ -62,17 +59,15 @@ afterEach(() => {
 });
 
 describe("runSkillInstall", () => {
-	test("installs by name: resolves id, downloads, strips root, extracts", async () => {
-		mockHub([SKILL]);
-		const dl = vi
-			.spyOn(skillhub, "downloadSkill")
-			.mockResolvedValue(skillZip());
+	test("installs by name: resolves meta, downloads, strips root, extracts", async () => {
+		mockMeta();
+		const dl = mockDownload();
 		const out = captureLog();
 
 		const code = await runSkillInstall(["pg-tuner", "--dir", tempDir]);
 
 		expect(code).toBe(0);
-		expect(dl).toHaveBeenCalledWith(SKILL.id);
+		expect(dl).toHaveBeenCalledWith(META.id);
 		const skillDir = join(tempDir, "pg-tuner");
 		expect(readFileSync(join(skillDir, "SKILL.md"), "utf-8")).toBe(
 			"# pg-tuner",
@@ -81,34 +76,38 @@ describe("runSkillInstall", () => {
 		expect(out.join("\n")).toContain("Installed pg-tuner@1.2.0 ->");
 	});
 
-	test("installs by UUID: downloads directly, names dir from the ZIP root", async () => {
-		const listSpy = vi.spyOn(skillhub, "listHubSkills");
-		vi.spyOn(skillhub, "downloadSkill").mockResolvedValue(skillZip());
-		captureLog();
+	test("installs by UUID: names the folder from the resolved name, not the id", async () => {
+		const getMeta = mockMeta();
+		mockDownload();
+		const out = captureLog();
 
-		const code = await runSkillInstall([SKILL.id, "--dir", tempDir]);
+		const code = await runSkillInstall([META.id, "--dir", tempDir]);
 
 		expect(code).toBe(0);
-		expect(listSpy).not.toHaveBeenCalled(); // UUID skips the listing lookup
+		expect(getMeta).toHaveBeenCalledWith(META.id);
+		// Folder is the human name, not the UUID — and the version is shown too.
 		expect(existsSync(join(tempDir, "pg-tuner", "SKILL.md"))).toBe(true);
+		expect(existsSync(join(tempDir, META.id))).toBe(false);
+		expect(out.join("\n")).toContain("Installed pg-tuner@1.2.0 ->");
 	});
 
-	test("errors with suggestions when no skill matches the name", async () => {
-		mockHub([{ ...SKILL, name: "other-skill" }]);
+	test("errors when the skill is not found", async () => {
+		vi.spyOn(skillhub, "getSkillMeta").mockRejectedValue(
+			new Error('Skill "nope" not found or not public.'),
+		);
 		const dl = vi.spyOn(skillhub, "downloadSkill");
 		const errs = captureErr();
 
-		const code = await runSkillInstall(["pg-tuner", "--dir", tempDir]);
+		const code = await runSkillInstall(["nope", "--dir", tempDir]);
 
 		expect(code).toBe(1);
 		expect(dl).not.toHaveBeenCalled();
-		expect(errs.join("\n")).toMatch(/No public skill named "pg-tuner"/);
-		expect(errs.join("\n")).toContain("other-skill");
+		expect(errs.join("\n")).toMatch(/not found or not public/i);
 	});
 
 	test("refuses to overwrite an existing install without --force", async () => {
-		mockHub([SKILL]);
-		vi.spyOn(skillhub, "downloadSkill").mockResolvedValue(skillZip());
+		mockMeta();
+		mockDownload();
 		mkdirSync(join(tempDir, "pg-tuner"), { recursive: true });
 		const errs = captureErr();
 
@@ -119,8 +118,8 @@ describe("runSkillInstall", () => {
 	});
 
 	test("--force overwrites an existing install", async () => {
-		mockHub([SKILL]);
-		vi.spyOn(skillhub, "downloadSkill").mockResolvedValue(skillZip());
+		mockMeta();
+		mockDownload();
 		const skillDir = join(tempDir, "pg-tuner");
 		mkdirSync(skillDir, { recursive: true });
 		captureLog();
@@ -137,8 +136,8 @@ describe("runSkillInstall", () => {
 	});
 
 	test("--json emits a machine-readable summary", async () => {
-		mockHub([SKILL]);
-		vi.spyOn(skillhub, "downloadSkill").mockResolvedValue(skillZip());
+		mockMeta();
+		mockDownload();
 		const out = captureLog();
 
 		const code = await runSkillInstall([
@@ -155,7 +154,7 @@ describe("runSkillInstall", () => {
 			ok: true,
 			name: "pg-tuner",
 			version: "1.2.0",
-			id: SKILL.id,
+			id: META.id,
 			strippedRoot: "pg-tuner",
 		});
 		expect(parsed.dir).toContain(join("pg-tuner"));
@@ -169,13 +168,13 @@ describe("runSkillInstall", () => {
 	});
 
 	test("requires --dir on the non-interactive path (no prompt available)", async () => {
-		const dl = vi.spyOn(skillhub, "downloadSkill");
+		const getMeta = vi.spyOn(skillhub, "getSkillMeta");
 		const errs = captureErr();
 
 		const code = await runSkillInstall(["pg-tuner"]); // no --dir
 
 		expect(code).toBe(1);
-		expect(dl).not.toHaveBeenCalled();
+		expect(getMeta).not.toHaveBeenCalled();
 		expect(errs.join("\n")).toMatch(/pass --dir/i);
 	});
 });

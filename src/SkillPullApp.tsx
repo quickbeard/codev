@@ -1,6 +1,6 @@
 import { Box, Text, useApp, useInput } from "ink";
 import Spinner from "ink-spinner";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Banner } from "@/components/Banner.js";
 import { Frame } from "@/components/Frame.js";
 import { Step } from "@/components/Step.js";
@@ -8,9 +8,10 @@ import {
 	formatInstallResult,
 	type InstallLocation,
 	type InstallResult,
-	installSkill,
+	installResolvedSkill,
 	skillsDirFor,
 } from "@/lib/skill-install.js";
+import { getSkillMeta, type SkillMeta } from "@/lib/skillhub.js";
 
 interface SkillPullAppProps {
 	target: string;
@@ -21,7 +22,7 @@ interface SkillPullAppProps {
 	onDone?: (ok: boolean) => void;
 }
 
-type Phase = "select" | "installing" | "done" | "error";
+type Phase = "resolving" | "select" | "installing" | "done" | "error";
 
 const LOCATIONS: { key: InstallLocation; label: string }[] = [
 	{ key: "current", label: "Current directory" },
@@ -35,7 +36,8 @@ export function SkillPullApp({
 	onDone,
 }: SkillPullAppProps) {
 	const { exit } = useApp();
-	const [phase, setPhase] = useState<Phase>("select");
+	const [phase, setPhase] = useState<Phase>("resolving");
+	const [meta, setMeta] = useState<SkillMeta | null>(null);
 	const [index, setIndex] = useState(0);
 	const [result, setResult] = useState<InstallResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -51,11 +53,33 @@ export function SkillPullApp({
 		[onDone, exit],
 	);
 
+	// Resolve the skill's real name up front so the prompt shows the name (never
+	// a raw id) and the install dir is named after it.
+	useEffect(() => {
+		let cancelled = false;
+		getSkillMeta(target)
+			.then((m) => {
+				if (cancelled) return;
+				setMeta(m);
+				setPhase("select");
+			})
+			.catch((err: unknown) => {
+				if (cancelled) return;
+				setError(err instanceof Error ? err.message : String(err));
+				setPhase("error");
+				finish(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [target, finish]);
+
 	const start = useCallback(
 		async (location: InstallLocation) => {
+			if (!meta) return;
 			setPhase("installing");
 			try {
-				const r = await installSkill(target, {
+				const r = await installResolvedSkill(meta, {
 					rootDir: skillsDirFor(location),
 					force,
 				});
@@ -68,7 +92,7 @@ export function SkillPullApp({
 				finish(false);
 			}
 		},
-		[target, force, finish],
+		[meta, force, finish],
 	);
 
 	useInput(
@@ -85,14 +109,24 @@ export function SkillPullApp({
 		{ isActive: phase === "select" },
 	);
 
+	const title = meta ? `Install ${meta.name}` : "Install skill";
+
 	return (
 		<Box flexDirection="column" padding={1}>
 			<Banner />
 			<Frame tag="CoDev">
-				<Step active title={<Text bold>{`Install ${target}`}</Text>}>
-					{phase === "select" && (
+				<Step active title={<Text bold>{title}</Text>}>
+					{phase === "resolving" && (
+						<Box>
+							<Text color="cyan">
+								<Spinner />
+							</Text>
+							<Text>{" Resolving skill..."}</Text>
+						</Box>
+					)}
+					{phase === "select" && meta && (
 						<Box flexDirection="column">
-							<Text dimColor>Choose an install location:</Text>
+							<Text dimColor>{`Install ${meta.name} to:`}</Text>
 							{LOCATIONS.map((loc, i) => (
 								<Text key={loc.key} color={i === index ? "cyan" : undefined}>
 									{`${i === index ? "❯ " : "  "}${loc.label}`}

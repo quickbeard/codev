@@ -2,10 +2,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { detectAndStripRoot, extractZip, pathExists } from "@/lib/archive.js";
-import { downloadSkill, listHubSkills } from "@/lib/skillhub.js";
-
-const UUID_RE =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { downloadSkill, getSkillMeta, type SkillMeta } from "@/lib/skillhub.js";
 
 export type InstallLocation = "current" | "global";
 
@@ -63,23 +60,16 @@ export interface InstallResult {
 	strippedRoot: string | null;
 }
 
-interface SkillPayload {
-	buffer: Buffer;
-	name: string;
-	id: string;
-	version?: string;
-	strippedRoot: string | null;
-}
-
-// Core install: resolve <target>, download, un-nest, and extract into
-// <rootDir>/<name>. No console I/O — returns the result or throws. Shared by the
-// Ink app and the non-interactive runner.
-export async function installSkill(
-	target: string,
+// Download + extract a skill whose metadata is already resolved. The install
+// dir is named after the canonical skill name (meta.name), not the id or the
+// ZIP's root folder — the root is only stripped so files aren't double-nested.
+export async function installResolvedSkill(
+	meta: SkillMeta,
 	opts: { rootDir: string; force: boolean },
 ): Promise<InstallResult> {
-	const payload = await resolveAndDownload(target);
-	const skillDir = join(opts.rootDir, payload.name);
+	const zip = await downloadSkill(meta.id);
+	const { buffer, stripped } = detectAndStripRoot(zip);
+	const skillDir = join(opts.rootDir, meta.name);
 
 	if (await pathExists(skillDir)) {
 		if (!opts.force) {
@@ -91,15 +81,27 @@ export async function installSkill(
 	}
 
 	await mkdir(skillDir, { recursive: true });
-	await extractZip(payload.buffer, skillDir);
+	await extractZip(buffer, skillDir);
 
 	return {
-		name: payload.name,
-		version: payload.version,
-		id: payload.id,
+		name: meta.name,
+		version: meta.version,
+		id: meta.id,
 		dir: skillDir,
-		strippedRoot: payload.strippedRoot,
+		strippedRoot: stripped,
 	};
+}
+
+// Resolve <target> (id or name) to its canonical metadata, then download +
+// extract. No console I/O — returns the result or throws. Used by the
+// non-interactive runner; the Ink app resolves metadata itself (to show the
+// name in the prompt) and calls installResolvedSkill directly.
+export async function installSkill(
+	target: string,
+	opts: { rootDir: string; force: boolean },
+): Promise<InstallResult> {
+	const meta = await getSkillMeta(target);
+	return installResolvedSkill(meta, opts);
 }
 
 export function formatInstallResult(r: InstallResult, json: boolean): string {
@@ -117,9 +119,9 @@ export function formatInstallResult(r: InstallResult, json: boolean): string {
 	return `Installed ${r.name}${versionSuffix} -> ${r.dir}`;
 }
 
-// Non-interactive path (`--dir` given, or piped/CI). The interactive
-// location prompt lives in SkillPullApp; here a location MUST be explicit, so a
-// missing --dir is an error rather than a silent default. Returns the exit code.
+// Non-interactive path (`--dir` given, or piped/CI). The interactive location
+// prompt lives in SkillPullApp; here a location MUST be explicit, so a missing
+// --dir is an error rather than a silent default. Returns the exit code.
 export async function runSkillInstall(args: string[]): Promise<number> {
 	const parsed = parsePullArgs(args);
 	if (parsed.error) {
@@ -150,43 +152,4 @@ export async function runSkillInstall(args: string[]): Promise<number> {
 		console.error(err instanceof Error ? err.message : String(err));
 		return 1;
 	}
-}
-
-// Resolve <target> (UUID → download directly; name → exact match from the hub
-// listing) and download + un-nest the ZIP.
-async function resolveAndDownload(target: string): Promise<SkillPayload> {
-	if (UUID_RE.test(target)) {
-		const zip = await downloadSkill(target);
-		const { buffer, stripped } = detectAndStripRoot(zip);
-		// The ZIP's root folder names the skill; fall back to the id if unstripped.
-		return {
-			buffer,
-			name: stripped ?? target,
-			id: target,
-			version: undefined,
-			strippedRoot: stripped,
-		};
-	}
-
-	const { items } = await listHubSkills({ search: target, limit: 50 });
-	const skill = items.find((s) => s.name === target);
-	if (!skill) {
-		const near = items
-			.map((s) => s.name)
-			.slice(0, 5)
-			.join(", ");
-		throw new Error(
-			`No public skill named "${target}".${near ? ` Did you mean: ${near}?` : ""}`,
-		);
-	}
-
-	const zip = await downloadSkill(skill.id);
-	const { buffer, stripped } = detectAndStripRoot(zip);
-	return {
-		buffer,
-		name: skill.name,
-		id: skill.id,
-		version: skill.version,
-		strippedRoot: stripped,
-	};
 }
