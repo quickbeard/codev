@@ -2,7 +2,7 @@ import { render } from "ink";
 import { ConfigApp } from "@/ConfigApp.js";
 import { InstallApp } from "@/InstallApp.js";
 import { LoginApp } from "@/LoginApp.js";
-import { logout } from "@/lib/auth.js";
+import { clearSkillhubCookie, logout } from "@/lib/auth.js";
 import { runClearLogs } from "@/lib/clear-logs.js";
 import { forwardToCodegraph } from "@/lib/codegraph.js";
 import { printHelp, printVersion } from "@/lib/help.js";
@@ -111,7 +111,8 @@ switch (command) {
 	}
 	case "login": {
 		const force = args.includes("--force") || args.includes("-f");
-		const { waitUntilExit } = render(<LoginApp force={force} />);
+		const admin = args.includes("--admin");
+		const { waitUntilExit } = render(<LoginApp force={force} admin={admin} />);
 		try {
 			await waitUntilExit();
 			process.exit(0);
@@ -121,8 +122,10 @@ switch (command) {
 		break;
 	}
 	case "logout": {
-		const ok = await logout();
-		console.log(ok ? "Logged out." : "Not logged in.");
+		// Full sign-out: drop the SSO session AND any SkillHub admin cookie.
+		const ssoOut = await logout();
+		const cookieOut = clearSkillhubCookie();
+		console.log(ssoOut || cookieOut ? "Logged out." : "Not logged in.");
 		process.exit(0);
 		break;
 	}
