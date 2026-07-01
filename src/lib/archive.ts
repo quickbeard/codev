@@ -36,14 +36,26 @@ function isIgnoredFile(name: string): boolean {
 // Extract a ZIP buffer into targetDir with zip-slip protection: any entry that
 // is absolute or resolves outside the target root is rejected rather than
 // written. Directory entries are created; file entries are written verbatim.
+// Entry-count and cumulative-size caps bound a hostile archive (e.g. one pulled
+// from the hub) so it can't fill the disk. Note: adm-zip's getData() inflates a
+// single entry fully into memory, so a crafted per-entry decompression bomb is
+// still bounded only by the compressed input size (see downloadSkill's cap) —
+// the cumulative check below is a backstop against many/large honest entries.
 export async function extractZip(
 	buffer: Buffer,
 	targetDir: string,
 ): Promise<void> {
 	await mkdir(targetDir, { recursive: true });
 	const zip = new AdmZip(buffer);
+	const entries = zip.getEntries();
+	if (entries.length > MAX_ARCHIVE_ENTRIES) {
+		throw new Error(
+			`Archive has too many files (limit ${MAX_ARCHIVE_ENTRIES}).`,
+		);
+	}
 	const root = resolve(targetDir);
-	for (const entry of zip.getEntries()) {
+	let written = 0;
+	for (const entry of entries) {
 		const entryName = entry.entryName;
 		if (isAbsolute(entryName)) {
 			throw new Error(`unsafe zip entry: ${entryName}`);
@@ -57,8 +69,15 @@ export async function extractZip(
 			await mkdir(dest, { recursive: true });
 			continue;
 		}
+		const data = entry.getData();
+		written += data.length;
+		if (written > MAX_ARCHIVE_BYTES) {
+			throw new Error(
+				`Archive exceeds the ${MAX_ARCHIVE_BYTES / 1024 / 1024} MB limit.`,
+			);
+		}
 		await mkdir(dirname(dest), { recursive: true });
-		await writeFile(dest, entry.getData());
+		await writeFile(dest, data);
 	}
 }
 
@@ -183,13 +202,21 @@ export async function zipDirectory(
 	};
 }
 
-// Enumerate a pre-built ZIP's file entries and uncompressed total. Used to
-// preview and size-check a user-supplied `.zip` before uploading it. Throws if
-// it blows past the same caps zipDirectory enforces.
+// Enumerate a ZIP's file entries and uncompressed total, enforcing the archive
+// caps. Used to preview + size-check a user-supplied `.zip` before uploading it
+// (`skill push`) and to vet a hub download before extracting it (`skill pull`).
+// Checks the compressed buffer, the declared uncompressed total, and the entry
+// count — all cheap (central-directory reads, no inflation). Throws if any cap
+// is exceeded.
 export function inspectZip(zipBuffer: Buffer): {
 	files: string[];
 	totalBytes: number;
 } {
+	if (zipBuffer.length > MAX_ARCHIVE_BYTES) {
+		throw new Error(
+			`Archive exceeds the ${MAX_ARCHIVE_BYTES / 1024 / 1024} MB limit.`,
+		);
+	}
 	const zip = new AdmZip(zipBuffer);
 	const files: string[] = [];
 	let totalBytes = 0;
@@ -200,7 +227,7 @@ export function inspectZip(zipBuffer: Buffer): {
 	}
 	if (totalBytes > MAX_ARCHIVE_BYTES) {
 		throw new Error(
-			`Archive exceeds the ${MAX_ARCHIVE_BYTES / 1024 / 1024} MB upload limit.`,
+			`Archive exceeds the ${MAX_ARCHIVE_BYTES / 1024 / 1024} MB limit.`,
 		);
 	}
 	if (files.length > MAX_ARCHIVE_ENTRIES) {

@@ -177,4 +177,38 @@ describe("runSkillInstall", () => {
 		expect(getMeta).not.toHaveBeenCalled();
 		expect(errs.join("\n")).toMatch(/pass --dir/i);
 	});
+
+	test("rejects a server name that escapes the target dir (no download, no write)", async () => {
+		vi.spyOn(skillhub, "getSkillMeta").mockResolvedValue({
+			id: META.id,
+			name: "../../evil",
+			version: "1.0.0",
+		});
+		const dl = mockDownload();
+		const errs = captureErr();
+
+		const code = await runSkillInstall(["whatever", "--dir", tempDir]);
+
+		expect(code).toBe(1);
+		expect(errs.join("\n")).toMatch(/unsafe name/i);
+		// The path is validated before any network or filesystem work.
+		expect(dl).not.toHaveBeenCalled();
+		expect(existsSync(join(tempDir, "..", "evil"))).toBe(false);
+	});
+
+	test("rejects a server name containing a path separator", async () => {
+		vi.spyOn(skillhub, "getSkillMeta").mockResolvedValue({
+			id: META.id,
+			name: "nested/name",
+			version: "1.0.0",
+		});
+		const dl = mockDownload();
+		const errs = captureErr();
+
+		const code = await runSkillInstall(["whatever", "--dir", tempDir]);
+
+		expect(code).toBe(1);
+		expect(errs.join("\n")).toMatch(/unsafe name/i);
+		expect(dl).not.toHaveBeenCalled();
+	});
 });
