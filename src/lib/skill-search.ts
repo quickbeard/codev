@@ -3,9 +3,9 @@ import { type HubSkill, listHubSkills } from "@/lib/skillhub.js";
 const DEFAULT_LIMIT = 20;
 const DESCRIPTION_MAX = 90;
 
-// `codev skill search [query] [--json] [--limit <n>]`. Plain console output
+// `codev skill search <query> [--json] [--limit <n>]`. Plain console output
 // (no Ink) so results pipe cleanly and `--json` is script-friendly — mirrors
-// the deprecated `skillhub search`. Returns the process exit code.
+// the deprecated `skillhub search`. The query is required. Returns the exit code.
 export async function runSkillSearch(args: string[]): Promise<number> {
 	const json = args.includes("--json");
 
@@ -31,7 +31,11 @@ export async function runSkillSearch(args: string[]): Promise<number> {
 		if (args[i]?.startsWith("--")) continue;
 		positionals.push(args[i] as string);
 	}
-	const query = positionals.length > 0 ? positionals.join(" ") : undefined;
+	const query = positionals.join(" ").trim();
+	if (!query) {
+		console.error("Usage: codev skill search <query> [--json] [--limit <n>]");
+		return 1;
+	}
 
 	try {
 		const { total, items } = await listHubSkills({ search: query, limit });
@@ -41,9 +45,7 @@ export async function runSkillSearch(args: string[]): Promise<number> {
 			return 0;
 		}
 		if (items.length === 0) {
-			console.log(
-				query ? `No skills match "${query}".` : "No public skills yet.",
-			);
+			console.log(`No skills match "${query}".`);
 			return 0;
 		}
 		console.log(formatResults(total, items));
@@ -57,7 +59,7 @@ export async function runSkillSearch(args: string[]): Promise<number> {
 function formatResults(total: number, items: HubSkill[]): string {
 	const lines = [`Found ${total} skill(s) — showing ${items.length}:`, ""];
 	for (const s of items) {
-		lines.push(`  ${s.name}@${s.version}  by ${s.provider}`);
+		lines.push(`  ${s.name}@${s.version} by ${s.provider}`);
 		const desc = s.description ?? "";
 		const trimmed =
 			desc.length > DESCRIPTION_MAX

@@ -48,13 +48,13 @@ describe("runSkillSearch", () => {
 		expect(spy).toHaveBeenCalledWith({ search: "postgres tuning", limit: 20 });
 	});
 
-	test("parses --limit and treats a bare invocation as no query", async () => {
+	test("parses --limit alongside the query", async () => {
 		const spy = mockSearch([SKILL]);
 		captureLog();
 
-		await runSkillSearch(["--limit", "5"]);
+		await runSkillSearch(["pg", "--limit", "5"]);
 
-		expect(spy).toHaveBeenCalledWith({ search: undefined, limit: 5 });
+		expect(spy).toHaveBeenCalledWith({ search: "pg", limit: 5 });
 	});
 
 	test("renders a human-readable list", async () => {
@@ -65,7 +65,7 @@ describe("runSkillSearch", () => {
 
 		const text = out.join("\n");
 		expect(text).toContain("Found 7 skill(s) — showing 1:");
-		expect(text).toContain("pg-tuner@1.2.0  by viettel");
+		expect(text).toContain("pg-tuner@1.2.0 by viettel");
 		expect(text).toContain("Tune Postgres configs");
 		expect(text).toContain("id: id-1");
 	});
@@ -91,13 +91,15 @@ describe("runSkillSearch", () => {
 		expect(out.join("\n")).toBe('No skills match "nope".');
 	});
 
-	test("shows the empty-hub message when no query and no results", async () => {
-		mockSearch([]);
-		const out = captureLog();
+	test("requires a query (errors without calling the API)", async () => {
+		const spy = mockSearch([SKILL]);
+		const errs = captureErr();
 
-		await runSkillSearch([]);
+		const code = await runSkillSearch([]);
 
-		expect(out.join("\n")).toBe("No public skills yet.");
+		expect(code).toBe(1);
+		expect(spy).not.toHaveBeenCalled();
+		expect(errs.join("\n")).toMatch(/Usage: codev skill search <query>/);
 	});
 
 	test("rejects a non-positive --limit without calling the API", async () => {
