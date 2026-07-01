@@ -67,10 +67,6 @@ export function SUPABASE_ANON_KEY(): string {
 	return readField("supabase_anon_key", "supabase_anon_key");
 }
 
-// The public gateway base URL, fetched from the backend's POST /config endpoint
-// and cached in ~/.codev/auth.json (see refreshCodevConfig). Like the Supabase
-// accessors, this hard-fails with an actionable message if the cache was never
-// populated — every consumer runs after a login that refreshes config.
 export function AI_GATEWAY_URL(): string {
 	return readField("gateway_url", "gateway_url");
 }
