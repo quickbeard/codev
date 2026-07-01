@@ -7,8 +7,6 @@ const BASE_URL = atob("aHR0cHM6Ly9uZXRtaW5kLnZpZXR0ZWwudm4=");
 export const BACKEND_URL = `${BASE_URL}/codev-backend`;
 export const SSO_URL = `${BASE_URL}/sso-wrapper`;
 export const LOGIN_SUCCESS_URL = `${BASE_URL}/codev-landing-page/oauth/success`;
-// SkillHub registry — the private skill hub codev pushes/pulls skills from. Same
-// host and SSO realm as codev, mounted under the `/netmindhub` base path.
 export const SKILLHUB_URL = `${BASE_URL}/netmindhub`;
 
 export const FALLBACK_MODEL = atob("TWluaU1heC9NaW5pTWF4LU0yLjc=");
