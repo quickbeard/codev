@@ -74,6 +74,16 @@ function AdminLoginApp({
 		[exit],
 	);
 
+	// The interactive form gave up after its attempt cap. <AdminLogin> keeps its
+	// own "giving up" frame on screen, so just hold briefly for readability, then
+	// reject waitUntilExit so the dispatcher exits non-zero.
+	const handleFail = useCallback(
+		(msg: string) => {
+			setTimeout(() => exit(new Error(msg)), 800);
+		},
+		[exit],
+	);
+
 	useEffect(() => {
 		if (!nonInteractive || didRunRef.current) return;
 		didRunRef.current = true;
@@ -114,7 +124,7 @@ function AdminLoginApp({
 			</Box>
 		);
 	} else {
-		content = <AdminLogin onDone={handleDone} />;
+		content = <AdminLogin onDone={handleDone} onFail={handleFail} />;
 	}
 
 	return (

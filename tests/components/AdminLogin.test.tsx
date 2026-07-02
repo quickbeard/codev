@@ -114,4 +114,50 @@ describe("AdminLogin", () => {
 		expect(save).not.toHaveBeenCalled();
 		expect(onDone).not.toHaveBeenCalled();
 	});
+
+	test("caps interactive retries at maxAttempts and calls onFail", async () => {
+		const signIn = vi
+			.spyOn(skillhub, "skillhubSignIn")
+			.mockRejectedValue(new Error("Invalid username or password"));
+		vi.spyOn(auth, "saveSkillhubCookie").mockImplementation(() => {});
+		const onFail = vi.fn();
+
+		const { stdin, lastFrame } = render(
+			<AdminLogin onDone={vi.fn()} onFail={onFail} maxAttempts={3} />,
+		);
+
+		// One failed sign-in: type username + password, submit, wait for the
+		// error, then (unless it's the last) press Enter to retry.
+		const failedAttempt = async (n: number, last: boolean) => {
+			await typeField(stdin, lastFrame, "root", () =>
+				stripAnsi(lastFrame() ?? "").includes("root"),
+			);
+			await typeField(stdin, lastFrame, "bad", () =>
+				stripAnsi(lastFrame() ?? "").includes("•••"),
+			);
+			if (last) {
+				await waitFor(() =>
+					stripAnsi(lastFrame() ?? "").includes(
+						"3 failed attempts — giving up",
+					),
+				);
+			} else {
+				await waitFor(() =>
+					stripAnsi(lastFrame() ?? "").includes(`attempt ${n} of 3`),
+				);
+				expect(onFail).not.toHaveBeenCalled();
+				stdin.write("\r"); // back to the input phase for the next try
+			}
+		};
+
+		await failedAttempt(1, false);
+		await failedAttempt(2, false);
+		await failedAttempt(3, true);
+
+		expect(signIn).toHaveBeenCalledTimes(3);
+		expect(onFail).toHaveBeenCalledTimes(1);
+		expect(onFail).toHaveBeenCalledWith("Invalid username or password");
+		// The terminal state no longer offers a retry.
+		expect(stripAnsi(lastFrame() ?? "")).not.toContain("press Enter to retry");
+	});
 });
