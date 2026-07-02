@@ -22,9 +22,10 @@ const FIELDS: { key: FieldKey; label: string; mask: boolean }[] = [
 ];
 const LABEL_WIDTH = Math.max(...FIELDS.map((f) => f.label.length));
 
-// "input" accepts a fresh attempt; "error" is a recoverable failure (Enter
-// retries); "failed" is the terminal state after maxAttempts — no more retries.
-type Phase = "input" | "submitting" | "error" | "failed";
+// "input" accepts a fresh attempt (a failed sign-in below the cap drops
+// straight back here with the fields cleared); "failed" is the terminal state
+// after maxAttempts — no more retries.
+type Phase = "input" | "submitting" | "failed";
 
 // Interactive username/password form for `codev login --admin`. Only local
 // ADMIN/SUPERADMIN accounts can use this — regular users are rejected
@@ -66,7 +67,11 @@ export function AdminLogin({
 					setPhase("failed");
 					onFail?.(msg);
 				} else {
-					setPhase("error");
+					// Retry right away: clear the fields and drop back to the input
+					// phase so the user can retype immediately — no Enter-to-retry gate.
+					setValues({ username: "", password: "" });
+					setIndex(0);
+					setPhase("input");
 				}
 			}
 		},
@@ -75,16 +80,6 @@ export function AdminLogin({
 
 	useInput(
 		(input, key) => {
-			// After a failed sign-in, Enter clears the form for a fresh attempt.
-			if (phase === "error") {
-				if (key.return) {
-					setValues({ username: "", password: "" });
-					setIndex(0);
-					setError(null);
-					setPhase("input");
-				}
-				return;
-			}
 			if (phase !== "input") return;
 
 			const current = FIELDS[index];
@@ -128,7 +123,7 @@ export function AdminLogin({
 				[current.key]: prev[current.key] + cleaned,
 			}));
 		},
-		{ isActive: phase === "input" || phase === "error" },
+		{ isActive: phase === "input" },
 	);
 
 	if (phase === "submitting") {
@@ -162,10 +157,8 @@ export function AdminLogin({
 			{error && (
 				<Box marginTop={1}>
 					<Text color="red">{error}</Text>
-					{phase === "error" && (
-						<Text
-							dimColor
-						>{`  (attempt ${attempts} of ${maxAttempts} — press Enter to retry)`}</Text>
+					{phase === "input" && attempts > 0 && (
+						<Text dimColor>{`  (attempt ${attempts} of ${maxAttempts})`}</Text>
 					)}
 					{phase === "failed" && (
 						<Text
