@@ -65,6 +65,19 @@ async function gateSqlite(): Promise<void> {
 
 const [command, ...args] = process.argv.slice(2);
 
+// Read the value of a `--name value` / `--name=value` flag from argv, or
+// undefined when the flag is absent. Used for the non-interactive admin-login
+// credentials on `codev login`.
+function flagValue(argv: string[], name: string): string | undefined {
+	const eq = `${name}=`;
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i];
+		if (arg === name) return argv[i + 1];
+		if (arg?.startsWith(eq)) return arg.slice(eq.length);
+	}
+	return undefined;
+}
+
 // Diagnostic logging (~/.codev/logs/codev-YYYYMMDD.ndjson, ECS NDJSON) starts
 // before dispatch so every command logs its start/end and crashes. File-only —
 // never stdout/stderr, which the Ink apps own.
@@ -116,8 +129,29 @@ switch (command) {
 	}
 	case "login": {
 		const force = args.includes("--force") || args.includes("-f");
-		const admin = args.includes("--admin");
-		const { waitUntilExit } = render(<LoginApp force={force} admin={admin} />);
+		const username = flagValue(args, "--username");
+		const password = flagValue(args, "--password");
+		// Passing either credential implies the admin (username/password) flow, so
+		// `codev login --username u --password p` works without also typing --admin.
+		const admin =
+			args.includes("--admin") ||
+			username !== undefined ||
+			password !== undefined;
+		// Non-interactive admin login needs both halves; one alone is a usage error.
+		if ((username === undefined) !== (password === undefined)) {
+			console.error(
+				"codev login: --username and --password must be provided together.",
+			);
+			process.exit(1);
+		}
+		const { waitUntilExit } = render(
+			<LoginApp
+				force={force}
+				admin={admin}
+				username={username}
+				password={password}
+			/>,
+		);
 		try {
 			await waitUntilExit();
 			process.exit(0);

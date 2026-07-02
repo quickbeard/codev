@@ -21,7 +21,8 @@ Commands:
   logs                Show the last run from the diagnostic log
                       (--path newest file, --trace <id> one run, --verbose extra detail)
   login               Sign in to SSO (--force to bypass cached session,
-                      --admin for admin username/password sign-in)
+                      --admin for interactive admin sign-in, or
+                      --username <u> --password <p> for non-interactive admin sign-in)
   logout              Sign out (SSO and admin session)
   remove              Revert this machine to its pre-CoDev state (--yes to skip prompt)
   --version, -v       Show version

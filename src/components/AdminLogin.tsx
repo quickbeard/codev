@@ -1,11 +1,17 @@
 import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { saveSkillhubCookie } from "@/lib/auth.js";
 import { type SkillhubUser, skillhubSignIn } from "@/lib/skillhub.js";
 
 interface AdminLoginProps {
 	onDone: (user: SkillhubUser) => void;
+	// Called after the final failed attempt (maxAttempts reached). The form
+	// stops accepting Enter-to-retry at that point, so the caller can exit
+	// non-zero. Optional — omit to keep retries unbounded.
+	onFail?: (message: string) => void;
+	// How many credential attempts before giving up. Default 3.
+	maxAttempts?: number;
 }
 
 type FieldKey = "username" | "password";
@@ -16,13 +22,20 @@ const FIELDS: { key: FieldKey; label: string; mask: boolean }[] = [
 ];
 const LABEL_WIDTH = Math.max(...FIELDS.map((f) => f.label.length));
 
-type Phase = "input" | "submitting" | "error";
+// "input" accepts a fresh attempt (a failed sign-in below the cap drops
+// straight back here with the fields cleared); "failed" is the terminal state
+// after maxAttempts — no more retries.
+type Phase = "input" | "submitting" | "failed";
 
 // Interactive username/password form for `codev login --admin`. Only local
 // ADMIN/SUPERADMIN accounts can use this — regular users are rejected
 // server-side and must log in via SSO (`codev login`). On success it captures
 // the skill-hub-session cookie and persists it via saveSkillhubCookie.
-export function AdminLogin({ onDone }: AdminLoginProps) {
+export function AdminLogin({
+	onDone,
+	onFail,
+	maxAttempts = 3,
+}: AdminLoginProps) {
 	const [values, setValues] = useState<Record<FieldKey, string>>({
 		username: "",
 		password: "",
@@ -30,6 +43,10 @@ export function AdminLogin({ onDone }: AdminLoginProps) {
 	const [index, setIndex] = useState(0);
 	const [phase, setPhase] = useState<Phase>("input");
 	const [error, setError] = useState<string | null>(null);
+	// Authoritative attempt count for the give-up decision (read inside the
+	// async submit, so a ref rather than the render-only `attempts` mirror).
+	const attemptsRef = useRef(0);
+	const [attempts, setAttempts] = useState(0);
 
 	const submit = useCallback(
 		async (username: string, password: string) => {
@@ -39,25 +56,30 @@ export function AdminLogin({ onDone }: AdminLoginProps) {
 				saveSkillhubCookie(cookie);
 				onDone(user);
 			} catch (err) {
-				setError(err instanceof Error ? err.message : String(err));
-				setPhase("error");
+				const msg = err instanceof Error ? err.message : String(err);
+				const used = attemptsRef.current + 1;
+				attemptsRef.current = used;
+				setAttempts(used);
+				setError(msg);
+				if (used >= maxAttempts) {
+					// Out of attempts — freeze in the terminal state and hand the
+					// failure up so the caller can exit non-zero.
+					setPhase("failed");
+					onFail?.(msg);
+				} else {
+					// Retry right away: clear the fields and drop back to the input
+					// phase so the user can retype immediately — no Enter-to-retry gate.
+					setValues({ username: "", password: "" });
+					setIndex(0);
+					setPhase("input");
+				}
 			}
 		},
-		[onDone],
+		[onDone, onFail, maxAttempts],
 	);
 
 	useInput(
 		(input, key) => {
-			// After a failed sign-in, Enter clears the form for a fresh attempt.
-			if (phase === "error") {
-				if (key.return) {
-					setValues({ username: "", password: "" });
-					setIndex(0);
-					setError(null);
-					setPhase("input");
-				}
-				return;
-			}
 			if (phase !== "input") return;
 
 			const current = FIELDS[index];
@@ -101,7 +123,7 @@ export function AdminLogin({ onDone }: AdminLoginProps) {
 				[current.key]: prev[current.key] + cleaned,
 			}));
 		},
-		{ isActive: phase === "input" || phase === "error" },
+		{ isActive: phase === "input" },
 	);
 
 	if (phase === "submitting") {
@@ -135,8 +157,13 @@ export function AdminLogin({ onDone }: AdminLoginProps) {
 			{error && (
 				<Box marginTop={1}>
 					<Text color="red">{error}</Text>
-					{phase === "error" && (
-						<Text dimColor>{"  (press Enter to retry)"}</Text>
+					{phase === "input" && attempts > 0 && (
+						<Text dimColor>{`  (attempt ${attempts} of ${maxAttempts})`}</Text>
+					)}
+					{phase === "failed" && (
+						<Text
+							dimColor
+						>{`  (${maxAttempts} failed attempts — giving up)`}</Text>
 					)}
 				</Box>
 			)}
