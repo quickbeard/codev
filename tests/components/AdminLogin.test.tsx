@@ -118,9 +118,15 @@ describe("AdminLogin", () => {
 		// The just-typed username was cleared.
 		expect(stripAnsi(lastFrame() ?? "")).not.toContain("root");
 
-		// A fresh username can be typed right away.
-		stdin.write("admin2");
-		await waitFor(() => stripAnsi(lastFrame() ?? "").includes("admin2"));
+		// A fresh username can be typed right away. Re-issue the keystroke inside
+		// waitFor: on a slow (Windows) runner the write can land in the brief gap
+		// while Ink re-attaches its input listener after the submitting→input
+		// transition and be dropped, so retry until the frame reflects it. "z"
+		// appears nowhere else in the frame, so it uniquely marks the typed input.
+		await waitFor(() => {
+			stdin.write("z");
+			return stripAnsi(lastFrame() ?? "").includes("z");
+		});
 
 		expect(save).not.toHaveBeenCalled();
 		expect(onDone).not.toHaveBeenCalled();
