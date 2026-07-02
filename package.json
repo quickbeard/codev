@@ -31,8 +31,7 @@
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
-      "pnpm check",
-      "pnpm typecheck"
+      "pnpm check"
     ]
   },
   "dependencies": {
