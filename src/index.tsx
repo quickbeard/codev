@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { styleText } from "node:util";
 import { render } from "ink";
 import { ConfigApp } from "@/ConfigApp.js";
 import { InstallApp } from "@/InstallApp.js";
@@ -222,6 +225,25 @@ switch (command) {
 		process.exit(runRestore(toolForRestoreAgent(agent as RestoreAgent)));
 		break;
 	}
+	// `codev init` initializes the current project for CoDev. Hint that the
+	// generated `.codegraph/` directory should be committed so the whole team
+	// shares one knowledge graph — but only if it's actually on disk afterward.
+	// `codegraph init` exits 0 on no-ops too (e.g. `--help`), so we gate on the
+	// artifact existing rather than the exit code alone. `init [path]` writes
+	// into the given directory (the first non-flag arg), defaulting to cwd.
+	case "init": {
+		const code = await forwardToCodegraph(["init", ...args]);
+		const targetDir = args.find((a) => !a.startsWith("-")) ?? ".";
+		if (code === 0 && existsSync(join(targetDir, ".codegraph"))) {
+			console.log(
+				`Created the local ${styleText("cyan", ".codegraph/")} directory. ` +
+					"You can commit it if you'd like to share the knowledge graph with " +
+					"your team.",
+			);
+		}
+		process.exit(code);
+		break;
+	}
 	// `skill <subcommand>`: operations against the SkillHub registry. Namespaced
 	// so it doesn't collide with `codev install` (which installs agents).
 	// `pull` downloads/installs a skill (not `install`, to avoid that confusion);
@@ -324,7 +346,7 @@ switch (command) {
 		process.exit(await runAgent("opencode", args));
 		break;
 	// Transparent passthrough to CodeGraph: `codev codegraph <args>` ≡
-	// `codegraph <args>` (e.g. `codev codegraph init -y`). No upload daemon and
+	// `codegraph <args>` (e.g. `codev codegraph init`). No upload daemon and
 	// no shim handling — CodeGraph isn't a chat agent and isn't shimmed.
 	case "codegraph":
 		process.exit(await forwardToCodegraph(args));

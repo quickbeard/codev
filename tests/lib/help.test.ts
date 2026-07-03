@@ -55,6 +55,11 @@ describe("printHelp", () => {
 		expect(output()).toContain("login");
 	});
 
+	test("lists the init command", () => {
+		printHelp();
+		expect(output()).toContain("init");
+	});
+
 	test("lists the remove command", () => {
 		printHelp();
 		expect(output()).toContain("remove");
