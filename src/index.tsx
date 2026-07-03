@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { render } from "ink";
 import { ConfigApp } from "@/ConfigApp.js";
 import { InstallApp } from "@/InstallApp.js";
@@ -329,14 +331,16 @@ switch (command) {
 	case "codegraph":
 		process.exit(await forwardToCodegraph(args));
 		break;
-	// `codev init` initializes the current project for CoDev. On success, hint
-	// that the generated `.codegraph/` directory should be committed so the
-	// whole team shares one knowledge graph.
+	// `codev init` initializes the current project for CoDev. Hint that the
+	// generated `.codegraph/` directory should be committed so the whole team
+	// shares one knowledge graph — but only if it's actually on disk afterward.
+	// `codegraph init` exits 0 on no-ops too (e.g. `--help`), so we gate on the
+	// artifact existing rather than the exit code alone. `init [path]` writes
+	// into the given directory (the first non-flag arg), defaulting to cwd.
 	case "init": {
 		const code = await forwardToCodegraph(["init", ...args]);
-		// Skip the hint for `--help`/`-h`, which exits 0 without creating anything.
-		const helpOnly = args.includes("--help") || args.includes("-h");
-		if (code === 0 && !helpOnly) {
+		const targetDir = args.find((a) => !a.startsWith("-")) ?? ".";
+		if (code === 0 && existsSync(join(targetDir, ".codegraph"))) {
 			console.log(
 				"\nCreated the local .codegraph/ directory. Commit it to share the " +
 					"knowledge graph with your team.",
