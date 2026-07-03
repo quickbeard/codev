@@ -342,8 +342,8 @@ switch (command) {
 		const targetDir = args.find((a) => !a.startsWith("-")) ?? ".";
 		if (code === 0 && existsSync(join(targetDir, ".codegraph"))) {
 			console.log(
-				"\nCreated the local .codegraph/ directory. Commit it to share the " +
-					"knowledge graph with your team.",
+				"\nCreated the local .codegraph/ directory. You can commit it if " +
+					"you'd like to share the knowledge graph with your team.",
 			);
 		}
 		process.exit(code);
