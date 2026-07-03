@@ -324,10 +324,14 @@ switch (command) {
 		process.exit(await runAgent("opencode", args));
 		break;
 	// Transparent passthrough to CodeGraph: `codev codegraph <args>` ≡
-	// `codegraph <args>` (e.g. `codev codegraph init -y`). No upload daemon and
+	// `codegraph <args>` (e.g. `codev codegraph init`). No upload daemon and
 	// no shim handling — CodeGraph isn't a chat agent and isn't shimmed.
 	case "codegraph":
 		process.exit(await forwardToCodegraph(args));
+		break;
+	// `codev init` initializes the current project for CoDev.
+	case "init":
+		process.exit(await forwardToCodegraph(["init", ...args]));
 		break;
 	// ── Hidden commands ──────────────────────────────────────────────────
 	// Intentionally not surfaced in --help, README, or AGENTS.md. Kept
