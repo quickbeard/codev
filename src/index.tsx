@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { styleText } from "node:util";
 import { render } from "ink";
 import { ConfigApp } from "@/ConfigApp.js";
 import { InstallApp } from "@/InstallApp.js";
@@ -342,8 +343,9 @@ switch (command) {
 		const targetDir = args.find((a) => !a.startsWith("-")) ?? ".";
 		if (code === 0 && existsSync(join(targetDir, ".codegraph"))) {
 			console.log(
-				"Created the local .codegraph/ directory. You can commit it if " +
-					"you'd like to share the knowledge graph with your team.",
+				`Created the local ${styleText("cyan", ".codegraph/")} directory. ` +
+					"You can commit it if you'd like to share the knowledge graph with " +
+					"your team.",
 			);
 		}
 		process.exit(code);
