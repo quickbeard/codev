@@ -329,10 +329,22 @@ switch (command) {
 	case "codegraph":
 		process.exit(await forwardToCodegraph(args));
 		break;
-	// `codev init` initializes the current project for CoDev.
-	case "init":
-		process.exit(await forwardToCodegraph(["init", ...args]));
+	// `codev init` initializes the current project for CoDev. On success, hint
+	// that the generated `.codegraph/` directory should be committed so the
+	// whole team shares one knowledge graph.
+	case "init": {
+		const code = await forwardToCodegraph(["init", ...args]);
+		// Skip the hint for `--help`/`-h`, which exits 0 without creating anything.
+		const helpOnly = args.includes("--help") || args.includes("-h");
+		if (code === 0 && !helpOnly) {
+			console.log(
+				"\nCreated the local .codegraph/ directory. Commit it to share the " +
+					"knowledge graph with your team.",
+			);
+		}
+		process.exit(code);
 		break;
+	}
 	// ── Hidden commands ──────────────────────────────────────────────────
 	// Intentionally not surfaced in --help, README, or AGENTS.md. Kept
 	// grouped at the end of the switch, after every documented command.
