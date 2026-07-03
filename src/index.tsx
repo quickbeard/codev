@@ -83,310 +83,302 @@ function flagValue(argv: string[], name: string): string | undefined {
 // never stdout/stderr, which the Ink apps own.
 initLogging(command ?? "help", args);
 
-switch (command) {
-	case undefined:
-	case "--help":
-	case "-h":
-	case "help":
-		printHelp();
-		process.exit(0);
-		break;
-	case "--version":
-	case "-v":
-	case "version":
-		printVersion();
-		process.exit(0);
-		break;
-	case "install": {
-		const { waitUntilExit } = render(<InstallApp />);
-		try {
-			await waitUntilExit();
-			process.exit(0);
-		} catch {
-			process.exit(1);
-		}
-		break;
-	}
-	case "config": {
-		const { waitUntilExit } = render(<ConfigApp />);
-		try {
-			await waitUntilExit();
-			process.exit(0);
-		} catch {
-			process.exit(1);
-		}
-		break;
-	}
-	case "update": {
-		const { waitUntilExit } = render(<UpdateApp />);
-		try {
-			await waitUntilExit();
-			process.exit(0);
-		} catch {
-			process.exit(1);
-		}
-		break;
-	}
-	case "login": {
-		const force = args.includes("--force") || args.includes("-f");
-		const username = flagValue(args, "--username");
-		const password = flagValue(args, "--password");
-		// Passing either credential implies the admin (username/password) flow, so
-		// `codev login --username u --password p` works without also typing --admin.
-		const admin =
-			args.includes("--admin") ||
-			username !== undefined ||
-			password !== undefined;
-		// Non-interactive admin login needs both halves; one alone is a usage error.
-		if ((username === undefined) !== (password === undefined)) {
-			console.error(
-				"codev login: --username and --password must be provided together.",
-			);
-			process.exit(1);
-		}
-		const { waitUntilExit } = render(
-			<LoginApp
-				force={force}
-				admin={admin}
-				username={username}
-				password={password}
-			/>,
-		);
-		try {
-			await waitUntilExit();
-			process.exit(0);
-		} catch {
-			process.exit(1);
-		}
-		break;
-	}
-	case "logout": {
-		// Full sign-out: drop the SSO session AND any SkillHub admin cookie.
-		const ssoOut = await logout();
-		const cookieOut = clearSkillhubCookie();
-		console.log(ssoOut || cookieOut ? "Logged out." : "Not logged in.");
-		process.exit(0);
-		break;
-	}
-	case "remove": {
-		const skipConfirm = args.includes("--yes") || args.includes("-y");
-		const { waitUntilExit } = render(<RemoveApp skipConfirm={skipConfirm} />);
-		try {
-			await waitUntilExit();
-			process.exit(0);
-		} catch {
-			process.exit(1);
-		}
-		break;
-	}
-	case "model": {
-		const { waitUntilExit } = render(<ModelApp />);
-		try {
-			await waitUntilExit();
-			process.exit(0);
-		} catch {
-			process.exit(1);
-		}
-		break;
-	}
-	case "upload": {
-		await gateSqlite();
-		if (args.includes("--daemon")) {
-			process.exit(await runUploadDaemon());
-		}
-		const force = args.includes("--force") || args.includes("-f");
-		const { waitUntilExit } = render(<UploadApp force={force} />);
-		try {
-			await waitUntilExit();
-			process.exit(0);
-		} catch {
-			process.exit(1);
-		}
-		break;
-	}
-	case "logs": {
-		process.exit(runLogs(args));
-		break;
-	}
-	case "restore": {
-		const agent = args[0];
-		if (agent === undefined) {
-			process.exit(runRestoreAll());
-		}
-		if (!(RESTORE_AGENTS as readonly string[]).includes(agent)) {
-			console.error(
-				`Unknown agent: ${agent}. Valid: ${RESTORE_AGENTS.join(", ")}.`,
-			);
-			process.exit(1);
-		}
-		process.exit(runRestore(toolForRestoreAgent(agent as RestoreAgent)));
-		break;
-	}
-	// `skill <subcommand>`: operations against the SkillHub registry. Namespaced
-	// so it doesn't collide with `codev install` (which installs agents).
-	// `pull` downloads/installs a skill (not `install`, to avoid that confusion);
-	// `push` publishes one; whoami migrates here next.
-	case "skill": {
-		const [sub, ...rest] = args;
-		if (sub === "search") {
-			process.exit(await runSkillSearch(rest));
-		}
-		if (sub === "push") {
-			const parsed = parsePublishArgs(rest);
-			if (!parsed.path) {
-				console.error(
-					"Usage: codev skill push <path> [--draft-only] [--auto-approve] [--json]",
-				);
-				process.exit(1);
+// Dispatch a single command and resolve to its process exit code. Every branch
+// returns a code rather than calling process.exit itself, so there's exactly
+// one exit point (`process.exit(await dispatch())` below) and no unreachable
+// break statements after the exits.
+async function dispatch(): Promise<number> {
+	switch (command) {
+		case undefined:
+		case "--help":
+		case "-h":
+		case "help":
+			printHelp();
+			return 0;
+		case "--version":
+		case "-v":
+		case "version":
+			printVersion();
+			return 0;
+		case "install": {
+			const { waitUntilExit } = render(<InstallApp />);
+			try {
+				await waitUntilExit();
+				return 0;
+			} catch {
+				return 1;
 			}
-			// Interactive TTY (and not --json): preview + confirm before uploading
-			// (Ink). Otherwise (piped/CI, or --json) go the plain runner.
-			const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-			if (interactive && !parsed.json) {
-				let ok = true;
-				const { waitUntilExit } = render(
-					<SkillPushApp
-						path={parsed.path}
-						json={parsed.json}
-						draftOnly={parsed.draftOnly}
-						autoApprove={parsed.autoApprove}
-						onDone={(v) => {
-							ok = v;
-						}}
-					/>,
+		}
+		case "config": {
+			const { waitUntilExit } = render(<ConfigApp />);
+			try {
+				await waitUntilExit();
+				return 0;
+			} catch {
+				return 1;
+			}
+		}
+		case "update": {
+			const { waitUntilExit } = render(<UpdateApp />);
+			try {
+				await waitUntilExit();
+				return 0;
+			} catch {
+				return 1;
+			}
+		}
+		case "login": {
+			const force = args.includes("--force") || args.includes("-f");
+			const username = flagValue(args, "--username");
+			const password = flagValue(args, "--password");
+			// Passing either credential implies the admin (username/password) flow, so
+			// `codev login --username u --password p` works without also typing --admin.
+			const admin =
+				args.includes("--admin") ||
+				username !== undefined ||
+				password !== undefined;
+			// Non-interactive admin login needs both halves; one alone is a usage error.
+			if ((username === undefined) !== (password === undefined)) {
+				console.error(
+					"codev login: --username and --password must be provided together.",
 				);
-				try {
-					await waitUntilExit();
-				} catch {
-					process.exit(1);
+				return 1;
+			}
+			const { waitUntilExit } = render(
+				<LoginApp
+					force={force}
+					admin={admin}
+					username={username}
+					password={password}
+				/>,
+			);
+			try {
+				await waitUntilExit();
+				return 0;
+			} catch {
+				return 1;
+			}
+		}
+		case "logout": {
+			// Full sign-out: drop the SSO session AND any SkillHub admin cookie.
+			const ssoOut = await logout();
+			const cookieOut = clearSkillhubCookie();
+			console.log(ssoOut || cookieOut ? "Logged out." : "Not logged in.");
+			return 0;
+		}
+		case "remove": {
+			const skipConfirm = args.includes("--yes") || args.includes("-y");
+			const { waitUntilExit } = render(<RemoveApp skipConfirm={skipConfirm} />);
+			try {
+				await waitUntilExit();
+				return 0;
+			} catch {
+				return 1;
+			}
+		}
+		case "model": {
+			const { waitUntilExit } = render(<ModelApp />);
+			try {
+				await waitUntilExit();
+				return 0;
+			} catch {
+				return 1;
+			}
+		}
+		case "upload": {
+			await gateSqlite();
+			if (args.includes("--daemon")) {
+				return runUploadDaemon();
+			}
+			const force = args.includes("--force") || args.includes("-f");
+			const { waitUntilExit } = render(<UploadApp force={force} />);
+			try {
+				await waitUntilExit();
+				return 0;
+			} catch {
+				return 1;
+			}
+		}
+		case "logs":
+			return runLogs(args);
+		case "restore": {
+			const agent = args[0];
+			if (agent === undefined) {
+				return runRestoreAll();
+			}
+			if (!(RESTORE_AGENTS as readonly string[]).includes(agent)) {
+				console.error(
+					`Unknown agent: ${agent}. Valid: ${RESTORE_AGENTS.join(", ")}.`,
+				);
+				return 1;
+			}
+			return runRestore(toolForRestoreAgent(agent as RestoreAgent));
+		}
+		// `skill <subcommand>`: operations against the SkillHub registry. Namespaced
+		// so it doesn't collide with `codev install` (which installs agents).
+		// `pull` downloads/installs a skill (not `install`, to avoid that confusion);
+		// `push` publishes one; whoami migrates here next.
+		case "skill": {
+			const [sub, ...rest] = args;
+			if (sub === "search") {
+				return runSkillSearch(rest);
+			}
+			if (sub === "push") {
+				const parsed = parsePublishArgs(rest);
+				if (!parsed.path) {
+					console.error(
+						"Usage: codev skill push <path> [--draft-only] [--auto-approve] [--json]",
+					);
+					return 1;
 				}
-				process.exit(ok ? 0 : 1);
-			}
-			process.exit(await runSkillPublish(rest));
-		}
-		if (sub === "pull") {
-			const parsed = parsePullArgs(rest);
-			if (parsed.error) {
-				console.error(parsed.error);
-				process.exit(1);
-			}
-			if (!parsed.target) {
-				console.error(
-					"Usage: codev skill pull <name|id> [--dir <path>] [--force] [--json]",
+				// Interactive TTY (and not --json): preview + confirm before uploading
+				// (Ink). Otherwise (piped/CI, or --json) go the plain runner.
+				const interactive = Boolean(
+					process.stdin.isTTY && process.stdout.isTTY,
 				);
-				process.exit(1);
-			}
-			// Interactive + no explicit --dir: prompt for the location (Ink).
-			// Otherwise (--dir given, or piped/CI) go the plain non-interactive path.
-			const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-			if (parsed.dir === undefined && interactive) {
-				let ok = true;
-				const { waitUntilExit } = render(
-					<SkillPullApp
-						target={parsed.target}
-						force={parsed.force}
-						json={parsed.json}
-						onDone={(v) => {
-							ok = v;
-						}}
-					/>,
-				);
-				try {
-					await waitUntilExit();
-				} catch {
-					process.exit(1);
+				if (interactive && !parsed.json) {
+					let ok = true;
+					const { waitUntilExit } = render(
+						<SkillPushApp
+							path={parsed.path}
+							json={parsed.json}
+							draftOnly={parsed.draftOnly}
+							autoApprove={parsed.autoApprove}
+							onDone={(v) => {
+								ok = v;
+							}}
+						/>,
+					);
+					try {
+						await waitUntilExit();
+					} catch {
+						return 1;
+					}
+					return ok ? 0 : 1;
 				}
-				process.exit(ok ? 0 : 1);
+				return runSkillPublish(rest);
 			}
-			process.exit(await runSkillInstall(rest));
-		}
-		console.error(
-			sub === undefined
-				? "Usage: codev skill <search|pull|push> ..."
-				: `Unknown skill subcommand: ${sub}. Valid: search, pull, push.`,
-		);
-		process.exit(1);
-		break;
-	}
-	case "claude":
-		spawnUploadDaemon();
-		await ensureFreshGatewayKey("claude-code");
-		process.exit(await runAgent("claude", args));
-		break;
-	case "codex":
-		spawnUploadDaemon();
-		await ensureFreshGatewayKey("codex");
-		process.exit(await runAgent("codex", args));
-		break;
-	case "opencode":
-		spawnUploadDaemon();
-		await ensureFreshGatewayKey("opencode");
-		process.exit(await runAgent("opencode", args));
-		break;
-	// Transparent passthrough to CodeGraph: `codev codegraph <args>` ≡
-	// `codegraph <args>` (e.g. `codev codegraph init -y`). No upload daemon and
-	// no shim handling — CodeGraph isn't a chat agent and isn't shimmed.
-	case "codegraph":
-		process.exit(await forwardToCodegraph(args));
-		break;
-	// ── Hidden commands ──────────────────────────────────────────────────
-	// Intentionally not surfaced in --help, README, or AGENTS.md. Kept
-	// grouped at the end of the switch, after every documented command.
-	//
-	// `hook`/`unhook`: install/remove the PATH shims that route
-	// `claude`/`codex`/`opencode` through codev.
-	case "hook": {
-		let agents: readonly ShimAgent[];
-		if (args.length === 0) {
-			agents = detectCodevTools();
-			if (agents.length === 0) {
-				console.log(
-					"No CoDev-installed tools found. Run `codev install` first, " +
-						"or specify agents explicitly: `codev hook claude|codex|opencode`.",
+			if (sub === "pull") {
+				const parsed = parsePullArgs(rest);
+				if (parsed.error) {
+					console.error(parsed.error);
+					return 1;
+				}
+				if (!parsed.target) {
+					console.error(
+						"Usage: codev skill pull <name|id> [--dir <path>] [--force] [--json]",
+					);
+					return 1;
+				}
+				// Interactive + no explicit --dir: prompt for the location (Ink).
+				// Otherwise (--dir given, or piped/CI) go the plain non-interactive path.
+				const interactive = Boolean(
+					process.stdin.isTTY && process.stdout.isTTY,
 				);
-				process.exit(0);
+				if (parsed.dir === undefined && interactive) {
+					let ok = true;
+					const { waitUntilExit } = render(
+						<SkillPullApp
+							target={parsed.target}
+							force={parsed.force}
+							json={parsed.json}
+							onDone={(v) => {
+								ok = v;
+							}}
+						/>,
+					);
+					try {
+						await waitUntilExit();
+					} catch {
+						return 1;
+					}
+					return ok ? 0 : 1;
+				}
+				return runSkillInstall(rest);
 			}
-		} else {
-			const invalid = args.filter(
-				(a) => !(SHIM_AGENTS as readonly string[]).includes(a),
+			console.error(
+				sub === undefined
+					? "Usage: codev skill <search|pull|push> ..."
+					: `Unknown skill subcommand: ${sub}. Valid: search, pull, push.`,
 			);
-			if (invalid.length > 0) {
-				console.error(
-					`Unknown agent(s): ${invalid.join(", ")}. Valid: ${SHIM_AGENTS.join(", ")}.`,
-				);
-				process.exit(1);
-			}
-			agents = args as ShimAgent[];
+			return 1;
 		}
-		const r = installShims(agents);
-		console.log(`Installed shims in ${r.shimDir}`);
-		for (const path of r.rcFilesUpdated) console.log(`  patched ${path}`);
-		if (r.windowsUserPathUpdated) console.log("  updated user PATH");
-		console.log(activationHint());
-		process.exit(0);
-		break;
-	}
-	case "unhook": {
-		const r = uninstallShims();
-		if (r.shimsRemoved.length === 0 && r.rcFilesUpdated.length === 0) {
-			console.log("No codev shims installed.");
-		} else {
-			console.log(`Removed ${r.shimsRemoved.length} shim(s) from ${r.shimDir}`);
-			for (const path of r.rcFilesUpdated) console.log(`  cleaned ${path}`);
+		case "claude":
+			spawnUploadDaemon();
+			await ensureFreshGatewayKey("claude-code");
+			return runAgent("claude", args);
+		case "codex":
+			spawnUploadDaemon();
+			await ensureFreshGatewayKey("codex");
+			return runAgent("codex", args);
+		case "opencode":
+			spawnUploadDaemon();
+			await ensureFreshGatewayKey("opencode");
+			return runAgent("opencode", args);
+		// Transparent passthrough to CodeGraph: `codev codegraph <args>` ≡
+		// `codegraph <args>` (e.g. `codev codegraph init -y`). No upload daemon and
+		// no shim handling — CodeGraph isn't a chat agent and isn't shimmed.
+		case "codegraph":
+			return forwardToCodegraph(args);
+		// ── Hidden commands ──────────────────────────────────────────────────
+		// Intentionally not surfaced in --help, README, or AGENTS.md. Kept
+		// grouped at the end of the switch, after every documented command.
+		//
+		// `hook`/`unhook`: install/remove the PATH shims that route
+		// `claude`/`codex`/`opencode` through codev.
+		case "hook": {
+			let agents: readonly ShimAgent[];
+			if (args.length === 0) {
+				agents = detectCodevTools();
+				if (agents.length === 0) {
+					console.log(
+						"No CoDev-installed tools found. Run `codev install` first, " +
+							"or specify agents explicitly: `codev hook claude|codex|opencode`.",
+					);
+					return 0;
+				}
+			} else {
+				const invalid = args.filter(
+					(a) => !(SHIM_AGENTS as readonly string[]).includes(a),
+				);
+				if (invalid.length > 0) {
+					console.error(
+						`Unknown agent(s): ${invalid.join(", ")}. Valid: ${SHIM_AGENTS.join(", ")}.`,
+					);
+					return 1;
+				}
+				agents = args as ShimAgent[];
+			}
+			const r = installShims(agents);
+			console.log(`Installed shims in ${r.shimDir}`);
+			for (const path of r.rcFilesUpdated) console.log(`  patched ${path}`);
 			if (r.windowsUserPathUpdated) console.log("  updated user PATH");
 			console.log(activationHint());
+			return 0;
 		}
-		process.exit(0);
-		break;
+		case "unhook": {
+			const r = uninstallShims();
+			if (r.shimsRemoved.length === 0 && r.rcFilesUpdated.length === 0) {
+				console.log("No codev shims installed.");
+			} else {
+				console.log(
+					`Removed ${r.shimsRemoved.length} shim(s) from ${r.shimDir}`,
+				);
+				for (const path of r.rcFilesUpdated) console.log(`  cleaned ${path}`);
+				if (r.windowsUserPathUpdated) console.log("  updated user PATH");
+				console.log(activationHint());
+			}
+			return 0;
+		}
+		// `clear-logs`: deletes both ~/.codev log homes — the CLI diagnostics
+		// (cliLogsDir) and the conversation exports (agentLogsDir).
+		case "clear-logs":
+			return runClearLogs();
+		default:
+			console.error(`Unknown command: ${command}\n`);
+			printHelp();
+			return 1;
 	}
-	// `clear-logs`: deletes both ~/.codev log homes — the CLI diagnostics
-	// (cliLogsDir) and the conversation exports (agentLogsDir).
-	case "clear-logs": {
-		process.exit(runClearLogs());
-		break;
-	}
-	default:
-		console.error(`Unknown command: ${command}\n`);
-		printHelp();
-		process.exit(1);
 }
+
+process.exit(await dispatch());
