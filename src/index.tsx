@@ -225,6 +225,25 @@ switch (command) {
 		process.exit(runRestore(toolForRestoreAgent(agent as RestoreAgent)));
 		break;
 	}
+	// `codev init` initializes the current project for CoDev. Hint that the
+	// generated `.codegraph/` directory should be committed so the whole team
+	// shares one knowledge graph — but only if it's actually on disk afterward.
+	// `codegraph init` exits 0 on no-ops too (e.g. `--help`), so we gate on the
+	// artifact existing rather than the exit code alone. `init [path]` writes
+	// into the given directory (the first non-flag arg), defaulting to cwd.
+	case "init": {
+		const code = await forwardToCodegraph(["init", ...args]);
+		const targetDir = args.find((a) => !a.startsWith("-")) ?? ".";
+		if (code === 0 && existsSync(join(targetDir, ".codegraph"))) {
+			console.log(
+				`Created the local ${styleText("cyan", ".codegraph/")} directory. ` +
+					"You can commit it if you'd like to share the knowledge graph with " +
+					"your team.",
+			);
+		}
+		process.exit(code);
+		break;
+	}
 	// `skill <subcommand>`: operations against the SkillHub registry. Namespaced
 	// so it doesn't collide with `codev install` (which installs agents).
 	// `pull` downloads/installs a skill (not `install`, to avoid that confusion);
@@ -332,25 +351,6 @@ switch (command) {
 	case "codegraph":
 		process.exit(await forwardToCodegraph(args));
 		break;
-	// `codev init` initializes the current project for CoDev. Hint that the
-	// generated `.codegraph/` directory should be committed so the whole team
-	// shares one knowledge graph — but only if it's actually on disk afterward.
-	// `codegraph init` exits 0 on no-ops too (e.g. `--help`), so we gate on the
-	// artifact existing rather than the exit code alone. `init [path]` writes
-	// into the given directory (the first non-flag arg), defaulting to cwd.
-	case "init": {
-		const code = await forwardToCodegraph(["init", ...args]);
-		const targetDir = args.find((a) => !a.startsWith("-")) ?? ".";
-		if (code === 0 && existsSync(join(targetDir, ".codegraph"))) {
-			console.log(
-				`Created the local ${styleText("cyan", ".codegraph/")} directory. ` +
-					"You can commit it if you'd like to share the knowledge graph with " +
-					"your team.",
-			);
-		}
-		process.exit(code);
-		break;
-	}
 	// ── Hidden commands ──────────────────────────────────────────────────
 	// Intentionally not surfaced in --help, README, or AGENTS.md. Kept
 	// grouped at the end of the switch, after every documented command.
