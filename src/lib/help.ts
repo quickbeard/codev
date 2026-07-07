@@ -7,9 +7,13 @@ export function printVersion() {
 export function printHelp() {
 	console.log(`CoDev — AI Coding Agent Hub
 
-Usage: codev <command> [options]
+Usage: codev [command] [options]
 
-Commands:
+Bare \`codev\` opens CoDev Code, the built-in coding agent, in the current
+directory. Any command not listed below is passed through to it as well —
+\`codev run "fix the tests"\`, \`codev serve\`, \`codev models\`, and so on.
+
+Hub commands:
   install             Install and configure AI coding agents
   config              Configure existing AI coding agents
   update              Update installed AI coding agents

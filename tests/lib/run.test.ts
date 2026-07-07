@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { claudeNativeBinaryMissing } from "@/lib/npm.js";
-import { runAgent, spawner } from "@/lib/run.js";
+import { agentOnPath, runAgent, spawner } from "@/lib/run.js";
 
 // Stub the native-binary probe so the runtime repair hint can be exercised
 // without a real npm-global Claude Code install. Defaults to "present" so
@@ -255,5 +255,17 @@ describe("runAgent", () => {
 		} finally {
 			vi.unstubAllEnvs();
 		}
+	});
+});
+
+describe("agentOnPath", () => {
+	test("finds an executable that is on PATH", () => {
+		// The test runner itself is a node process, so `node` (node.exe's
+		// resolution goes through PATHEXT on Windows) must be findable.
+		expect(agentOnPath("node")).toBe(true);
+	});
+
+	test("returns false for a binary that does not exist", () => {
+		expect(agentOnPath("codev-definitely-not-installed-xyzzy")).toBe(false);
 	});
 });

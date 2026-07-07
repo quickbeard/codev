@@ -1,5 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process";
+import { accessSync, constants as fsConstants } from "node:fs";
 import { constants } from "node:os";
+import { delimiter, join } from "node:path";
 import { logError, logInfo, logWarn } from "@/lib/log.js";
 import { claudeNativeBinaryMissing } from "@/lib/npm.js";
 import { stripShimDirFromPath } from "@/lib/shims.js";
@@ -17,6 +19,29 @@ const AGENT_LABEL: Record<string, string> = {
 export const spawner = {
 	spawn: nodeSpawn,
 };
+
+// Cheap PATH probe (no child process) used by the bare-`codev` dispatch to
+// decide between opening CoDev Code and falling back to the hub help. Skips
+// the shim dir, mirroring the spawn PATH below. Windows spawns go through the
+// shell (PATHEXT resolution), so probe the standard executable extensions.
+export function agentOnPath(cmd: string): boolean {
+	const exts =
+		process.platform === "win32"
+			? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")
+			: [""];
+	for (const dir of stripShimDirFromPath(process.env.PATH).split(delimiter)) {
+		if (!dir) continue;
+		for (const ext of exts) {
+			try {
+				accessSync(join(dir, cmd + ext), fsConstants.X_OK);
+				return true;
+			} catch {
+				// Not here — keep scanning.
+			}
+		}
+	}
+	return false;
+}
 
 export function runAgent(cmd: string, args: string[]): Promise<number> {
 	return new Promise((resolve) => {
