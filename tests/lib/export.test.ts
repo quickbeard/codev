@@ -100,6 +100,7 @@ describe("runExport", () => {
 		expect(summary.byAgent["claude-code"]).toBe(1);
 		expect(summary.skipped).toContain("codex");
 		expect(summary.skipped).toContain("opencode");
+		expect(summary.skipped).toContain("codev-code");
 
 		const expectedFile = join(
 			expectedDir,
@@ -132,13 +133,19 @@ describe("runExport", () => {
 	test("skips all providers when no agents are active", async () => {
 		const summary = await runExport();
 		expect(summary.exported).toBe(0);
-		expect(summary.skipped).toEqual(["claude-code", "codex", "opencode"]);
+		expect(summary.skipped).toEqual([
+			"claude-code",
+			"codex",
+			"opencode",
+			"codev-code",
+		]);
 		// Each skipped provider records where it looked, so `codev upload` can
 		// explain an empty result instead of a bare "0/0".
 		expect(summary.targets.map((t) => t.agent)).toEqual([
 			"claude-code",
 			"codex",
 			"opencode",
+			"codev-code",
 		]);
 		expect(summary.targets.every((t) => t.path.length > 0)).toBe(true);
 	});
@@ -179,6 +186,7 @@ describe("runExport", () => {
 		expect(existsSync(join(summary.outDir, "claude-code"))).toBe(true);
 		expect(existsSync(join(summary.outDir, "codex"))).toBe(false);
 		expect(existsSync(join(summary.outDir, "opencode"))).toBe(false);
+		expect(existsSync(join(summary.outDir, "codev-code"))).toBe(false);
 	});
 });
 

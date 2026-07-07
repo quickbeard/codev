@@ -30,12 +30,16 @@ export function isNpmTool(tool: Tool): tool is NpmTool {
 export const PKG: Record<NpmTool, string> = {
 	"claude-code": "@anthropic-ai/claude-code",
 	opencode: "opencode-ai",
+	// Published to the private registry; installing it requires an npmrc scope
+	// mapping (`@quickbeard:registry=<url>`) on the machine.
+	"codev-code": "@quickbeard/codev-code",
 	codex: "@openai/codex",
 };
 
 export const CLI: Record<NpmTool, string> = {
 	"claude-code": "claude",
 	opencode: "opencode",
+	"codev-code": "codev-code",
 	codex: "codex",
 };
 

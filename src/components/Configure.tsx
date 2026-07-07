@@ -6,6 +6,7 @@ import {
 	type ConfigureResult,
 	type Credentials,
 	configureClaudeCode,
+	configureCodevCode,
 	configureCodex,
 	configureContinue,
 	configureOpenCode,
@@ -32,6 +33,7 @@ const LABEL: Record<BackupKind, string> = {
 	"claude-credentials": "Claude Code (credentials)",
 	"codex-config": "Codex",
 	"opencode-config": "OpenCode",
+	"codev-code-config": "CoDev Code",
 	"continue-config": "Continue",
 };
 
@@ -67,6 +69,8 @@ export function Configure({ tools, creds, onDone }: ConfigureProps) {
 					results.push(...configureCodex(creds));
 				} else if (tool === "opencode") {
 					results.push(...configureOpenCode(creds));
+				} else if (tool === "codev-code") {
+					results.push(...configureCodevCode(creds));
 				} else if (
 					tool === "vscode-continue" ||
 					tool === "jetbrains-continue"

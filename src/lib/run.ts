@@ -8,6 +8,7 @@ const AGENT_LABEL: Record<string, string> = {
 	claude: "Claude Code",
 	codex: "Codex",
 	opencode: "OpenCode",
+	"codev-code": "CoDev Code",
 };
 
 // Indirection so tests can stub the spawn call without intercepting
@@ -31,10 +32,17 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 		// Strip ~/.codev/bin from the child's PATH so spawning `claude` resolves
 		// the real npm-installed binary, not our shim — otherwise the shim would
 		// re-exec `codev claude` and infinite-loop.
-		const env = {
+		const env: NodeJS.ProcessEnv = {
 			...process.env,
 			PATH: stripShimDirFromPath(process.env.PATH),
 		};
+		// codev-code is a fork of opencode whose self-updater still points at
+		// upstream's release channel — letting it run would replace the fork
+		// with stock opencode. codev owns updates (`codev update`), so disable
+		// the agent's own updater at every launch.
+		if (cmd === "codev-code") {
+			env.OPENCODE_DISABLE_AUTOUPDATE = "1";
+		}
 		// On Windows, npm-installed agent binaries are `.cmd` shims (e.g.
 		// `opencode.cmd`). Node's `spawn` only consults PATHEXT when shell is
 		// enabled, so without it the spawn fails with ENOENT even though the

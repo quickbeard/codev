@@ -345,6 +345,11 @@ switch (command) {
 		await ensureFreshGatewayKey("opencode");
 		process.exit(await runAgent("opencode", args));
 		break;
+	case "codev-code":
+		spawnUploadDaemon();
+		await ensureFreshGatewayKey("codev-code");
+		process.exit(await runAgent("codev-code", args));
+		break;
 	// Transparent passthrough to CodeGraph: `codev codegraph <args>` ≡
 	// `codegraph <args>` (e.g. `codev codegraph init`). No upload daemon and
 	// no shim handling — CodeGraph isn't a chat agent and isn't shimmed.

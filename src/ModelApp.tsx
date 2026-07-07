@@ -17,6 +17,7 @@ import { isInvalidKeyError } from "@/lib/backend.js";
 import {
 	type Credentials,
 	configureClaudeCode,
+	configureCodevCode,
 	configureCodex,
 	configureContinue,
 	configureOpenCode,
@@ -52,6 +53,7 @@ const TOOL_LABEL: Record<Tool, string> = {
 	"claude-code": "Claude Code",
 	codex: "Codex",
 	opencode: "OpenCode",
+	"codev-code": "CoDev Code",
 	"vscode-claude-code": "Claude Code",
 	"jetbrains-claude-code": "Claude Code",
 	"vscode-continue": "Continue",
@@ -205,6 +207,7 @@ export function ModelApp() {
 					configureClaudeCode(creds);
 				else if (tool === "codex") configureCodex(creds);
 				else if (tool === "opencode") configureOpenCode(creds);
+				else if (tool === "codev-code") configureCodevCode(creds);
 				else if (tool === "vscode-continue" || tool === "jetbrains-continue")
 					configureContinue(creds);
 			}

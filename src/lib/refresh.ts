@@ -8,6 +8,7 @@ import { fetchApiKey, validateApiKey } from "@/lib/backend.js";
 import {
 	type Credentials,
 	configureClaudeCode,
+	configureCodevCode,
 	configureCodex,
 	configureOpenCode,
 	type Tool,
@@ -34,6 +35,9 @@ function reconfigure(tool: Tool, creds: Credentials): void {
 			break;
 		case "opencode":
 			configureOpenCode(creds);
+			break;
+		case "codev-code":
+			configureCodevCode(creds);
 			break;
 		default:
 			break;
