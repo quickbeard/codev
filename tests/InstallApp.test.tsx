@@ -84,6 +84,19 @@ beforeEach(() => {
 	// default it to a pass so full-flow tests don't make a network call. The
 	// failure-path test overrides it.
 	vi.spyOn(backend, "smokeTestModel").mockResolvedValue(null);
+	// codev-code is always installed and configured now, so the real
+	// configureCodevCode runs in every flow. On the new-key path it would fall
+	// back to AI_GATEWAY_OPENAI_URL() and hard-fail on the unpopulated
+	// gateway_url cache, so stub it. Its own output is covered by
+	// tests/providers/codev-code.test.ts and tests/lib/configure.test.ts.
+	vi.spyOn(configure, "configureCodevCode").mockReturnValue([
+		{
+			kind: "codev-code-config",
+			sourcePath: "/tmp/codev-code.json",
+			backupPath: "/tmp/codev-code.json.backup",
+			created: true,
+		},
+	]);
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
@@ -405,6 +418,12 @@ describe("InstallApp fail-stop invariant", () => {
 			model: "m-alpha",
 			models: ["m-alpha", "m-beta"],
 		});
+		// codev-code is always configured alongside the selected agent(s).
+		expect(configure.configureCodevCode).toHaveBeenCalledWith({
+			apiKey: "sk-test-123",
+			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
+		});
 	});
 
 	test("wires CodeGraph for the selected agent after a successful install", async () => {
@@ -436,7 +455,12 @@ describe("InstallApp fail-stop invariant", () => {
 		// handed to setupCodegraph verbatim; the mapping/dedupe to `--target` is
 		// covered in lib/codegraph.test.ts.
 		expect(codegraph.ensureCodegraphInstalled).toHaveBeenCalled();
-		expect(codegraph.setupCodegraph).toHaveBeenCalledWith(["claude-code"]);
+		// The always-on codev-code leads the survivor set; claude-code is the
+		// tool that actually maps to a CodeGraph target (see lib/codegraph.test.ts).
+		expect(codegraph.setupCodegraph).toHaveBeenCalledWith([
+			"codev-code",
+			"claude-code",
+		]);
 		expect(allFrames(frames)).toContain("Wired CodeGraph into Claude Code");
 	});
 
@@ -701,8 +725,10 @@ describe("InstallApp fail-stop invariant", () => {
 		const history = allFrames(frames);
 		expect(history).toContain("Skip configuration");
 		expect(history).toContain("Happy coding");
-		// The backup still runs for its side-effect…
-		expect(backupOnlySpy).toHaveBeenCalledTimes(1);
+		// The backup still runs for its side-effect — once for the always-on
+		// codev-code and once for the selected claude-code.
+		expect(backupOnlySpy).toHaveBeenCalledTimes(2);
+		expect(backupOnlySpy).toHaveBeenCalledWith("codev-code");
 		expect(backupOnlySpy).toHaveBeenCalledWith("claude-code");
 		expect(configureSpy).not.toHaveBeenCalled();
 		expect(fetchApiKeySpy).not.toHaveBeenCalled();
