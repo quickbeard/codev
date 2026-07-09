@@ -584,6 +584,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 					<ToolSelect
 						onConfirm={handleToolSelectConfirm}
 						readOnly={step !== "select"}
+						mode={mode}
 					/>
 				</Step>
 				{(claudeCodeExtSelected || continueSelected) && step !== "select" && (

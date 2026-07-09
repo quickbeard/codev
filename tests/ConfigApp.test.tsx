@@ -69,6 +69,18 @@ beforeEach(() => {
 	// Stub the post-model gateway smoke test to a pass so full-flow tests don't
 	// make a real completion call; the failure-path test overrides it.
 	vi.spyOn(backend, "smokeTestModel").mockResolvedValue(null);
+	// codev-code is always configured now, so the real configureCodevCode runs
+	// in every flow. On the new-key path it would fall back to
+	// AI_GATEWAY_OPENAI_URL() and hard-fail on the unpopulated gateway_url
+	// cache, so stub it. Its output is covered by the provider/configure tests.
+	vi.spyOn(configure, "configureCodevCode").mockReturnValue([
+		{
+			kind: "codev-code-config",
+			sourcePath: "/tmp/codev-code.json",
+			backupPath: "/tmp/codev-code.json.backup",
+			created: true,
+		},
+	]);
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
@@ -275,10 +287,22 @@ describe("ConfigApp", () => {
 		// login (labeled with the npm package name), then wires in finalize.
 		expect(history).toContain("@colbymchenry/codegraph");
 		expect(codegraph.ensureCodegraphInstalled).toHaveBeenCalled();
-		expect(codegraph.setupCodegraph).toHaveBeenCalledWith(["claude-code"]);
+		// The always-on codev-code leads the tool set; claude-code is the one
+		// that maps to a CodeGraph target.
+		expect(codegraph.setupCodegraph).toHaveBeenCalledWith([
+			"codev-code",
+			"claude-code",
+		]);
 		// Configure still ran for the selected tool.
 		expect(configureSpy).toHaveBeenCalledTimes(1);
 		expect(configureSpy).toHaveBeenCalledWith({
+			apiKey: "sk-cfg-123",
+			baseUrl: "https://my-gateway.example.com/v1",
+			model: "m-alpha",
+			models: ["m-alpha", "m-beta"],
+		});
+		// codev-code is always configured too, even in config mode.
+		expect(configure.configureCodevCode).toHaveBeenCalledWith({
 			apiKey: "sk-cfg-123",
 			baseUrl: "https://my-gateway.example.com/v1",
 			model: "m-alpha",
@@ -307,7 +331,10 @@ describe("ConfigApp", () => {
 		const history = allFrames(frames);
 		expect(history).toContain("Happy coding");
 		expect(history).not.toContain("Installing packages");
-		expect(backupOnlySpy).toHaveBeenCalledTimes(1);
+		// Backup runs once for the always-on codev-code and once for the
+		// selected claude-code.
+		expect(backupOnlySpy).toHaveBeenCalledTimes(2);
+		expect(backupOnlySpy).toHaveBeenCalledWith("codev-code");
 		expect(backupOnlySpy).toHaveBeenCalledWith("claude-code");
 		expect(configureSpy).not.toHaveBeenCalled();
 		// Skip renders no backup Step; the configure-path rows (non-skip branch
