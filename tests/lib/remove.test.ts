@@ -133,6 +133,54 @@ describe("runRemove", () => {
 		expect(claudeStep?.detail).toBe("nothing to restore");
 	});
 
+	test("CoDev Code config: restores from backup when one exists", async () => {
+		stubFetchOk();
+		// The fork's gateway config lives at ~/.config/codev-code/opencode.json
+		// (distinct from OpenCode's ~/.config/opencode/opencode.json).
+		seedFile(".config/codev-code/opencode.json", '{"live":true}');
+		seedFile(
+			".config/codev-code/opencode.json.backup",
+			'{"original":"codev-code"}',
+		);
+
+		const result = await runRemove();
+
+		expect(result.anyFailed).toBe(false);
+		// Backup renamed over the live config — the user's pre-CoDev state.
+		expect(
+			JSON.parse(
+				readFileSync(
+					join(tempDir, ".config/codev-code/opencode.json"),
+					"utf-8",
+				),
+			),
+		).toEqual({ original: "codev-code" });
+		// The rename consumes the backup, so it no longer sits alongside.
+		expect(
+			existsSync(join(tempDir, ".config/codev-code/opencode.json.backup")),
+		).toBe(false);
+		const step = result.steps.find((s) => s.label === "CoDev Code config");
+		expect(step?.status).toBe("ok");
+		expect(step?.detail).toContain("restored from");
+	});
+
+	test("CoDev Code config: deletes the live config when no backup exists", async () => {
+		stubFetchOk();
+		// A fresh install writes this with no prior user config, so there's no
+		// backup — remove deletes it, landing the user back at "no file".
+		seedFile(".config/codev-code/opencode.json", '{"codev":"wrote-this"}');
+
+		const result = await runRemove();
+
+		expect(result.anyFailed).toBe(false);
+		expect(existsSync(join(tempDir, ".config/codev-code/opencode.json"))).toBe(
+			false,
+		);
+		const step = result.steps.find((s) => s.label === "CoDev Code config");
+		expect(step?.status).toBe("ok");
+		expect(step?.detail).toContain("no backup; deleted");
+	});
+
 	test("not signed in: SSO step reported as noop, not failed", async () => {
 		stubFetchOk();
 		// No auth.json seeded — logout() returns false.
@@ -188,9 +236,13 @@ describe("runRemove", () => {
 		expect(order[0]).toBe("SSO");
 		expect(order[1]).toBe("Shims");
 		expect(order[2]).toBe("CodeGraph");
-		expect(order.slice(3, 6).sort()).toEqual([
+		// The five config tools (one per BackupKind) sit between CodeGraph and the
+		// ~/.codev wipe — CoDev Code and Continue included.
+		expect(order.slice(3, 8).sort()).toEqual([
 			"Claude Code config",
+			"CoDev Code config",
 			"Codex config",
+			"Continue config",
 			"OpenCode config",
 		]);
 		expect(order[order.length - 1]).toBe("~/.codev");
