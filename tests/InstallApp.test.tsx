@@ -162,9 +162,12 @@ async function advanceThroughConfirm(
 	stdin: { write: (s: string) => void },
 	frames: string[],
 ) {
-	// Select Claude Code, confirm selection, accept backup-warning confirm
-	// (apt-style: type "y" then Enter). Lands on LOGIN.
+	// Move cursor to Claude Code (second row, below CoDev Code), select,
+	// confirm selection, accept backup-warning confirm (apt-style: type "y"
+	// then Enter). Lands on LOGIN.
 	await waitForFrame(frames, "Select the AI agent(s) to install");
+	stdin.write("\x1B[B");
+	await new Promise((r) => setTimeout(r, 30));
 	stdin.write(" ");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
@@ -176,8 +179,10 @@ async function advanceThroughConfirmCodex(
 	stdin: { write: (s: string) => void },
 	frames: string[],
 ) {
-	// Move cursor to the second option (Codex), select, confirm, accept warning.
+	// Move cursor to the third option (Codex), select, confirm, accept warning.
 	await waitForFrame(frames, "Select the AI agent(s) to install");
+	stdin.write("\x1B[B");
+	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\x1B[B");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write(" ");
@@ -784,9 +789,9 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 
-		// Pick the Continue (extension) row (5th, index 4).
+		// Pick the Continue (extension) row (6th, index 5).
 		await waitForFrame(frames, "Select the AI agent(s) to install");
-		for (let i = 0; i < 4; i++) {
+		for (let i = 0; i < 5; i++) {
 			stdin.write("\x1B[B");
 			await new Promise((r) => setTimeout(r, 30));
 		}
@@ -859,9 +864,9 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 
-		// Pick the Continue (extension) row (5th, index 4) and the VS Code editor.
+		// Pick the Continue (extension) row (6th, index 5) and the VS Code editor.
 		await waitForFrame(frames, "Select the AI agent(s) to install");
-		for (let i = 0; i < 4; i++) {
+		for (let i = 0; i < 5; i++) {
 			stdin.write("\x1B[B");
 			await new Promise((r) => setTimeout(r, 30));
 		}
@@ -936,9 +941,9 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 
-		// Continue (extension) row (5th, index 4) → editor sub-select → JetBrains.
+		// Continue (extension) row (6th, index 5) → editor sub-select → JetBrains.
 		await waitForFrame(frames, "Select the AI agent(s) to install");
-		for (let i = 0; i < 4; i++) {
+		for (let i = 0; i < 5; i++) {
 			stdin.write("\x1B[B");
 			await new Promise((r) => setTimeout(r, 30));
 		}
@@ -1001,9 +1006,9 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 
-		// Pick the Claude Code (extension) row (4th, index 3).
+		// Pick the Claude Code (extension) row (5th, index 4).
 		await waitForFrame(frames, "Select the AI agent(s) to install");
-		for (let i = 0; i < 3; i++) {
+		for (let i = 0; i < 4; i++) {
 			stdin.write("\x1B[B");
 			await new Promise((r) => setTimeout(r, 30));
 		}
@@ -1033,7 +1038,7 @@ describe("InstallApp fail-stop invariant", () => {
 	});
 
 	test("Claude Code CLI + extension share the backup kind: single configure call, both install tasks scheduled", async () => {
-		// Picks Claude Code CLI (1st row) AND Claude Code (extension) (4th
+		// Picks Claude Code CLI (2nd row) AND Claude Code (extension) (5th
 		// row), then VS Code in the merged sub-select. Asserts:
 		//  - `configureClaudeCode` runs exactly once (shared BackupKind).
 		//  - Both the npm install task (@anthropic-ai/claude-code) and the
@@ -1063,7 +1068,9 @@ describe("InstallApp fail-stop invariant", () => {
 		const { stdin, frames } = render(<InstallApp />);
 
 		await waitForFrame(frames, "Select the AI agent(s) to install");
-		// Row 0 (Claude Code CLI) — toggle, then arrow down to row 3 and toggle.
+		// Row 1 (Claude Code CLI) — toggle, then arrow down to row 4 and toggle.
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 30));
 		for (let i = 0; i < 3; i++) {
@@ -1163,8 +1170,10 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 
-		// Select Claude Code (row 0), down arrow, select Codex (row 1), Enter.
+		// Select Claude Code (row 1), down arrow, select Codex (row 2), Enter.
 		await waitForFrame(frames, "Select the AI agent(s) to install");
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 30));
 		stdin.write("\x1B[B");

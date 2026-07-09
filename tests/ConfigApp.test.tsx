@@ -129,9 +129,11 @@ async function advanceThroughConfirm(
 	stdin: { write: (s: string) => void },
 	frames: string[],
 ) {
-	// Title says "configure" in config mode (not "install"). Pick Claude Code,
-	// Enter, accept backup warning.
+	// Title says "configure" in config mode (not "install"). Pick Claude Code
+	// (second row, below CoDev Code), Enter, accept backup warning.
 	await waitForFrame(frames, "Select the AI agent(s) to configure");
+	stdin.write("\x1B[B");
+	await new Promise((r) => setTimeout(r, 30));
 	stdin.write(" ");
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");

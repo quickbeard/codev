@@ -16,7 +16,12 @@ import {
 	type Tool,
 } from "@/lib/configure.js";
 
-export const SHIM_AGENTS = ["claude", "opencode", "codex"] as const;
+export const SHIM_AGENTS = [
+	"claude",
+	"opencode",
+	"codex",
+	"codev-code",
+] as const;
 export type ShimAgent = (typeof SHIM_AGENTS)[number];
 
 // Editor extension variants (vscode-claude-code / jetbrains-claude-code /
@@ -28,6 +33,7 @@ export function toolToShimAgent(tool: Tool): ShimAgent | null {
 	if (tool === "claude-code") return "claude";
 	if (tool === "codex") return "codex";
 	if (tool === "opencode") return "opencode";
+	if (tool === "codev-code") return "codev-code";
 	return null;
 }
 
@@ -45,7 +51,7 @@ export function toolToShimAgent(tool: Tool): ShimAgent | null {
 // no pre-existing config" — but there CoDev didn't modify the tool's files at
 // all, so there's nothing on disk to detect.
 export function detectCodevTools(): ShimAgent[] {
-	const tools: Tool[] = ["claude-code", "codex", "opencode"];
+	const tools: Tool[] = ["claude-code", "codex", "opencode", "codev-code"];
 	const configured = new Set(detectConfiguredTools());
 	return tools
 		.filter(

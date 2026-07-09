@@ -20,6 +20,7 @@ const KIND_RESTORE_CMD: Record<BackupKind, string> = {
 	"claude-credentials": "codev restore claude",
 	"codex-config": "codev restore codex",
 	"opencode-config": "codev restore opencode",
+	"codev-code-config": "codev restore codev-code",
 	"continue-config": "codev restore continue",
 };
 

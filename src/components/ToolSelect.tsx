@@ -15,6 +15,7 @@ export type ToolSelectSentinel =
 export type ToolSelectValue = Tool | ToolSelectSentinel;
 
 const TOOLS: { label: string; value: ToolSelectValue }[] = [
+	{ label: "CoDev Code", value: "codev-code" },
 	{ label: "Claude Code", value: "claude-code" },
 	{ label: "Codex", value: "codex" },
 	{ label: "OpenCode", value: "opencode" },

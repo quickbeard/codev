@@ -105,6 +105,27 @@ describe("ensureFreshGatewayKey", () => {
 		expect(claude).not.toHaveBeenCalled();
 	});
 
+	test("routes the reconfigure to the launched tool (codev-code, not opencode)", async () => {
+		// configureCodevCode rewrites ~/.config/codev-code/opencode.json — the
+		// fork must not have its refresh land in stock opencode's config.
+		vi.spyOn(auth, "loadApiKey").mockReturnValue(CREDS);
+		vi.spyOn(backend, "validateApiKey").mockResolvedValue(false);
+		vi.spyOn(auth, "silentSso").mockResolvedValue(fakeSession());
+		vi.spyOn(backend, "fetchApiKey").mockResolvedValue("sk-new");
+		vi.spyOn(auth, "saveApiKey").mockImplementation(() => {});
+		const opencode = vi
+			.spyOn(configure, "configureOpenCode")
+			.mockReturnValue([]);
+		const codevCode = vi
+			.spyOn(configure, "configureCodevCode")
+			.mockReturnValue([]);
+
+		await ensureFreshGatewayKey("codev-code");
+
+		expect(codevCode).toHaveBeenCalled();
+		expect(opencode).not.toHaveBeenCalled();
+	});
+
 	test("hints to reinstall when the session can't be refreshed silently", async () => {
 		vi.spyOn(auth, "loadApiKey").mockReturnValue(CREDS);
 		vi.spyOn(backend, "validateApiKey").mockResolvedValue(false);

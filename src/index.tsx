@@ -20,7 +20,7 @@ import {
 	runRestoreAll,
 	toolForRestoreAgent,
 } from "@/lib/restore.js";
-import { runAgent } from "@/lib/run.js";
+import { agentOnPath, runAgent } from "@/lib/run.js";
 import {
 	activationHint,
 	detectCodevTools,
@@ -87,7 +87,19 @@ function flagValue(argv: string[], name: string): string | undefined {
 initLogging(command ?? "help", args);
 
 switch (command) {
-	case undefined:
+	// Bare `codev` opens CoDev Code (the built-in coding agent) in the current
+	// directory. Fall back to the hub help when the agent isn't installed yet,
+	// so first-run users get orientation instead of a launch error.
+	case undefined: {
+		if (!agentOnPath("codev-code")) {
+			printHelp();
+			process.exit(0);
+		}
+		spawnUploadDaemon();
+		await ensureFreshGatewayKey("codev-code");
+		process.exit(await runAgent("codev-code", []));
+		break;
+	}
 	case "--help":
 	case "-h":
 	case "help":
@@ -345,6 +357,11 @@ switch (command) {
 		await ensureFreshGatewayKey("opencode");
 		process.exit(await runAgent("opencode", args));
 		break;
+	case "codev-code":
+		spawnUploadDaemon();
+		await ensureFreshGatewayKey("codev-code");
+		process.exit(await runAgent("codev-code", args));
+		break;
 	// Transparent passthrough to CodeGraph: `codev codegraph <args>` ≡
 	// `codegraph <args>` (e.g. `codev codegraph init`). No upload daemon and
 	// no shim handling — CodeGraph isn't a chat agent and isn't shimmed.
@@ -407,8 +424,13 @@ switch (command) {
 		process.exit(runClearLogs());
 		break;
 	}
+	// Every command not claimed by the hub above belongs to CoDev Code:
+	// `codev run "..."`, `codev serve`, `codev models`, a project path, etc.
+	// Hub commands always win on a name collision (the sync checklist in the
+	// codev-code repo watches for new upstream commands); running the
+	// `codev-code` binary directly is the escape hatch to a shadowed command.
 	default:
-		console.error(`Unknown command: ${command}\n`);
-		printHelp();
-		process.exit(1);
+		spawnUploadDaemon();
+		await ensureFreshGatewayKey("codev-code");
+		process.exit(await runAgent("codev-code", [command, ...args]));
 }

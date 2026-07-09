@@ -27,6 +27,7 @@ export type Tool =
 	| "claude-code"
 	| "codex"
 	| "opencode"
+	| "codev-code"
 	| "vscode-claude-code"
 	| "jetbrains-claude-code"
 	| "vscode-continue"
@@ -37,6 +38,7 @@ export type BackupKind =
 	| "claude-credentials"
 	| "codex-config"
 	| "opencode-config"
+	| "codev-code-config"
 	| "continue-config";
 
 export interface BackupStatus {
@@ -168,7 +170,9 @@ export function readAgentConfig(agent: Agent): AgentConfigResult {
 		case "codex":
 			return readCodexConfig();
 		case "opencode":
-			return readOpenCodeConfig();
+			return readOpenCodeConfig("opencode-config");
+		case "codev-code":
+			return readOpenCodeConfig("codev-code-config");
 	}
 }
 
@@ -217,8 +221,12 @@ function readCodexConfig(): AgentConfigResult {
 	}
 }
 
-function readOpenCodeConfig(): AgentConfigResult {
-	const path = sourcePathOf("opencode-config");
+// Shared by opencode and codev-code — the fork reads the same opencode.json
+// shape, just from ~/.config/codev-code instead of ~/.config/opencode.
+function readOpenCodeConfig(
+	kind: "opencode-config" | "codev-code-config",
+): AgentConfigResult {
+	const path = sourcePathOf(kind);
 	if (!existsSync(path)) return {};
 	try {
 		const raw = JSON.parse(readFileSync(path, "utf-8")) as unknown;
@@ -274,6 +282,10 @@ function sourcePathOf(kind: BackupKind): string {
 			return join(homedir(), ".codex", "config.toml");
 		case "opencode-config":
 			return join(homedir(), ".config", "opencode", "opencode.json");
+		// The codev-code fork keeps upstream's config filename but relocates the
+		// XDG app dir (its `Global.Path` constant is "codev-code").
+		case "codev-code-config":
+			return join(homedir(), ".config", "codev-code", "opencode.json");
 		case "continue-config":
 			return join(homedir(), ".continue", "config.yaml");
 	}
@@ -310,7 +322,8 @@ export function detectConfiguredTools(): Tool[] {
 	const tools: Tool[] = [];
 	if (isCodevClaudeConfig()) tools.push("claude-code");
 	if (isCodevCodexConfig()) tools.push("codex");
-	if (isCodevOpenCodeConfig()) tools.push("opencode");
+	if (isCodevOpenCodeConfig("opencode-config")) tools.push("opencode");
+	if (isCodevOpenCodeConfig("codev-code-config")) tools.push("codev-code");
 	if (isCodevContinueConfig()) tools.push("vscode-continue");
 	return tools;
 }
@@ -344,8 +357,10 @@ function isCodevCodexConfig(): boolean {
 	}
 }
 
-function isCodevOpenCodeConfig(): boolean {
-	const path = sourcePathOf("opencode-config");
+function isCodevOpenCodeConfig(
+	kind: "opencode-config" | "codev-code-config",
+): boolean {
+	const path = sourcePathOf(kind);
 	if (!existsSync(path)) return false;
 	try {
 		const config = JSON.parse(readFileSync(path, "utf-8")) as unknown;
@@ -384,6 +399,8 @@ export function kindForTool(tool: Tool): BackupKind {
 			return "codex-config";
 		case "opencode":
 			return "opencode-config";
+		case "codev-code":
+			return "codev-code-config";
 		case "vscode-continue":
 		case "jetbrains-continue":
 			return "continue-config";
@@ -663,8 +680,21 @@ export function configureContinue(creds: Credentials): ConfigureResult[] {
 }
 
 export function configureOpenCode(creds: Credentials): ConfigureResult[] {
-	const { path: backupPath, created } = ensureBackup("opencode-config");
-	const sourcePath = sourcePathOf("opencode-config");
+	return configureOpenCodeKind("opencode-config", creds);
+}
+
+// The codev-code fork consumes the exact same opencode.json shape; only the
+// config directory differs (see sourcePathOf).
+export function configureCodevCode(creds: Credentials): ConfigureResult[] {
+	return configureOpenCodeKind("codev-code-config", creds);
+}
+
+function configureOpenCodeKind(
+	kind: "opencode-config" | "codev-code-config",
+	creds: Credentials,
+): ConfigureResult[] {
+	const { path: backupPath, created } = ensureBackup(kind);
+	const sourcePath = sourcePathOf(kind);
 	mkdirSync(dirname(sourcePath), { recursive: true });
 
 	const baseUrl = creds.baseUrl
@@ -719,5 +749,5 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 		},
 	});
 
-	return [{ kind: "opencode-config", sourcePath, backupPath, created }];
+	return [{ kind, sourcePath, backupPath, created }];
 }

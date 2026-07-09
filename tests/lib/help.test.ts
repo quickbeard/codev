@@ -45,6 +45,14 @@ describe("printHelp", () => {
 		expect(output()).toContain("Usage: codev");
 	});
 
+	test("documents the CoDev Code passthrough", () => {
+		// Bare `codev` and unknown commands forward to the built-in agent;
+		// the help must orient users to that before the hub command list.
+		printHelp();
+		expect(output()).toContain("CoDev Code");
+		expect(output()).toContain("passed through");
+	});
+
 	test("lists the restore subcommand", () => {
 		printHelp();
 		expect(output()).toContain("restore [agent]");

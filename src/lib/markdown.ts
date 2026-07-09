@@ -6,6 +6,7 @@ const AGENT_LABEL: Record<Agent, string> = {
 	"claude-code": "claude-code",
 	codex: "codex",
 	opencode: "opencode",
+	"codev-code": "codev-code",
 };
 
 /**

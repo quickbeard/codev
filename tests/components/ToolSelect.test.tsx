@@ -12,6 +12,7 @@ describe("ToolSelect", () => {
 		const { lastFrame } = render(<ToolSelect onConfirm={onConfirm} />);
 
 		const output = lastFrame() ?? "";
+		expect(output).toContain("CoDev Code");
 		expect(output).toContain("Claude Code");
 		expect(output).toContain("OpenCode");
 		expect(output).toContain("Codex");
@@ -27,13 +28,11 @@ describe("ToolSelect", () => {
 		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
-		// Three down-arrows to reach the 4th (Claude Code (extension)) row.
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 50));
+		// Four down-arrows to reach the 5th (Claude Code (extension)) row.
+		for (let i = 0; i < 4; i++) {
+			stdin.write("\x1B[B");
+			await new Promise((r) => setTimeout(r, 50));
+		}
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 50));
 		stdin.write("\r");
@@ -46,8 +45,8 @@ describe("ToolSelect", () => {
 		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
-		// Four down-arrows to reach the 5th (Continue (extension)) row.
-		for (let i = 0; i < 4; i++) {
+		// Five down-arrows to reach the 6th (Continue (extension)) row.
+		for (let i = 0; i < 5; i++) {
 			stdin.write("\x1B[B");
 			await new Promise((r) => setTimeout(r, 50));
 		}
@@ -83,12 +82,27 @@ describe("ToolSelect", () => {
 		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
+		// One down-arrow to reach the Claude Code row (CoDev Code sits first).
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 50));
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 50));
 		stdin.write("\r");
 		await new Promise((r) => setTimeout(r, 50));
 
 		expect(onConfirm).toHaveBeenCalledWith(["claude-code"]);
+	});
+
+	test("selects CoDev Code on the first row without moving the cursor", async () => {
+		const onConfirm = vi.fn();
+		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
+
+		stdin.write(" ");
+		await new Promise((r) => setTimeout(r, 50));
+		stdin.write("\r");
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(onConfirm).toHaveBeenCalledWith(["codev-code"]);
 	});
 
 	test("does not call onConfirm when no tools selected", async () => {
@@ -105,6 +119,9 @@ describe("ToolSelect", () => {
 		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
+		// Down to Claude Code (row 1), select, down to Codex (row 2), select.
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 50));
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 50));
 
@@ -119,10 +136,12 @@ describe("ToolSelect", () => {
 		expect(onConfirm).toHaveBeenCalledWith(["claude-code", "codex"]);
 	});
 
-	test("can select Codex by moving cursor down once", async () => {
+	test("can select Codex by moving cursor down twice", async () => {
 		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 50));
 		stdin.write("\x1B[B");
 		await new Promise((r) => setTimeout(r, 50));
 		stdin.write(" ");

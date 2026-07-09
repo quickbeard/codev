@@ -1,7 +1,12 @@
-export type Agent = "claude-code" | "codex" | "opencode";
+export type Agent = "claude-code" | "codex" | "opencode" | "codev-code";
 
 // Canonical display order shared by export and upload flows.
-export const AGENTS: Agent[] = ["claude-code", "codex", "opencode"];
+export const AGENTS: Agent[] = [
+	"claude-code",
+	"codex",
+	"opencode",
+	"codev-code",
+];
 
 export interface Message {
 	role: "user" | "assistant";

@@ -30,7 +30,13 @@ export interface RemoveResult {
 // restored. Same for the Claude Code extension variants — they share
 // ~/.claude/settings.json with `claude-code`. Use `claude-code` and
 // `vscode-continue` as the canonical Tools for each shared kind.
-const TOOLS: Tool[] = ["claude-code", "codex", "opencode", "vscode-continue"];
+const TOOLS: Tool[] = [
+	"claude-code",
+	"codex",
+	"opencode",
+	"codev-code",
+	"vscode-continue",
+];
 
 // Tools that share a backup file get an editor-neutral label. The non-
 // canonical entries (extension variants) are present for type
@@ -39,6 +45,7 @@ const TOOL_LABEL: Record<Tool, string> = {
 	"claude-code": "Claude Code config",
 	codex: "Codex config",
 	opencode: "OpenCode config",
+	"codev-code": "CoDev Code config",
 	"vscode-claude-code": "Claude Code config",
 	"jetbrains-claude-code": "Claude Code config",
 	"vscode-continue": "Continue config",

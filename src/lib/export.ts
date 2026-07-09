@@ -56,6 +56,11 @@ const PROVIDER_LOADERS: { agent: Agent; load: () => Promise<Provider> }[] = [
 		load: async () =>
 			(await import("@/providers/opencode.js")).openCodeProvider,
 	},
+	{
+		agent: "codev-code",
+		load: async () =>
+			(await import("@/providers/codev-code.js")).codevCodeProvider,
+	},
 ];
 
 // Conversation exports used to live in ~/.codev/logs/<project>/; that root now

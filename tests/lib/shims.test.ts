@@ -57,6 +57,7 @@ describe("toolToShimAgent", () => {
 		expect(toolToShimAgent("claude-code")).toBe("claude");
 		expect(toolToShimAgent("codex")).toBe("codex");
 		expect(toolToShimAgent("opencode")).toBe("opencode");
+		expect(toolToShimAgent("codev-code")).toBe("codev-code");
 	});
 });
 
@@ -170,8 +171,13 @@ describe.skipIf(process.platform === "win32")("installShims (Unix)", () => {
 		const { installShims } = await import("@/lib/shims.js");
 		const result = installShims();
 
-		expect(result.shimsWritten.sort()).toEqual(["claude", "codex", "opencode"]);
-		for (const agent of ["claude", "codex", "opencode"]) {
+		expect(result.shimsWritten.sort()).toEqual([
+			"claude",
+			"codev-code",
+			"codex",
+			"opencode",
+		]);
+		for (const agent of ["claude", "codev-code", "codex", "opencode"]) {
 			const path = join(tempDir, ".codev", "bin", agent);
 			expect(existsSync(path)).toBe(true);
 			const contents = readFileSync(path, "utf-8");
@@ -196,6 +202,9 @@ describe.skipIf(process.platform === "win32")("installShims (Unix)", () => {
 			expect(contents).toContain('alias claude="$HOME/.codev/bin/claude"');
 			expect(contents).toContain('alias codex="$HOME/.codev/bin/codex"');
 			expect(contents).toContain('alias opencode="$HOME/.codev/bin/opencode"');
+			expect(contents).toContain(
+				'alias codev-code="$HOME/.codev/bin/codev-code"',
+			);
 		}
 	});
 
@@ -339,11 +348,11 @@ describe.skipIf(process.platform === "win32")("uninstallShims (Unix)", () => {
 		const result = uninstallShims();
 
 		expect(result.shimsRemoved.sort()).toEqual(
-			["claude", "codex", "opencode"]
+			["claude", "codev-code", "codex", "opencode"]
 				.map((a) => join(tempDir, ".codev", "bin", a))
 				.sort(),
 		);
-		for (const agent of ["claude", "codex", "opencode"]) {
+		for (const agent of ["claude", "codev-code", "codex", "opencode"]) {
 			expect(existsSync(join(tempDir, ".codev", "bin", agent))).toBe(false);
 		}
 		for (const name of [".zshrc", ".bashrc", ".bash_profile"]) {

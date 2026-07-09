@@ -30,7 +30,7 @@ import {
 	isCodeCliAvailable,
 } from "@/lib/vscode.js";
 
-const NPM_TOOLS: NpmTool[] = ["claude-code", "codex", "opencode"];
+const NPM_TOOLS: NpmTool[] = ["claude-code", "codex", "opencode", "codev-code"];
 
 // Targets for the Continue update branch. We probe each editor's launcher
 // at update time and only schedule the corresponding task if it's on PATH

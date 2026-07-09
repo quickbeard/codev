@@ -11,6 +11,7 @@ export const RESTORE_AGENTS = [
 	"claude",
 	"codex",
 	"opencode",
+	"codev-code",
 	"continue",
 ] as const;
 export type RestoreAgent = (typeof RESTORE_AGENTS)[number];
@@ -19,6 +20,7 @@ const TOOL_FOR_AGENT: Record<RestoreAgent, Tool> = {
 	claude: "claude-code",
 	codex: "codex",
 	opencode: "opencode",
+	"codev-code": "codev-code",
 	// Either editor Tool routes to the same `continue-config` BackupKind
 	// — picking `vscode-continue` is canonical, not editor-specific.
 	continue: "vscode-continue",
@@ -60,6 +62,7 @@ const SWEEP_TOOLS: Tool[] = [
 	"claude-code",
 	"codex",
 	"opencode",
+	"codev-code",
 	"vscode-continue",
 ];
 
