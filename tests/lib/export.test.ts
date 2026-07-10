@@ -91,10 +91,15 @@ afterEach(() => {
 });
 
 describe("runExport", () => {
-	test("writes markdown to ~/.codev/agent-logs/<project>/ and returns a summary", async () => {
+	test("writes markdown to ~/.codev-hub/agent-logs/<project>/ and returns a summary", async () => {
 		seedClaudeSession();
 		const summary = await runExport();
-		const expectedDir = join(tempHome, ".codev", "agent-logs", "works-myapp");
+		const expectedDir = join(
+			tempHome,
+			".codev-hub",
+			"agent-logs",
+			"works-myapp",
+		);
 		expect(summary.outDir).toBe(expectedDir);
 		expect(summary.exported).toBe(1);
 		expect(summary.byAgent["claude-code"]).toBe(1);
@@ -118,7 +123,7 @@ describe("runExport", () => {
 		await runExport();
 		const statsPath = join(
 			tempHome,
-			".codev",
+			".codev-hub",
 			"agent-logs",
 			"works-myapp",
 			"statistics.json",
@@ -191,10 +196,10 @@ describe("runExport", () => {
 });
 
 describe("migrateLegacyAgentLogs", () => {
-	const legacyRoot = () => join(tempHome, ".codev", "logs");
-	const targetRoot = () => join(tempHome, ".codev", "agent-logs");
+	const legacyRoot = () => join(tempHome, ".codev-hub", "logs");
+	const targetRoot = () => join(tempHome, ".codev-hub", "agent-logs");
 
-	test("moves legacy project folders into ~/.codev/agent-logs/", () => {
+	test("moves legacy project folders into ~/.codev-hub/agent-logs/", () => {
 		const legacyFile = join(legacyRoot(), "works-myapp", "codex", "a.md");
 		mkdirSync(join(legacyRoot(), "works-myapp", "codex"), { recursive: true });
 		writeFileSync(legacyFile, "hello");

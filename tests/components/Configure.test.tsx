@@ -14,9 +14,9 @@ beforeEach(() => {
 	// hit the temp home on every platform.
 	vi.stubEnv("USERPROFILE", tempHome);
 	// configure* falls back to the gateway-URL accessors when creds carry no
-	// baseUrl (as these tests do); those read gateway_url from ~/.codev/auth.json,
+	// baseUrl (as these tests do); those read gateway_url from ~/.codev-hub/auth.json,
 	// which refreshCodevConfig populates in the real flow. Seed it here.
-	const codevDir = join(tempHome, ".codev");
+	const codevDir = join(tempHome, ".codev-hub");
 	mkdirSync(codevDir, { recursive: true });
 	writeFileSync(
 		join(codevDir, "auth.json"),

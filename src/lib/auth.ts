@@ -28,11 +28,11 @@ const SSO_FETCH_TIMEOUT_MS = 10_000;
 const AUTH_CALLBACK_TIMEOUT_MS = 300_000;
 
 function authFilePath() {
-	return join(homedir(), ".codev", "auth.json");
+	return join(homedir(), ".codev-hub", "auth.json");
 }
 
 function forceLoginPath() {
-	return join(homedir(), ".codev", "force-login");
+	return join(homedir(), ".codev-hub", "force-login");
 }
 
 function markForceLogin() {
@@ -351,7 +351,7 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
  * 2. Try a silent refresh if a refresh_token is on disk
  * 3. Otherwise: start a loopback HTTP server, send the user to /authorize
  *    with state + nonce + PKCE, wait for the callback, exchange code for
- *    tokens, fetch userinfo, and persist to ~/.codev/auth.json
+ *    tokens, fetch userinfo, and persist to ~/.codev-hub/auth.json
  */
 export async function login(
 	onLog: (msg: string) => void,
@@ -411,7 +411,7 @@ export async function login(
 	}
 
 	// Force re-auth via the IdP login form (prompt=login) when:
-	//   1. ~/.codev/auth.json doesn't exist — typically the user just ran
+	//   1. ~/.codev-hub/auth.json doesn't exist — typically the user just ran
 	//      `codevhub remove` (which wipes the dir), or this is a truly fresh
 	//      install. We have no record of prior auth on this machine, so don't
 	//      silently ride any IdP browser-session cookie that might still be
@@ -419,7 +419,7 @@ export async function login(
 	//   2. The force-login sentinel is set — `codevhub logout` writes it because
 	//      revoking tokens does not terminate the IdP's session cookie.
 	//
-	// Keyed off auth.json rather than the ~/.codev/ dir: unrelated code creates
+	// Keyed off auth.json rather than the ~/.codev-hub/ dir: unrelated code creates
 	// the dir as a side effect before login can run — diagnostic logging
 	// (lib/log.ts) at the entry of every command, runExport during
 	// `codevhub upload` — and a dir-existence probe would misread those as "prior

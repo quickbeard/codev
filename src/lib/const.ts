@@ -42,7 +42,7 @@ interface CodevAuthFile {
 function readCodevAuthFile(): CodevAuthFile | null {
 	try {
 		return JSON.parse(
-			readFileSync(join(homedir(), ".codev", "auth.json"), "utf-8"),
+			readFileSync(join(homedir(), ".codev-hub", "auth.json"), "utf-8"),
 		) as CodevAuthFile;
 	} catch {
 		return null;
@@ -53,7 +53,7 @@ function readField(field: keyof CodevAuthFile, label: string): string {
 	const value = readCodevAuthFile()?.[field];
 	if (!value) {
 		throw new Error(
-			`Missing ${label} in ~/.codev/auth.json. Run \`codevhub install\` (or log in again) to fetch the latest configuration.`,
+			`Missing ${label} in ~/.codev-hub/auth.json. Run \`codevhub install\` (or log in again) to fetch the latest configuration.`,
 		);
 	}
 	return value;

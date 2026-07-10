@@ -23,7 +23,7 @@ const PREFLIGHT_TIMEOUT_MS = 2_500;
 
 // Rewrite the launched agent's OWN config with the fresh key — the agent reads
 // its config file (settings.json / config.toml / opencode.json), not
-// ~/.codev/auth.json, so saving auth.json alone wouldn't help. Only the three
+// ~/.codev-hub/auth.json, so saving auth.json alone wouldn't help. Only the three
 // chat agents are launchable via `codevhub <agent>`; the extension variants aren't.
 function reconfigure(tool: Tool, creds: Credentials): void {
 	switch (tool) {

@@ -18,11 +18,11 @@ import {
 
 let tempDir: string;
 
-// Seed ~/.codev/auth.json for the test. A valid (non-expired) SSO session lets
+// Seed ~/.codev-hub/auth.json for the test. A valid (non-expired) SSO session lets
 // silentSso() return it without any network call, so the Bearer path is
 // exercisable offline.
 function seedAuth(contents: Record<string, unknown>): void {
-	const dir = join(tempDir, ".codev");
+	const dir = join(tempDir, ".codev-hub");
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, "auth.json"), JSON.stringify(contents));
 }

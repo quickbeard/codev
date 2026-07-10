@@ -11,7 +11,7 @@ import { VERSION } from "@/lib/const.js";
 import { cliLogsDir } from "@/lib/paths.js";
 
 // CoDev's local diagnostic log: one Elastic-Common-Schema NDJSON document per
-// line, written to ~/.codev/logs/codev-YYYYMMDD.ndjson (UTC date). The files
+// line, written to ~/.codev-hub/logs/codev-YYYYMMDD.ndjson (UTC date). The files
 // are plain ECS, so a Filebeat/Elastic Agent filestream input can ingest them
 // unmodified if logs are ever collected centrally — but nothing here ships
 // anything; the CLI only appends locally.

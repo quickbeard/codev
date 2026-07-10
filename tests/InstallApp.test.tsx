@@ -52,7 +52,7 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 // InstallApp's manual-creds path calls saveApiKey(), which writes to
-// ~/.codev/auth.json. Without this redirect, every test run would clobber the
+// ~/.codev-hub/auth.json. Without this redirect, every test run would clobber the
 // developer's real auth.json with fixture keys like "sk-manual-123".
 let installAppTempHome: string;
 
@@ -298,7 +298,7 @@ afterEach(() => {
 
 // Default to "no saved API key" for tests that exercise the new/manual paths —
 // otherwise InstallApp would discover whatever is in the dev's real
-// ~/.codev/auth.json and route through the validating-existing branch.
+// ~/.codev-hub/auth.json and route through the validating-existing branch.
 function stubNoSavedKey() {
 	vi.spyOn(auth, "loadApiKey").mockReturnValue(null);
 }

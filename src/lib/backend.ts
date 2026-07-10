@@ -70,7 +70,7 @@ export async function fetchApiKey(accessToken: string): Promise<string> {
 // Pulls the runtime coordinates the CLI doesn't bake into its source — the
 // Supabase URL/anon key and the public gateway base URL. Called from auth.ts on
 // every successful SSO login (fresh + refresh) and persisted into
-// ~/.codev/auth.json by saveCodevConfig.
+// ~/.codev-hub/auth.json by saveCodevConfig.
 export async function fetchCodevConfig(
 	accessToken: string,
 ): Promise<CodevConfig> {

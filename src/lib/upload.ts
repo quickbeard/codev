@@ -471,7 +471,7 @@ async function confirmUpload(
 // invocation so prior sessions keep flowing to the backend without blocking the
 // user's workflow. The parent fire-and-forgets a detached `codevhub upload --daemon`
 // child; the child takes a lockfile to prevent concurrent uploads and writes
-// ~/.codev/last-upload.json with the outcome so future runs can surface
+// ~/.codev-hub/last-upload.json with the outcome so future runs can surface
 // failures.
 //
 // Daemon diagnostics go to the standard NDJSON log (lib/log.ts) like every
@@ -502,7 +502,7 @@ interface UploadStatus {
 }
 
 function codevHomeDir(): string {
-	return join(homedir(), ".codev");
+	return join(homedir(), ".codev-hub");
 }
 
 function uploadLockPath(): string {
