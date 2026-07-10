@@ -17,17 +17,25 @@ export interface StepResult {
 	label: string;
 	detail: string;
 	status: StepStatus;
+	// Live config files left in place because they had no backup to restore
+	// from. Surfaced to the user so they can delete them by hand if they want a
+	// fully pre-CoDev state; these files may still point at the removed
+	// ~/.codev-hub.
+	keptPaths?: string[];
 }
 
 export interface RemoveResult {
 	steps: StepResult[];
 	anyFailed: boolean;
+	// Aggregated across all restore steps — the union of every step's keptPaths.
+	keptPaths: string[];
 }
 
 // We iterate one Tool per BackupKind. `vscode-continue` and
 // `jetbrains-continue` share ~/.continue/config.yaml, so including both
-// would have the second iteration delete the file the first iteration just
-// restored. Same for the Claude Code extension variants — they share
+// would restore the file once and then redundantly re-report it (the second
+// visit finds no backup left and reports keeping the file the first visit just
+// restored). Same for the Claude Code extension variants — they share
 // ~/.claude/settings.json with `claude-code`. Use `claude-code` and
 // `vscode-continue` as the canonical Tools for each shared kind.
 const TOOLS: Tool[] = [
@@ -69,11 +77,15 @@ export async function runRemove(): Promise<RemoveResult> {
 	steps.push(recordStep(runUnhook()));
 	steps.push(recordStep(await runCodegraphRemoval()));
 	for (const tool of TOOLS) {
-		steps.push(recordStep(runRestoreOrDelete(tool)));
+		steps.push(recordStep(runRestoreOrKeep(tool)));
 	}
 	steps.push(recordStep(runWipeCodevDir()));
 
-	return { steps, anyFailed: steps.some((s) => s.status === "failed") };
+	return {
+		steps,
+		anyFailed: steps.some((s) => s.status === "failed"),
+		keptPaths: steps.flatMap((s) => s.keptPaths ?? []),
+	};
 }
 
 // Diagnostic-log mirror of each step's TUI row, leveled by status.
@@ -155,7 +167,7 @@ function runUnhook(): StepResult {
 	}
 }
 
-function runRestoreOrDelete(tool: Tool): StepResult {
+function runRestoreOrKeep(tool: Tool): StepResult {
 	const label = TOOL_LABEL[tool];
 	try {
 		const results = restoreTool(tool);
@@ -174,36 +186,36 @@ function runRestoreOrDelete(tool: Tool): StepResult {
 						detail: `restored from ${result.backupPath}`,
 						status: "ok",
 					};
-				case "deleted-live":
+				case "kept-live":
 					return {
 						label,
-						detail: `no backup; deleted ${result.sourcePath}`,
+						detail: `no backup; kept ${result.sourcePath}`,
 						status: "ok",
+						keptPaths: [result.sourcePath],
 					};
 				case "noop":
 					return { label, detail: "nothing to restore", status: "noop" };
 			}
 		}
 		let restored = 0;
-		let deleted = 0;
 		let noop = 0;
+		const keptPaths: string[] = [];
 		for (const r of results) {
 			if (r.status === "restored") restored++;
-			else if (r.status === "deleted-live") deleted++;
+			else if (r.status === "kept-live") keptPaths.push(r.sourcePath);
 			else noop++;
 		}
-		if (restored === 0 && deleted === 0) {
+		const kept = keptPaths.length;
+		if (restored === 0 && kept === 0) {
 			return { label, detail: "nothing to restore", status: "noop" };
 		}
 		const parts: string[] = [];
 		if (restored > 0)
 			parts.push(`restored ${restored} file${restored === 1 ? "" : "s"}`);
-		if (deleted > 0)
-			parts.push(
-				`deleted ${deleted} file${deleted === 1 ? "" : "s"} (no backup)`,
-			);
+		if (kept > 0)
+			parts.push(`kept ${kept} file${kept === 1 ? "" : "s"} (no backup)`);
 		if (noop > 0) parts.push(`${noop} already clean`);
-		return { label, detail: parts.join("; "), status: "ok" };
+		return { label, detail: parts.join("; "), status: "ok", keptPaths };
 	} catch (err) {
 		return { label, detail: errorMessage(err), status: "failed" };
 	}
