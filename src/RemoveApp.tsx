@@ -36,6 +36,7 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 						},
 					],
 					anyFailed: true,
+					keptPaths: [],
 				});
 				setPhase("done");
 			});
@@ -98,6 +99,25 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 		</Text>
 	));
 
+	// Config files that had no backup were left in place rather than deleted.
+	// Point them out so the user can remove them by hand if they want a fully
+	// pre-CoDev state — they may still reference the removed ~/.codev-hub.
+	const keptHint =
+		result.keptPaths.length > 0 ? (
+			<Box flexDirection="column" marginTop={1}>
+				<Text color="yellow">
+					Left {result.keptPaths.length} config file
+					{result.keptPaths.length === 1 ? "" : "s"} in place (no backup to
+					restore from). Delete manually for a clean state:
+				</Text>
+				{result.keptPaths.map((p) => (
+					<Text key={p} dimColor>
+						- {p}
+					</Text>
+				))}
+			</Box>
+		) : null;
+
 	if (result.anyFailed) {
 		const failures = result.steps.filter((s) => s.status === "failed");
 		return (
@@ -109,6 +129,7 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 						- {s.label}: {s.detail}
 					</Text>
 				))}
+				{keptHint}
 			</Box>
 		);
 	}
@@ -121,6 +142,7 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 				<Text color="cyan">npm uninstall -g codev-ai</Text>
 				{" to remove the CoDev package. Restart your terminal to apply."}
 			</Text>
+			{keptHint}
 		</Box>
 	);
 }

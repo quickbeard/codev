@@ -1007,7 +1007,7 @@ describe("restoreTool", () => {
 		);
 	});
 
-	test("deletes the live CoDev config when no backup exists", async () => {
+	test("keeps the live CoDev config when no backup exists", async () => {
 		const dir = join(tempDir, ".claude");
 		const livePath = join(dir, "settings.json");
 		const backupPath = `${livePath}.backup`;
@@ -1018,8 +1018,10 @@ describe("restoreTool", () => {
 		const results = restoreTool("claude-code");
 		const settingsResult = results.find((r) => r.sourcePath === livePath);
 
-		expect(settingsResult?.status).toBe("deleted-live");
-		expect(existsSync(livePath)).toBe(false);
+		expect(settingsResult?.status).toBe("kept-live");
+		// No backup to restore from, so the live file is left untouched.
+		expect(existsSync(livePath)).toBe(true);
+		expect(readFileSync(livePath, "utf-8")).toBe('{"marker":"codev-live"}');
 		expect(existsSync(backupPath)).toBe(false);
 	});
 
@@ -1113,11 +1115,11 @@ describe("restoreTool", () => {
 		expect(existsSync(credBackup)).toBe(false);
 	});
 
-	test("Claude bundle: deletes live files that have no backup", async () => {
+	test("Claude bundle: keeps live files that have no backup", async () => {
 		const claudeDir = join(tempDir, ".claude");
 		mkdirSync(claudeDir, { recursive: true });
 
-		// Settings has a backup → restored. Others have only live files → deleted.
+		// Settings has a backup → restored. Others have only live files → kept.
 		const settingsLive = join(claudeDir, "settings.json");
 		writeFileSync(settingsLive, '{"env":{}}');
 		writeFileSync(`${settingsLive}.backup`, '{"marker":"orig"}');
@@ -1133,13 +1135,17 @@ describe("restoreTool", () => {
 
 		const byKind = new Map(results.map((r) => [r.sourcePath, r.status]));
 		expect(byKind.get(settingsLive)).toBe("restored");
-		expect(byKind.get(jsonLive)).toBe("deleted-live");
-		expect(byKind.get(credLive)).toBe("deleted-live");
+		expect(byKind.get(jsonLive)).toBe("kept-live");
+		expect(byKind.get(credLive)).toBe("kept-live");
 
-		// All live files are now gone (no backup left to restore from for the two
-		// deleted-live cases, and the restored one's backup was consumed).
-		expect(existsSync(jsonLive)).toBe(false);
-		expect(existsSync(credLive)).toBe(false);
+		// The two backup-less files are left in place untouched; only the one with
+		// a backup was restored (and its backup consumed).
+		expect(JSON.parse(readFileSync(jsonLive, "utf-8"))).toEqual({
+			hasCompletedOnboarding: true,
+		});
+		expect(JSON.parse(readFileSync(credLive, "utf-8"))).toEqual({
+			session: "post-install",
+		});
 		expect(JSON.parse(readFileSync(settingsLive, "utf-8"))).toEqual({
 			marker: "orig",
 		});
