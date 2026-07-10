@@ -277,7 +277,7 @@ describe("logApiKeyConfigured (unsafeUnredacted)", () => {
 		expect(doc.codev?.api_key).toBe("sk-litellm0realkey0value");
 		expect(doc.codev?.source).toBe("new");
 		expect(doc.codev?.model).toBe("gpt-5");
-		// The key rides in codev.api_key, never the message, so `codev logs`'
+		// The key rides in codev.api_key, never the message, so `codevhub logs`'
 		// pretty printer (message-only) never echoes it to the terminal.
 		expect(doc.message).toBe("configured gateway API key");
 	});

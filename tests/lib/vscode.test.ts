@@ -101,7 +101,7 @@ describe("installContinueExtension", () => {
 	test("returns a soft warning on non-ENOENT failures (proxy / marketplace / etc.)", async () => {
 		// A real `code` invocation that returned non-zero. With option B this
 		// is no longer a hard failure — it rides forward as a warning the
-		// Configure step can surface, instead of aborting `codev install`.
+		// Configure step can surface, instead of aborting `codevhub install`.
 		const fail: NodeJS.ErrnoException = new Error("nope");
 		stubExecFile({
 			handler: () => ({ error: fail, stderr: "marketplace unreachable" }),

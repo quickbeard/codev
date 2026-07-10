@@ -438,7 +438,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 
 	const handleModelFallback = useCallback((err: Error) => {
 		// Record WHY the fallback was taken (the underlying fetch error) as one
-		// clear event, so `codev logs` shows the cause without correlating the
+		// clear event, so `codevhub logs` shows the cause without correlating the
 		// raw gateway.models http.request doc.
 		logWarn("model list fetch failed; using fallback model", {
 			action: "model.fallback",

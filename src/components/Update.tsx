@@ -51,7 +51,7 @@ type Phase =
 			// Mirror-Continue behavior: if the marker is present AND the IDE
 			// launcher is on PATH, schedule the extension/plugin install. A
 			// CLI-only user with `code` on PATH will see the extension
-			// installed at `codev update` time — idempotent and easy to
+			// installed at `codevhub update` time — idempotent and easy to
 			// uninstall, but slightly more aggressive than Continue's update
 			// (where the YAML marker is a clean "user wanted Continue" signal).
 			claudeCodeExtTargets: ExtensionTarget[];
@@ -187,7 +187,7 @@ export function Update({ onDone }: UpdateProps) {
 	// CodeGraph refresh, only when it's already globally installed (codev
 	// install/config put it there). Best-effort, exactly like the Install step:
 	// a failed refresh is a ▲ warning — still a survivor key — never a ✗, so it
-	// can't fail `codev update`. Mirrors the CodeGraph row in components/
+	// can't fail `codevhub update`. Mirrors the CodeGraph row in components/
 	// Install.tsx.
 	if (phase.codegraphInstalled) {
 		tasks.push({

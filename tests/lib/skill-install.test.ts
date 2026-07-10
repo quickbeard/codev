@@ -164,7 +164,7 @@ describe("runSkillInstall", () => {
 		const errs = captureErr();
 		const code = await runSkillInstall(["--dir", tempDir]);
 		expect(code).toBe(1);
-		expect(errs.join("\n")).toMatch(/Usage: codev skill pull/);
+		expect(errs.join("\n")).toMatch(/Usage: codevhub skill pull/);
 	});
 
 	test("requires --dir on the non-interactive path (no prompt available)", async () => {

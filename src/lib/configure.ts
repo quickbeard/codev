@@ -308,7 +308,7 @@ export function getBackupStatus(tool: Tool): BackupStatus[] {
 }
 
 // Detect which AI tools currently have a CoDev-managed config on disk. Used
-// by `codev model` to know whose configs to rewrite when the user switches
+// by `codevhub model` to know whose configs to rewrite when the user switches
 // the default model. Each marker is something CoDev distinctly writes — the
 // `aigateway` provider id (codex/opencode) or `ANTHROPIC_DEFAULT_OPUS_MODEL`
 // (claude-code) — none of which would appear in a user-authored config.
@@ -316,7 +316,7 @@ export function getBackupStatus(tool: Tool): BackupStatus[] {
 // Continue's config file is shared across editors (VS Code + JetBrains both
 // read the same ~/.continue/config.yaml), so when the marker is present we
 // return `vscode-continue` as the canonical pointer rather than enumerating
-// both editor tools. That keeps `codev model` rewriting the YAML once
+// both editor tools. That keeps `codevhub model` rewriting the YAML once
 // instead of twice; the resulting file is correct for both editors.
 export function detectConfiguredTools(): Tool[] {
 	const tools: Tool[] = [];

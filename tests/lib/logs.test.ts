@@ -66,53 +66,53 @@ function writeLogFile(name: string, lines: string[]): void {
 	writeFileSync(join(logDir, name), `${lines.join("\n")}\n`);
 }
 
-describe("codev logs (bare)", () => {
-	test("prints the most recent run, skipping prior `codev logs` invocations", () => {
+describe("codevhub logs (bare)", () => {
+	test("prints the most recent run, skipping prior `codevhub logs` invocations", () => {
 		writeLogFile("codev-20260610.ndjson", [
-			doc("trace-old", "codev install started", { command: "install" }),
+			doc("trace-old", "codevhub install started", { command: "install" }),
 		]);
 		writeLogFile("codev-20260611.ndjson", [
-			doc("trace-upload", "codev upload started"),
+			doc("trace-upload", "codevhub upload started"),
 			doc("trace-upload", "upload failed", {
 				level: "error",
 				errMessage: "presign-upload failed (401): denied",
 			}),
-			doc("trace-viewer", "codev logs started", { command: "logs" }),
+			doc("trace-viewer", "codevhub logs started", { command: "logs" }),
 		]);
 
 		expect(runLogs([])).toBe(0);
 		const out = output();
-		expect(out).toContain("Run trace-upload — codev upload");
-		expect(out).toContain("INFO  codev upload started");
+		expect(out).toContain("Run trace-upload — codevhub upload");
+		expect(out).toContain("INFO  codevhub upload started");
 		expect(out).toContain("ERROR upload failed");
 		expect(out).toContain("↳ presign-upload failed (401): denied");
 		expect(out).not.toContain("trace-viewer");
-		expect(out).not.toContain("codev install started");
+		expect(out).not.toContain("codevhub install started");
 	});
 
 	test("includes the codev version in the run header when present", () => {
 		writeLogFile("codev-20260611.ndjson", [
-			doc("trace-ver", "codev upload started", { version: "0.3.8" }),
+			doc("trace-ver", "codevhub upload started", { version: "0.3.8" }),
 		]);
 
 		expect(runLogs([])).toBe(0);
-		expect(output()).toContain("Run trace-ver — codev upload v0.3.8 —");
+		expect(output()).toContain("Run trace-ver — codevhub upload v0.3.8 —");
 	});
 
 	test("omits the version tag when no document carries one", () => {
 		writeLogFile("codev-20260611.ndjson", [
-			doc("trace-nover", "codev upload started"),
+			doc("trace-nover", "codevhub upload started"),
 		]);
 
 		expect(runLogs([])).toBe(0);
 		const out = output();
-		expect(out).toContain("Run trace-nover — codev upload —");
-		expect(out).not.toContain("codev upload v");
+		expect(out).toContain("Run trace-nover — codevhub upload —");
+		expect(out).not.toContain("codevhub upload v");
 	});
 
 	test("prefers the top-level run over its later-writing child and lists the child", () => {
 		writeLogFile("codev-20260611.ndjson", [
-			doc("trace-agent", "codev claude started", { command: "claude" }),
+			doc("trace-agent", "codevhub claude started", { command: "claude" }),
 			doc("trace-daemon", "auto-upload skipped: not logged in", {
 				parent: "trace-agent",
 			}),
@@ -120,9 +120,9 @@ describe("codev logs (bare)", () => {
 
 		expect(runLogs([])).toBe(0);
 		const out = output();
-		expect(out).toContain("Run trace-agent — codev claude");
+		expect(out).toContain("Run trace-agent — codevhub claude");
 		expect(out).toContain(
-			"Child run trace-daemon — view with: codev logs --trace trace-daemon",
+			"Child run trace-daemon — view with: codevhub logs --trace trace-daemon",
 		);
 	});
 
@@ -134,22 +134,22 @@ describe("codev logs (bare)", () => {
 		]);
 
 		expect(runLogs([])).toBe(0);
-		expect(output()).toContain("Run trace-daemon — codev upload");
+		expect(output()).toContain("Run trace-daemon — codevhub upload");
 	});
 
 	test("skips malformed lines instead of failing", () => {
 		writeLogFile("codev-20260611.ndjson", [
 			"{not json at all",
-			doc("trace-ok", "codev update started", { command: "update" }),
+			doc("trace-ok", "codevhub update started", { command: "update" }),
 		]);
 
 		expect(runLogs([])).toBe(0);
-		expect(output()).toContain("Run trace-ok — codev update");
+		expect(output()).toContain("Run trace-ok — codevhub update");
 	});
 
-	test("errors when only `codev logs` runs are recorded", () => {
+	test("errors when only `codevhub logs` runs are recorded", () => {
 		writeLogFile("codev-20260611.ndjson", [
-			doc("trace-viewer", "codev logs started", { command: "logs" }),
+			doc("trace-viewer", "codevhub logs started", { command: "logs" }),
 		]);
 		expect(runLogs([])).toBe(1);
 		expect(errors()).toContain("No prior runs recorded.");
@@ -161,7 +161,7 @@ describe("codev logs (bare)", () => {
 	});
 });
 
-describe("codev logs --path", () => {
+describe("codevhub logs --path", () => {
 	test("prints the newest log file path", () => {
 		writeLogFile("codev-20260610.ndjson", [doc("a", "older")]);
 		writeLogFile("codev-20260611.ndjson", [doc("b", "newer")]);
@@ -170,18 +170,18 @@ describe("codev logs --path", () => {
 	});
 });
 
-describe("codev logs --trace", () => {
+describe("codevhub logs --trace", () => {
 	test("prints one run by trace id prefix, across files", () => {
 		writeLogFile("codev-20260610.ndjson", [
-			doc("aaaa-1111", "codev model started", { command: "model" }),
+			doc("aaaa-1111", "codevhub model started", { command: "model" }),
 		]);
 		writeLogFile("codev-20260611.ndjson", [
-			doc("bbbb-2222", "codev upload started"),
+			doc("bbbb-2222", "codevhub upload started"),
 		]);
 
 		expect(runLogs(["--trace", "aaaa"])).toBe(0);
 		const out = output();
-		expect(out).toContain("Run aaaa-1111 — codev model");
+		expect(out).toContain("Run aaaa-1111 — codevhub model");
 		expect(out).not.toContain("bbbb-2222");
 	});
 
@@ -210,19 +210,19 @@ describe("codev logs --trace", () => {
 	});
 });
 
-describe("codev logs argument handling", () => {
+describe("codevhub logs argument handling", () => {
 	test("rejects unknown options with usage", () => {
 		expect(runLogs(["--nope"])).toBe(1);
 		const err = errors();
 		expect(err).toContain("Unknown option: --nope");
-		expect(err).toContain("Usage: codev logs");
+		expect(err).toContain("Usage: codevhub logs");
 	});
 });
 
-describe("codev logs --verbose", () => {
+describe("codevhub logs --verbose", () => {
 	test("surfaces codev.* context (api_key, source, model) as ↳ lines", () => {
 		writeLogFile("codev-20260611.ndjson", [
-			doc("trace-cfg", "codev config started", { command: "config" }),
+			doc("trace-cfg", "codevhub config started", { command: "config" }),
 			doc("trace-cfg", "configured gateway API key", {
 				command: "config",
 				codevExtra: { source: "new", model: "gpt-5", api_key: "sk-realkey123" },

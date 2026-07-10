@@ -83,7 +83,7 @@ describe("runAgent", () => {
 			expect(
 				messages.some((m: string) =>
 					m.includes(
-						"could not be launched. If it isn't installed, run 'codev install'",
+						"could not be launched. If it isn't installed, run 'codevhub install'",
 					),
 				),
 			).toBe(true);
@@ -190,7 +190,7 @@ describe("runAgent", () => {
 		expect(stderr.some((m) => m.includes("native binary is missing"))).toBe(
 			true,
 		);
-		expect(stderr.some((m) => m.includes("codev install"))).toBe(true);
+		expect(stderr.some((m) => m.includes("codevhub install"))).toBe(true);
 	});
 
 	test("stays quiet when claude exits non-zero but the binary is present", async () => {
@@ -236,11 +236,10 @@ describe("runAgent", () => {
 			});
 	}
 
-	test("disables the codev-code fork's self-updater via OPENCODE_DISABLE_AUTOUPDATE", async () => {
-		// The fork's updater still points at upstream opencode's release channel;
-		// letting it run would replace the fork with stock opencode. codev owns
-		// updates (`codev update`), so every launch must pin the kill switch.
-		const env = await runCapturingEnv("codev-code");
+	test("disables CoDev Code's self-updater via OPENCODE_DISABLE_AUTOUPDATE", async () => {
+		// The hub owns updates (`codevhub update`), so every launch of the agent
+		// must pin the kill switch on its own updater.
+		const env = await runCapturingEnv("codev");
 		expect(env?.OPENCODE_DISABLE_AUTOUPDATE).toBe("1");
 	});
 

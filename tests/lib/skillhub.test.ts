@@ -116,7 +116,7 @@ describe("skillhubFetch auth selection", () => {
 
 		await expect(skillhubFetch("/api/v1/me")).rejects.toMatchObject({
 			name: "SkillhubAuthError",
-			message: expect.stringContaining("codev login"),
+			message: expect.stringContaining("codevhub login"),
 		});
 	});
 

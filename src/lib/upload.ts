@@ -41,7 +41,7 @@ export interface UploadOptions {
 	// Re-upload every exported log even when its content hash matches a prior
 	// upload. The previous-version link is still sent, so a forced re-upload
 	// supersedes the existing conversation instead of creating a duplicate.
-	// Wired to `codev upload --force`; the background daemon never sets it.
+	// Wired to `codevhub upload --force`; the background daemon never sets it.
 	force?: boolean;
 	onStatus?: (message: string) => void;
 	// Surfaces the SSO authorize URL when ensureAuth has to open a browser.
@@ -277,7 +277,7 @@ export function filterNewFiles(
 		const abs = realpathSync(path);
 		const hash = fileSha256(abs);
 		const previous = existing.get(abs);
-		// `codev upload --force` re-uploads everything; otherwise an unchanged
+		// `codevhub upload --force` re-uploads everything; otherwise an unchanged
 		// file (hash matches the stored row) is skipped. Either way we keep the
 		// previous version id so a re-upload supersedes rather than duplicates.
 		if (!force && previous?.local_content_hash === hash) continue;
@@ -303,7 +303,7 @@ async function ensureAuth(
 		else
 			onStatus(`If your browser didn't open, visit this URL manually: ${url}`);
 		// Expose the paste-back submitter to an interactive caller (UploadApp) so
-		// a no-browser user can finish login without leaving `codev upload`. The
+		// a no-browser user can finish login without leaving `codevhub upload`. The
 		// daemon doesn't wire this — it has no TTY and bails when logged out.
 		onManualSubmit?.(submitManualCode);
 		openBrowser();
@@ -467,9 +467,9 @@ async function confirmUpload(
 	}
 }
 
-// Background-upload daemon: triggered before every `codev claude/codex/opencode`
+// Background-upload daemon: triggered before every `codevhub claude/codex/opencode`
 // invocation so prior sessions keep flowing to the backend without blocking the
-// user's workflow. The parent fire-and-forgets a detached `codev upload --daemon`
+// user's workflow. The parent fire-and-forgets a detached `codevhub upload --daemon`
 // child; the child takes a lockfile to prevent concurrent uploads and writes
 // ~/.codev/last-upload.json with the outcome so future runs can surface
 // failures.

@@ -179,7 +179,7 @@ export function formatPublishResult(r: PublishResult, json: boolean): string {
 	} else if (r.status === "DRAFT") {
 		lines.push(
 			"",
-			"Status: DRAFT — run `codev skill push` again (without --draft-only) to submit.",
+			"Status: DRAFT — run `codevhub skill push` again (without --draft-only) to submit.",
 		);
 	} else if (r.status === "PUBLIC") {
 		lines.push("", "Status: PUBLIC — the skill is live on the hub.");
@@ -198,7 +198,7 @@ export async function runSkillPublish(args: string[]): Promise<number> {
 	}
 	if (!parsed.path) {
 		console.error(
-			"Usage: codev skill push <path> [--draft-only] [--auto-approve] [--json]",
+			"Usage: codevhub skill push <path> [--draft-only] [--auto-approve] [--json]",
 		);
 		return 1;
 	}

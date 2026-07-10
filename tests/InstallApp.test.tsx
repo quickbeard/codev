@@ -1392,7 +1392,7 @@ describe("InstallApp finalize: Claude file fate by auth choice", () => {
 		expect(existsSync(credPath)).toBe(true);
 		expect(JSON.parse(readFileSync(credPath, "utf-8"))).toEqual(credOriginal);
 		// Backups still created (the finalize Phase runs backupClaudeAuth on
-		// Skip), so the user can `codev restore claude` later.
+		// Skip), so the user can `codevhub restore claude` later.
 		expect(JSON.parse(readFileSync(`${jsonPath}.backup`, "utf-8"))).toEqual(
 			jsonOriginal,
 		);

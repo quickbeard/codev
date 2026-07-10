@@ -122,7 +122,7 @@ describe("runSkillSearch", () => {
 
 		expect(code).toBe(1);
 		expect(spy).not.toHaveBeenCalled();
-		expect(errs.join("\n")).toMatch(/Usage: codev skill search <query>/);
+		expect(errs.join("\n")).toMatch(/Usage: codevhub skill search <query>/);
 	});
 
 	test("rejects a non-positive --limit without calling the API", async () => {

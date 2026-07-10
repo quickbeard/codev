@@ -37,7 +37,7 @@ export const PKG: Record<NpmTool, string> = {
 export const CLI: Record<NpmTool, string> = {
 	"claude-code": "claude",
 	opencode: "opencode",
-	"codev-code": "codev-code",
+	"codev-code": "codev",
 	codex: "codex",
 };
 

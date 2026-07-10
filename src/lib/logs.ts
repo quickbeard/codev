@@ -3,12 +3,12 @@ import { join } from "node:path";
 import { currentTraceId } from "@/lib/log.js";
 import { cliLogsDir } from "@/lib/paths.js";
 
-// Reader side of the diagnostic log (`codev logs`). The writer is lib/log.ts;
+// Reader side of the diagnostic log (`codevhub logs`). The writer is lib/log.ts;
 // this module only consumes the NDJSON files it produces:
-//   codev logs               pretty-print the most recent run
-//   codev logs --path        print the newest log file's path
-//   codev logs --trace <id>  print one run by trace id (prefix accepted)
-//   codev logs --verbose     also print each document's codev.* context fields
+//   codevhub logs               pretty-print the most recent run
+//   codevhub logs --path        print the newest log file's path
+//   codevhub logs --trace <id>  print one run by trace id (prefix accepted)
+//   codevhub logs --verbose     also print each document's codev.* context fields
 //                            (the gateway api_key, endpoints, pids, …); composes
 //                            with the bare and --trace modes
 //
@@ -94,7 +94,9 @@ function printRun(run: DiagDoc[], allDocs: DiagDoc[], verbose = false): void {
 	// path-encoding issue). Every doc carries it via service.version.
 	const version = first?.service?.version;
 	const versionTag = version ? ` v${version}` : "";
-	console.log(`Run ${traceId} — codev ${command}${versionTag} — ${startedAt}`);
+	console.log(
+		`Run ${traceId} — codevhub ${command}${versionTag} — ${startedAt}`,
+	);
 	console.log("");
 	for (const doc of run) {
 		// "HH:MM:SS.mmm" from the ISO timestamp; dates are in the header/file.
@@ -133,7 +135,7 @@ function printRun(run: DiagDoc[], allDocs: DiagDoc[], verbose = false): void {
 		console.log("");
 		for (const child of children) {
 			console.log(
-				`Child run ${child} — view with: codev logs --trace ${child}`,
+				`Child run ${child} — view with: codevhub logs --trace ${child}`,
 			);
 		}
 	}
@@ -157,7 +159,7 @@ export function runLogs(args: string[]): number {
 			}
 		} else {
 			console.error(`Unknown option: ${arg}`);
-			console.error("Usage: codev logs [--path | --trace <id>] [--verbose]");
+			console.error("Usage: codevhub logs [--path | --trace <id>] [--verbose]");
 			return 1;
 		}
 	}
@@ -198,7 +200,7 @@ export function runLogs(args: string[]): number {
 	}
 
 	// Bare mode: the most recent run that is neither this very invocation nor
-	// a previous `codev logs` (showing the log viewer's own runs would bury
+	// a previous `codevhub logs` (showing the log viewer's own runs would bury
 	// the run the user actually cares about). Prefer top-level runs: a child
 	// process (upload daemon, sqlite re-exec) writes after its parent and
 	// would otherwise always win, but the run the user invoked is the parent —

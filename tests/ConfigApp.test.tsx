@@ -345,7 +345,7 @@ describe("ConfigApp", () => {
 });
 
 // Symmetric with InstallApp.test.tsx's "finalize: Claude file fate" — verifies
-// that `codev config` honors the same Skip vs non-Skip routing for
+// that `codevhub config` honors the same Skip vs non-Skip routing for
 // ~/.claude.json and ~/.claude/.credentials.json. SetupApp drives both modes
 // so the wiring is shared; this is a cheap regression guard against a future
 // mode-specific divergence.

@@ -1,8 +1,9 @@
 import { type RestoreResult, restoreTool, type Tool } from "@/lib/configure.js";
 
-// Launch-name aliases that `codev restore <name>` accepts. The first three
-// match the agent launchers (`codev claude`, `codev codex`, `codev opencode`)
-// — `claude-code` is an internal Tool name and isn't exposed here. `continue`
+// Launch-name aliases that `codevhub restore <name>` accepts. The first three
+// match the agent launchers (`codevhub claude`, `codevhub codex`,
+// `codevhub opencode`) — `claude-code` is an internal Tool name and isn't
+// exposed here. `continue`
 // has no launcher (the user opens VS Code or a JetBrains IDE directly), and
 // the underlying ~/.continue/config.yaml is shared across both editors —
 // hence one editor-neutral alias rather than `vscode` + `jetbrains` for the
@@ -11,7 +12,7 @@ export const RESTORE_AGENTS = [
 	"claude",
 	"codex",
 	"opencode",
-	"codev-code",
+	"codev",
 	"continue",
 ] as const;
 export type RestoreAgent = (typeof RESTORE_AGENTS)[number];
@@ -20,7 +21,7 @@ const TOOL_FOR_AGENT: Record<RestoreAgent, Tool> = {
 	claude: "claude-code",
 	codex: "codex",
 	opencode: "opencode",
-	"codev-code": "codev-code",
+	codev: "codev-code",
 	// Either editor Tool routes to the same `continue-config` BackupKind
 	// — picking `vscode-continue` is canonical, not editor-specific.
 	continue: "vscode-continue",
@@ -66,7 +67,7 @@ const SWEEP_TOOLS: Tool[] = [
 	"vscode-continue",
 ];
 
-// Bare `codev restore` — process every tool. Each result ends in one of
+// Bare `codevhub restore` — process every tool. Each result ends in one of
 // three states (restored / deleted-live / noop). Counters aggregate across
 // all results from all sweep tools (claude-code contributes three results,
 // the others one). Exit 1 only if every result was noop or any tool threw;

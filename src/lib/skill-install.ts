@@ -166,7 +166,7 @@ export async function runSkillInstall(args: string[]): Promise<number> {
 	}
 	if (!parsed.target) {
 		console.error(
-			"Usage: codev skill pull <name|id> [--dir <path>] [--force] [--json]",
+			"Usage: codevhub skill pull <name|id> [--dir <path>] [--force] [--json]",
 		);
 		return 1;
 	}

@@ -10,7 +10,7 @@ const AGENT_LABEL: Record<string, string> = {
 	claude: "Claude Code",
 	codex: "Codex",
 	opencode: "OpenCode",
-	"codev-code": "CoDev Code",
+	codev: "CoDev Code",
 };
 
 // Indirection so tests can stub the spawn call without intercepting
@@ -20,7 +20,7 @@ export const spawner = {
 	spawn: nodeSpawn,
 };
 
-// Cheap PATH probe (no child process) used by the bare-`codev` dispatch to
+// Cheap PATH probe (no child process) used by the bare-`codevhub` dispatch to
 // decide between opening CoDev Code and falling back to the hub help. Skips
 // the shim dir, mirroring the spawn PATH below. Windows spawns go through the
 // shell (PATHEXT resolution), so probe the standard executable extensions.
@@ -47,7 +47,7 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 	return new Promise((resolve) => {
 		const label = AGENT_LABEL[cmd] ?? cmd;
 		process.stderr.write(`Starting ${label}...\n`);
-		// Agent args can carry prompt text (`codev claude -p "..."`) — log only
+		// Agent args can carry prompt text (`codevhub claude -p "..."`) — log only
 		// the count, never the contents.
 		logInfo(`launching ${label}`, {
 			action: "process.spawn",
@@ -56,16 +56,15 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 		});
 		// Strip ~/.codev/bin from the child's PATH so spawning `claude` resolves
 		// the real npm-installed binary, not our shim — otherwise the shim would
-		// re-exec `codev claude` and infinite-loop.
+		// re-exec `codevhub claude` and infinite-loop.
 		const env: NodeJS.ProcessEnv = {
 			...process.env,
 			PATH: stripShimDirFromPath(process.env.PATH),
 		};
-		// codev-code is a fork of opencode whose self-updater still points at
-		// upstream's release channel — letting it run would replace the fork
-		// with stock opencode. codev owns updates (`codev update`), so disable
-		// the agent's own updater at every launch.
-		if (cmd === "codev-code") {
+		// CoDev Code (the codev-code package) has its own self-updater, but the
+		// hub owns updates (`codevhub update`) — disable the agent's updater at
+		// every launch so the two never race.
+		if (cmd === "codev") {
 			env.OPENCODE_DISABLE_AUTOUPDATE = "1";
 		}
 		// On Windows, npm-installed agent binaries are `.cmd` shims (e.g.
@@ -112,7 +111,7 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 			});
 			if (err.code === "ENOENT") {
 				console.error(
-					`'${cmd}' could not be launched. If it isn't installed, run 'codev install'.`,
+					`'${cmd}' could not be launched. If it isn't installed, run 'codevhub install'.`,
 				);
 			} else {
 				console.error(`Failed to run ${cmd}: ${err.message}`);
@@ -135,7 +134,7 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 					(await claudeNativeBinaryMissing())
 				) {
 					process.stderr.write(
-						"\nclaude's native binary is missing. Run 'codev install' to repair it " +
+						"\nclaude's native binary is missing. Run 'codevhub install' to repair it " +
 							"(reinstalls Claude Code with the platform binary included).\n",
 					);
 				}

@@ -149,7 +149,7 @@ export function installClaudeCodePlugin(): Promise<InstallPluginResult> {
 }
 
 // Whether at least one of the JetBrains launchers resolves on PATH, or on
-// macOS, inside a standard `.app` bundle. Used by `codev update` to decide
+// macOS, inside a standard `.app` bundle. Used by `codevhub update` to decide
 // whether to schedule the plugin update — short-circuits on the first
 // responder so we don't pay the launcher-probe cost for every IDE when
 // one will do.

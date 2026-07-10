@@ -27,7 +27,7 @@ export interface SkillhubUser {
 }
 
 // Pick the credential for a SkillHub request. A stored admin cookie (local
-// ADMIN/SUPERADMIN accounts from `codev login --admin`) wins; otherwise we ride
+// ADMIN/SUPERADMIN accounts from `codevhub login --admin`) wins; otherwise we ride
 // the SSO session, auto-refreshing the access token via silentSso() so a
 // background call never triggers an interactive login. When `optional` is set
 // (public endpoints like the hub listing), missing credentials yield no auth
@@ -43,7 +43,7 @@ async function skillhubAuthHeaders(
 
 	if (optional) return {};
 	throw new SkillhubAuthError(
-		"Not logged in to SkillHub. Run `codev login` (SSO) or `codev login --admin`.",
+		"Not logged in to SkillHub. Run `codevhub login` (SSO) or `codevhub login --admin`.",
 	);
 }
 
@@ -93,7 +93,7 @@ export async function skillhubFetch(
 
 	if (res.status === 401) {
 		throw new SkillhubAuthError(
-			"SkillHub session expired or invalid (401). Run `codev login` again.",
+			"SkillHub session expired or invalid (401). Run `codevhub login` again.",
 		);
 	}
 	return res;
@@ -101,7 +101,7 @@ export async function skillhubFetch(
 
 // Local ADMIN/SUPERADMIN sign-in: POST /api/auth/signin and capture the
 // `skill-hub-session` cookie from the Set-Cookie header. Does NOT persist —
-// `codev login --admin` saves the returned cookie via saveSkillhubCookie once
+// `codevhub login --admin` saves the returned cookie via saveSkillhubCookie once
 // the sign-in is confirmed. Regular users are rejected server-side (they must
 // use SSO), surfaced here as the server's error message.
 export async function skillhubSignIn(

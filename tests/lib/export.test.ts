@@ -139,7 +139,7 @@ describe("runExport", () => {
 			"opencode",
 			"codev-code",
 		]);
-		// Each skipped provider records where it looked, so `codev upload` can
+		// Each skipped provider records where it looked, so `codevhub upload` can
 		// explain an empty result instead of a bare "0/0".
 		expect(summary.targets.map((t) => t.agent)).toEqual([
 			"claude-code",

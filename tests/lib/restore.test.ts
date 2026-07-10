@@ -243,7 +243,7 @@ describe("toolForRestoreAgent", () => {
 		expect(toolForRestoreAgent("claude")).toBe("claude-code");
 		expect(toolForRestoreAgent("codex")).toBe("codex");
 		expect(toolForRestoreAgent("opencode")).toBe("opencode");
-		expect(toolForRestoreAgent("codev-code")).toBe("codev-code");
+		expect(toolForRestoreAgent("codev")).toBe("codev-code");
 		// One editor-neutral alias for the shared Continue config — `continue`
 		// routes to `vscode-continue` canonically; the backup file is shared
 		// between VS Code and JetBrains, so either editor Tool would have done.
@@ -255,7 +255,7 @@ describe("toolForRestoreAgent", () => {
 			"claude",
 			"codex",
 			"opencode",
-			"codev-code",
+			"codev",
 			"continue",
 		]);
 	});
@@ -346,7 +346,7 @@ describe("runRestoreAll", () => {
 	});
 
 	test("the `continue` alias rolls back the shared Continue file", () => {
-		// One alias for both editors — `codev restore continue` rolls back
+		// One alias for both editors — `codevhub restore continue` rolls back
 		// ~/.continue/config.yaml regardless of which editor (or both) the
 		// user actually has installed.
 		const { livePath, backupPath } = seedBackup(
