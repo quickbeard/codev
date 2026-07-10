@@ -63,9 +63,9 @@ const PROVIDER_LOADERS: { agent: Agent; load: () => Promise<Provider> }[] = [
 	},
 ];
 
-// Conversation exports used to live in ~/.codev/logs/<project>/; that root now
+// Conversation exports used to live in ~/.codev-hub/logs/<project>/; that root now
 // belongs to the CLI's own diagnostic logs (lib/log.ts) and exports moved to
-// ~/.codev/agent-logs/<project>/. Relocate any legacy project folders once so
+// ~/.codev-hub/agent-logs/<project>/. Relocate any legacy project folders once so
 // prior exports don't sit orphaned inside the diagnostics dir. Only
 // directories are moved — files at the legacy root (codev-*.ndjson diagnostics
 // written by a newer run) are not export data. Best-effort throughout: a

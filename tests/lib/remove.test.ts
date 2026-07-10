@@ -42,7 +42,7 @@ function seedAuthSso() {
 	// revoke. The revoke fetch is best-effort; we stub global fetch to avoid
 	// real network from the test.
 	seedFile(
-		".codev/auth.json",
+		".codev-hub/auth.json",
 		JSON.stringify({
 			access_token: "tok",
 			id_token: "id",
@@ -57,12 +57,12 @@ function stubFetchOk() {
 }
 
 describe("runRemove", () => {
-	test("happy path: restores configs, removes shims, signs out, wipes ~/.codev", async () => {
+	test("happy path: restores configs, removes shims, signs out, wipes ~/.codev-hub", async () => {
 		stubFetchOk();
 		seedAuthSso();
 		// Seed a shim and an rc-file sentinel block so uninstallShims has work to
 		// do.
-		seedFile(".codev/bin/claude", "#!/bin/sh\n");
+		seedFile(".codev-hub/bin/claude", "#!/bin/sh\n");
 		seedFile(
 			".zshrc",
 			`existing\n# >>> codev shims (managed) >>>\nalias claude="..."\n# <<< codev shims (managed) <<<\n`,
@@ -81,8 +81,8 @@ describe("runRemove", () => {
 		const result = await runRemove();
 
 		expect(result.anyFailed).toBe(false);
-		// SSO signed out (the auth file is part of ~/.codev which gets wiped).
-		expect(existsSync(join(tempDir, ".codev"))).toBe(false);
+		// SSO signed out (the auth file is part of ~/.codev-hub which gets wiped).
+		expect(existsSync(join(tempDir, ".codev-hub"))).toBe(false);
 		// Backups renamed over live configs.
 		expect(
 			JSON.parse(readFileSync(join(tempDir, ".claude/settings.json"), "utf-8")),
@@ -193,12 +193,12 @@ describe("runRemove", () => {
 		expect(result.anyFailed).toBe(false);
 	});
 
-	test("~/.codev absent: cleanup step reported as noop", async () => {
+	test("~/.codev-hub absent: cleanup step reported as noop", async () => {
 		stubFetchOk();
 
 		const result = await runRemove();
 
-		const wipeStep = result.steps.find((s) => s.label === "~/.codev");
+		const wipeStep = result.steps.find((s) => s.label === "~/.codev-hub");
 		expect(wipeStep?.status).toBe("noop");
 		expect(wipeStep?.detail).toBe("already absent");
 	});
@@ -226,10 +226,10 @@ describe("runRemove", () => {
 		expect(codexStep?.status).toBe("failed");
 		expect(codexStep?.detail).toBe("boom");
 		// Other steps still ran.
-		expect(result.steps.find((s) => s.label === "~/.codev")).toBeDefined();
+		expect(result.steps.find((s) => s.label === "~/.codev-hub")).toBeDefined();
 	});
 
-	test("step order: SSO, Shims, CodeGraph, configs, then ~/.codev", async () => {
+	test("step order: SSO, Shims, CodeGraph, configs, then ~/.codev-hub", async () => {
 		stubFetchOk();
 		const result = await runRemove();
 		const order = result.steps.map((s) => s.label);
@@ -237,7 +237,7 @@ describe("runRemove", () => {
 		expect(order[1]).toBe("Shims");
 		expect(order[2]).toBe("CodeGraph");
 		// The five config tools (one per BackupKind) sit between CodeGraph and the
-		// ~/.codev wipe — CoDev Code and Continue included.
+		// ~/.codev-hub wipe — CoDev Code and Continue included.
 		expect(order.slice(3, 8).sort()).toEqual([
 			"Claude Code config",
 			"CoDev Code config",
@@ -245,7 +245,7 @@ describe("runRemove", () => {
 			"Continue config",
 			"OpenCode config",
 		]);
-		expect(order[order.length - 1]).toBe("~/.codev");
+		expect(order[order.length - 1]).toBe("~/.codev-hub");
 	});
 
 	test("codegraph: removes MCP wiring from agents (ok step)", async () => {

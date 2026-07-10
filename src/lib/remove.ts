@@ -53,11 +53,11 @@ const TOOL_LABEL: Record<Tool, string> = {
 };
 
 // Composes the reversal steps (logout → unhook → codegraph uninstall →
-// restore-or-delete each tool → wipe ~/.codev). Order matters: logout runs
-// first because it reads ~/.codev/auth.json to revoke tokens, and the final
+// restore-or-delete each tool → wipe ~/.codev-hub). Order matters: logout runs
+// first because it reads ~/.codev-hub/auth.json to revoke tokens, and the final
 // step deletes that dir; unhook runs before the wipe because it cleans rc-file
 // sentinel blocks and (on Windows) the user PATH registry entry — state that
-// lives OUTSIDE ~/.codev and wouldn't be reached by rmSync(~/.codev). The
+// lives OUTSIDE ~/.codev-hub and wouldn't be reached by rmSync(~/.codev-hub). The
 // CodeGraph uninstall runs before the config restores so codev's restores are
 // the final writer on the files it owns, while CodeGraph still cleans the
 // files codev doesn't (e.g. opencode.jsonc); it's best-effort and never fails
@@ -210,15 +210,23 @@ function runRestoreOrDelete(tool: Tool): StepResult {
 }
 
 function runWipeCodevDir(): StepResult {
-	const path = join(homedir(), ".codev");
+	const path = join(homedir(), ".codev-hub");
 	try {
 		if (!existsSync(path)) {
-			return { label: "~/.codev", detail: "already absent", status: "noop" };
+			return {
+				label: "~/.codev-hub",
+				detail: "already absent",
+				status: "noop",
+			};
 		}
 		rmSync(path, { recursive: true, force: true });
-		return { label: "~/.codev", detail: `removed ${path}`, status: "ok" };
+		return { label: "~/.codev-hub", detail: `removed ${path}`, status: "ok" };
 	} catch (err) {
-		return { label: "~/.codev", detail: errorMessage(err), status: "failed" };
+		return {
+			label: "~/.codev-hub",
+			detail: errorMessage(err),
+			status: "failed",
+		};
 	}
 }
 

@@ -74,7 +74,7 @@ Then restart your terminal.
 
 ## Diagnostic logs
 
-Every codevhub command appends a structured diagnostic log to `~/.codev/logs/codev-YYYYMMDD.ndjson` — one [Elastic Common Schema](https://www.elastic.co/guide/en/ecs/current/index.html) JSON document per line. If a command misbehaves, this file shows what actually happened: each network request with its status and duration, every child process with its exit code and stderr tail, step-by-step flow progress, and any crash with a stack trace.
+Every codevhub command appends a structured diagnostic log to `~/.codev-hub/logs/codev-YYYYMMDD.ndjson` — one [Elastic Common Schema](https://www.elastic.co/guide/en/ecs/current/index.html) JSON document per line. If a command misbehaves, this file shows what actually happened: each network request with its status and duration, every child process with its exit code and stderr tail, step-by-step flow progress, and any crash with a stack trace.
 
 ```bash
 codevhub logs               # pretty-print the most recent run
@@ -88,7 +88,7 @@ jq 'select(.log.level == "error" or .log.level == "warn")' "$(codevhub logs --pa
 
 Details worth knowing:
 
-- **Conversations are never logged, and most secrets are redacted.** OAuth codes, bearer tokens, JWTs, and signed-URL parameters are scrubbed twice over, and agent prompt text is never recorded (only argument counts). **One deliberate exception:** the gateway API key you configure during `codevhub install` / `codevhub config` is written to the log in cleartext (as the `configure.api-key` event, surfaced by `codevhub logs --verbose`) so a misconfigured key can be diagnosed — treat `~/.codev/logs` as sensitive. Conversation exports are separate data and live in `~/.codev/agent-logs/`.
+- **Conversations are never logged, and most secrets are redacted.** OAuth codes, bearer tokens, JWTs, and signed-URL parameters are scrubbed twice over, and agent prompt text is never recorded (only argument counts). **One deliberate exception:** the gateway API key you configure during `codevhub install` / `codevhub config` is written to the log in cleartext (as the `configure.api-key` event, surfaced by `codevhub logs --verbose`) so a misconfigured key can be diagnosed — treat `~/.codev-hub/logs` as sensitive. Conversation exports are separate data and live in `~/.codev-hub/agent-logs/`.
 - **Retention** is automatic: files older than 14 days are pruned, and the directory is capped at 50 MB.
 - **Tuning:** `CODEV_LOG_LEVEL` (`debug` by default; `silent` disables logging), `CODEV_LOG_DIR` relocates the directory.
 

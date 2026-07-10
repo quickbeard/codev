@@ -54,7 +54,7 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 			eventType: "start",
 			extra: { agent: cmd, args_count: args.length },
 		});
-		// Strip ~/.codev/bin from the child's PATH so spawning `claude` resolves
+		// Strip ~/.codev-hub/bin from the child's PATH so spawning `claude` resolves
 		// the real npm-installed binary, not our shim — otherwise the shim would
 		// re-exec `codevhub claude` and infinite-loop.
 		const env: NodeJS.ProcessEnv = {

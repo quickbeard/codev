@@ -82,7 +82,7 @@ function flagValue(argv: string[], name: string): string | undefined {
 	return undefined;
 }
 
-// Diagnostic logging (~/.codev/logs/codev-YYYYMMDD.ndjson, ECS NDJSON) starts
+// Diagnostic logging (~/.codev-hub/logs/codev-YYYYMMDD.ndjson, ECS NDJSON) starts
 // before dispatch so every command logs its start/end and crashes. File-only —
 // never stdout/stderr, which the Ink apps own.
 initLogging(command ?? "help", args);
@@ -430,7 +430,7 @@ switch (command) {
 		process.exit(0);
 		break;
 	}
-	// `clear-logs`: deletes both ~/.codev log homes — the CLI diagnostics
+	// `clear-logs`: deletes both ~/.codev-hub log homes — the CLI diagnostics
 	// (cliLogsDir) and the conversation exports (agentLogsDir).
 	case "clear-logs": {
 		process.exit(runClearLogs());

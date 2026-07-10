@@ -53,7 +53,7 @@ const SUCCESS_RESULT: remove.RemoveResult = {
 			detail: "nothing to restore",
 			status: "noop",
 		},
-		{ label: "~/.codev", detail: "removed /x/.codev", status: "ok" },
+		{ label: "~/.codev-hub", detail: "removed /x/.codev", status: "ok" },
 	],
 	anyFailed: false,
 };
@@ -69,7 +69,7 @@ const FAILED_RESULT: remove.RemoveResult = {
 		},
 		{ label: "Codex config", detail: "nothing to restore", status: "noop" },
 		{ label: "OpenCode config", detail: "nothing to restore", status: "noop" },
-		{ label: "~/.codev", detail: "permission denied", status: "failed" },
+		{ label: "~/.codev-hub", detail: "permission denied", status: "failed" },
 	],
 	anyFailed: true,
 };
@@ -161,7 +161,7 @@ describe("RemoveApp", () => {
 		const out = history(frames);
 		expect(out).toContain("Some steps failed:");
 		expect(out).toContain("Shims: boom");
-		expect(out).toContain("~/.codev: permission denied");
+		expect(out).toContain("~/.codev-hub: permission denied");
 		// noop/ok steps are not listed under the failure block.
 		expect(out).not.toContain("SSO: signed out");
 	});

@@ -428,7 +428,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 	const handleManualDone = useCallback((value: ManualCredentialsValue) => {
 		logApiKeyConfigured("manual", value.apiKey, value.baseUrl);
 		// Defer saveApiKey to the model-choice step so we only persist a
-		// complete tuple (apiKey + baseUrl + model) to ~/.codev/auth.json.
+		// complete tuple (apiKey + baseUrl + model) to ~/.codev-hub/auth.json.
 		setCreds({
 			apiKey: value.apiKey,
 			baseUrl: value.baseUrl,
@@ -454,7 +454,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 		(model: string, models: string[]) => {
 			setChosenModel(model);
 			setCreds((prev) => (prev ? { ...prev, model, models } : prev));
-			// Persist apiKey/baseUrl/model to ~/.codev/auth.json. The full list
+			// Persist apiKey/baseUrl/model to ~/.codev-hub/auth.json. The full list
 			// isn't persisted — it's re-fetched on every install so reinstalls
 			// always see the current set.
 			if (!creds) {

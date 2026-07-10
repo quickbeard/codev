@@ -62,7 +62,7 @@ afterEach(() => {
 });
 
 function writeAuthFile(data: AuthData) {
-	const dir = join(tempDir, ".codev");
+	const dir = join(tempDir, ".codev-hub");
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, "auth.json"), JSON.stringify(data, null, 2));
 }
@@ -103,7 +103,7 @@ describe("loadAuth", () => {
 	});
 
 	test("returns null when file contains invalid JSON", () => {
-		const dir = join(tempDir, ".codev");
+		const dir = join(tempDir, ".codev-hub");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, "auth.json"), "not valid json{{{");
 		const result = loadAuth();
@@ -215,16 +215,16 @@ describe("logout", () => {
 	test("writes force-login marker so next login re-auths at the IdP", async () => {
 		writeAuthFile(VALID_AUTH);
 		await logout();
-		expect(existsSync(join(tempDir, ".codev", "force-login"))).toBe(true);
+		expect(existsSync(join(tempDir, ".codev-hub", "force-login"))).toBe(true);
 	});
 
 	test("does not write marker when there was no auth file to remove", async () => {
 		expect(await logout()).toBe(false);
-		expect(existsSync(join(tempDir, ".codev", "force-login"))).toBe(false);
+		expect(existsSync(join(tempDir, ".codev-hub", "force-login"))).toBe(false);
 	});
 
 	test("preserves api_key when stripping SSO fields", async () => {
-		const dir = join(tempDir, ".codev");
+		const dir = join(tempDir, ".codev-hub");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			join(dir, "auth.json"),
@@ -246,7 +246,7 @@ describe("logout", () => {
 	});
 
 	test("returns false when only api_key is present (already logged out)", async () => {
-		const dir = join(tempDir, ".codev");
+		const dir = join(tempDir, ".codev-hub");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			join(dir, "auth.json"),
@@ -256,7 +256,7 @@ describe("logout", () => {
 	});
 
 	test("preserves supabase config when stripping SSO fields", async () => {
-		const dir = join(tempDir, ".codev");
+		const dir = join(tempDir, ".codev-hub");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			join(dir, "auth.json"),
@@ -280,7 +280,7 @@ describe("logout", () => {
 	});
 
 	test("preserves both api_key and supabase config when stripping SSO", async () => {
-		const dir = join(tempDir, ".codev");
+		const dir = join(tempDir, ".codev-hub");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			join(dir, "auth.json"),
@@ -308,7 +308,7 @@ describe("saveCodevConfig", () => {
 			gatewayUrl: "https://gw.example.com/gateway",
 		});
 		const file = JSON.parse(
-			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
+			readFileSync(join(tempDir, ".codev-hub", "auth.json"), "utf-8"),
 		) as Record<string, unknown>;
 		expect(file.supabase_url).toBe("https://x.supabase.co");
 		expect(file.supabase_anon_key).toBe("anon-x");
@@ -346,7 +346,7 @@ describe("saveCodevConfig", () => {
 				supabaseAnonKey: "a",
 				gatewayUrl: "g",
 			});
-			const stat = statSync(join(tempDir, ".codev", "auth.json"));
+			const stat = statSync(join(tempDir, ".codev-hub", "auth.json"));
 			expect(stat.mode & 0o777).toBe(0o600);
 		},
 	);
@@ -368,7 +368,7 @@ describe("refreshCodevConfig", () => {
 		try {
 			await refreshCodevConfig("token", () => {});
 			const saved = JSON.parse(
-				readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
+				readFileSync(join(tempDir, ".codev-hub", "auth.json"), "utf-8"),
 			) as Record<string, unknown>;
 			expect(saved.supabase_url).toBe("https://fresh.supabase.co");
 			expect(saved.supabase_anon_key).toBe("fresh-anon");
@@ -436,7 +436,7 @@ describe("saveApiKey / loadApiKey", () => {
 		"file is written with mode 0600",
 		() => {
 			saveApiKey({ apiKey: "sk-perms" });
-			const stat = statSync(join(tempDir, ".codev", "auth.json"));
+			const stat = statSync(join(tempDir, ".codev-hub", "auth.json"));
 			expect(stat.mode & 0o777).toBe(0o600);
 		},
 	);
@@ -474,13 +474,13 @@ describe("skillhub cookie storage", () => {
 	test("clearSkillhubCookie removes the file when the cookie was the only field", () => {
 		saveSkillhubCookie("skill-hub-session=abc");
 		expect(clearSkillhubCookie()).toBe(true);
-		expect(existsSync(join(tempDir, ".codev", "auth.json"))).toBe(false);
+		expect(existsSync(join(tempDir, ".codev-hub", "auth.json"))).toBe(false);
 	});
 });
 
 describe("logout preserves the skillhub cookie", () => {
 	test("SSO logout keeps an admin cookie intact (login --force reuse)", async () => {
-		const dir = join(tempDir, ".codev");
+		const dir = join(tempDir, ".codev-hub");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			join(dir, "auth.json"),
@@ -588,7 +588,7 @@ describe("login refresh-token path", () => {
 	test("refreshes tokens silently without touching the backend", async () => {
 		// Pre-seed an expired SSO session with a refresh_token so login() takes
 		// the silent-refresh branch instead of the browser flow.
-		const dir = join(tempDir, ".codev");
+		const dir = join(tempDir, ".codev-hub");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			join(dir, "auth.json"),
@@ -715,11 +715,11 @@ describe("login full OAuth flow", () => {
 			.spyOn(browserOpener, "open")
 			.mockImplementation(() => Promise.resolve(undefined));
 		// These tests exercise the silent /authorize → /callback path. Login
-		// only takes that path when ~/.codev/auth.json exists (its absence
+		// only takes that path when ~/.codev-hub/auth.json exists (its absence
 		// signals "fresh machine or post-remove — force re-auth via the
 		// wrapper /logout flow").
-		mkdirSync(join(tempDir, ".codev"), { recursive: true });
-		writeFileSync(join(tempDir, ".codev", "auth.json"), "{}");
+		mkdirSync(join(tempDir, ".codev-hub"), { recursive: true });
+		writeFileSync(join(tempDir, ".codev-hub", "auth.json"), "{}");
 	});
 
 	afterEach(() => {
@@ -749,7 +749,7 @@ describe("login full OAuth flow", () => {
 		expect(result.user.email).toBe("flow@example.com");
 		expect(result.user.displayName).toBe("Flow User");
 
-		const authFile = join(tempDir, ".codev", "auth.json");
+		const authFile = join(tempDir, ".codev-hub", "auth.json");
 		expect(existsSync(authFile)).toBe(true);
 		const saved: AuthData = JSON.parse(readFileSync(authFile, "utf-8"));
 		expect(saved.access_token).toBe("flow-access-token");
@@ -839,7 +839,7 @@ describe("login full OAuth flow", () => {
 		);
 		expect(configCalls).toHaveLength(0);
 		const saved = JSON.parse(
-			readFileSync(join(tempDir, ".codev", "auth.json"), "utf-8"),
+			readFileSync(join(tempDir, ".codev-hub", "auth.json"), "utf-8"),
 		) as Record<string, unknown>;
 		expect(saved.supabase_url).toBeUndefined();
 		expect(saved.access_token).toBe("flow-access-token");
@@ -1097,7 +1097,7 @@ describe("login with force-login marker", () => {
 	const originalFetch = globalThis.fetch;
 
 	function writeMarker() {
-		const dir = join(tempDir, ".codev");
+		const dir = join(tempDir, ".codev-hub");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, "force-login"), "");
 	}
@@ -1212,7 +1212,7 @@ describe("login with force-login marker", () => {
 
 	test("clears the force-login marker after a successful login", async () => {
 		writeMarker();
-		const markerPath = join(tempDir, ".codev", "force-login");
+		const markerPath = join(tempDir, ".codev-hub", "force-login");
 		expect(existsSync(markerPath)).toBe(true);
 
 		await login(
@@ -1242,8 +1242,8 @@ describe("login with force-login marker", () => {
 	test("uses /authorize directly when no marker is present and auth.json exists", async () => {
 		// auth.json must exist for the silent path — otherwise the
 		// fresh-machine check forces login. Seed an empty auth file, no marker.
-		mkdirSync(join(tempDir, ".codev"), { recursive: true });
-		writeFileSync(join(tempDir, ".codev", "auth.json"), "{}");
+		mkdirSync(join(tempDir, ".codev-hub"), { recursive: true });
+		writeFileSync(join(tempDir, ".codev-hub", "auth.json"), "{}");
 
 		let openedUrl: URL | null = null;
 
@@ -1273,7 +1273,7 @@ describe("login with force-login marker", () => {
 		// behind by `codevhub remove`'s rmSync. The IdP's still-valid browser
 		// session cookie must not be silently reused: the next login must
 		// take the wrapper-logout path so the user retypes credentials.
-		expect(existsSync(join(tempDir, ".codev", "auth.json"))).toBe(false);
+		expect(existsSync(join(tempDir, ".codev-hub", "auth.json"))).toBe(false);
 
 		let openedUrl: URL | null = null;
 
@@ -1302,11 +1302,11 @@ describe("login with force-login marker", () => {
 		expect((openedUrl as unknown as URL).pathname).toBe("/sso-wrapper/logout");
 	});
 
-	test("forces login even when ~/.codev exists without auth.json (diagnostics side effect)", async () => {
+	test("forces login even when ~/.codev-hub exists without auth.json (diagnostics side effect)", async () => {
 		// Diagnostic logging (lib/log.ts) and runExport both create dirs under
-		// ~/.codev before login can run. Their side effects must not read as
+		// ~/.codev-hub before login can run. Their side effects must not read as
 		// "prior auth on this machine" — only auth.json itself counts.
-		mkdirSync(join(tempDir, ".codev", "logs"), { recursive: true });
+		mkdirSync(join(tempDir, ".codev-hub", "logs"), { recursive: true });
 
 		let openedUrl: URL | null = null;
 
@@ -1372,11 +1372,11 @@ describe("login manual paste-back (no-browser)", () => {
 		openBrowserSpy = vi
 			.spyOn(browserOpener, "open")
 			.mockImplementation(() => Promise.resolve(undefined));
-		// Silent /authorize path requires ~/.codev/auth.json to exist (its
+		// Silent /authorize path requires ~/.codev-hub/auth.json to exist (its
 		// absence signals "fresh machine or post-remove — force re-auth via
 		// the wrapper /logout flow").
-		mkdirSync(join(tempDir, ".codev"), { recursive: true });
-		writeFileSync(join(tempDir, ".codev", "auth.json"), "{}");
+		mkdirSync(join(tempDir, ".codev-hub"), { recursive: true });
+		writeFileSync(join(tempDir, ".codev-hub", "auth.json"), "{}");
 		fetchSpy = mockAuthFetch({
 			"/token": async () =>
 				new Response(
@@ -1427,7 +1427,7 @@ describe("login manual paste-back (no-browser)", () => {
 
 		expect(result.access_token).toBe("flow-access-token");
 		expect(result.user.email).toBe("flow@example.com");
-		expect(existsSync(join(tempDir, ".codev", "auth.json"))).toBe(true);
+		expect(existsSync(join(tempDir, ".codev-hub", "auth.json"))).toBe(true);
 		// No browser was opened — the remote user pasted the URL back by hand.
 		expect(openBrowserSpy).not.toHaveBeenCalled();
 	});

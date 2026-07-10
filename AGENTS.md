@@ -116,7 +116,7 @@ The install flow's "Skip configuration" auth choice routes Configure through `ba
 
 ## Config refresh and upload self-healing
 
-Supabase coordinates (`supabase_url`, `supabase_anon_key`) and the public gateway base URL (`gateway_url`) are not baked into the source — they're fetched together from the backend's `POST /config` endpoint and cached in `~/.codev/auth.json`. `gateway_url` is read back via `AI_GATEWAY_URL()` / `AI_GATEWAY_OPENAI_URL()` in `src/lib/const.ts` (the latter derives the `<base>/v1` endpoint), which `configure.ts` and `backend.ts` fall back to whenever a flow has no explicit `baseUrl` (the SSO-key path). Like the Supabase accessors they hard-fail with a "run `codevhub install`" message if the cache was never populated. Two invariants keep that cache fresh:
+Supabase coordinates (`supabase_url`, `supabase_anon_key`) and the public gateway base URL (`gateway_url`) are not baked into the source — they're fetched together from the backend's `POST /config` endpoint and cached in `~/.codev-hub/auth.json`. `gateway_url` is read back via `AI_GATEWAY_URL()` / `AI_GATEWAY_OPENAI_URL()` in `src/lib/const.ts` (the latter derives the `<base>/v1` endpoint), which `configure.ts` and `backend.ts` fall back to whenever a flow has no explicit `baseUrl` (the SSO-key path). Like the Supabase accessors they hard-fail with a "run `codevhub install`" message if the cache was never populated. Two invariants keep that cache fresh:
 
 1. **Every command that consumes Supabase coords refreshes config after a successful login.** `login()` itself does not call `refreshCodevConfig` — callers run it explicitly so the timing fits each flow. Today:
    - `InstallApp` awaits `refreshCodevConfig` inline between the install and key-choice steps. The `refreshing-config` Phase still exists as an internal state to block forward progress, but renders no visible Step.
@@ -126,10 +126,10 @@ Supabase coordinates (`supabase_url`, `supabase_anon_key`) and the public gatewa
 
 ## Diagnostic logging
 
-`~/.codev` has two log homes — don't mix them up:
+`~/.codev-hub` has two log homes — don't mix them up:
 
-- `~/.codev/agent-logs/<project>/` — **conversation exports** (the data `codevhub upload` ships). `paths.ts#agentLogsDir` / `projectLogsDir`. Used to live at `~/.codev/logs/`; `runExport` still migrates legacy project folders over (directories only).
-- `~/.codev/logs/codev-YYYYMMDD.ndjson` — **the CLI's own diagnostics** (`paths.ts#cliLogsDir`, written by `src/lib/log.ts`). One ECS NDJSON document per line.
+- `~/.codev-hub/agent-logs/<project>/` — **conversation exports** (the data `codevhub upload` ships). `paths.ts#agentLogsDir` / `projectLogsDir`. Used to live at `~/.codev-hub/logs/`; `runExport` still migrates legacy project folders over (directories only).
+- `~/.codev-hub/logs/codev-YYYYMMDD.ndjson` — **the CLI's own diagnostics** (`paths.ts#cliLogsDir`, written by `src/lib/log.ts`). One ECS NDJSON document per line.
 
 `lib/log.ts` ground rules, in priority order: (1) logging can never break or block a command — every disk touch is wrapped, failed init degrades to no-op; (2) no secrets on disk — key-based redaction of structured fields plus pattern scrubbing of the serialized line (bearer values, JWTs, `sk-…` keys, sensitive query params); URLs persist as domain + path only. The one deliberate exception: the configured gateway API key, which `logApiKeyConfigured` writes verbatim via the `unsafeUnredacted` escape hatch — its only sanctioned use — during `codevhub install`/`config` (event `configure.api-key`, carried in `codev.api_key`, never the message); everything else stays redacted; (3) never write to stdout/stderr — Ink owns the TTY. Files are date-named (no rename rotation: the foreground CLI and the detached upload daemon append concurrently); retention prunes at init (14 days / 50 MB) and only touches the `codev-*.ndjson` pattern. Env knobs: `CODEV_LOG_LEVEL` (default `debug`, `silent` disables), `CODEV_LOG_DIR`.
 
@@ -137,11 +137,11 @@ Supabase coordinates (`supabase_url`, `supabase_anon_key`) and the public gatewa
 
 Instrumented seams — extend these rather than adding ad-hoc writes: `loggedFetch(endpoint, url, init)` wraps every direct fetch (start + completion docs; error bodies read from a `Response.clone()` so callers' streams stay intact; request headers/bodies never serialized); `npm.ts#execAsync` covers all shelled-out children (npm, `code`, JetBrains CLIs, codegraph) with exit code + stderr tail; `runAgent` logs agent launches with an **args count only** — agent args can carry prompt text and must never reach disk; `login()` and `runUpload` tee their status callbacks. Keep `event.action` to the taxonomy listed in `LogFields`.
 
-Daemon specifics: `runUploadDaemon` logs `daemon.skip` / `daemon.run` documents to the NDJSON log; the detached child's own stdout/stderr are discarded (`stdio: ["ignore", "ignore", "ignore"]` in `spawnUploadDaemon`) — there is no separate `upload.log` sink, since the child runs through `index.tsx` and its diagnostics already land in the NDJSON log. `~/.codev/last-upload.json` is status, not logging, and stays.
+Daemon specifics: `runUploadDaemon` logs `daemon.skip` / `daemon.run` documents to the NDJSON log; the detached child's own stdout/stderr are discarded (`stdio: ["ignore", "ignore", "ignore"]` in `spawnUploadDaemon`) — there is no separate `upload.log` sink, since the child runs through `index.tsx` and its diagnostics already land in the NDJSON log. `~/.codev-hub/last-upload.json` is status, not logging, and stays.
 
 The reader side is `src/lib/logs.ts` (`codevhub logs`): bare mode prints the most recent run, excluding this very invocation's trace and prior `logs` runs; `--trace <id>` accepts a prefix; child runs are linked via `codev.parent_trace_id`. Plain console output, no Ink.
 
-Testing: logging is a silent no-op until `initLogging` runs, so ordinary tests need no setup and never write files. Tests that assert documents stub `CODEV_LOG_DIR`, call `initLogging(cmd, [], { installProcessHooks: false })` (so vitest's process stays free of our exit/crash listeners), and `resetLogging()` in `afterEach`. Related: `login()`'s force-login probe is keyed off `~/.codev/auth.json` — not the `~/.codev` dir — precisely because the logger creates `~/.codev/logs` at the entry of every command.
+Testing: logging is a silent no-op until `initLogging` runs, so ordinary tests need no setup and never write files. Tests that assert documents stub `CODEV_LOG_DIR`, call `initLogging(cmd, [], { installProcessHooks: false })` (so vitest's process stays free of our exit/crash listeners), and `resetLogging()` in `afterEach`. Related: `login()`'s force-login probe is keyed off `~/.codev-hub/auth.json` — not the `~/.codev-hub` dir — precisely because the logger creates `~/.codev-hub/logs` at the entry of every command.
 
 ## CodeGraph integration
 

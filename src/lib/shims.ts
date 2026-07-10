@@ -61,7 +61,7 @@ const SENTINEL_START = "# >>> codev shims (managed) >>>";
 const SENTINEL_END = "# <<< codev shims (managed) <<<";
 
 export function shimDir(): string {
-	return join(homedir(), ".codev", "bin");
+	return join(homedir(), ".codev-hub", "bin");
 }
 
 // run.ts uses this to strip our shim dir from the child's PATH so that
@@ -93,7 +93,7 @@ function posixShimContent(agent: ShimAgent): string {
 	// real agent.
 	return `#!/bin/sh
 # This shim is managed by CoDev. Manual edits will be overwritten.
-SHIM_DIR="$HOME/.codev/bin"
+SHIM_DIR="$HOME/.codev-hub/bin"
 new_path=""
 old_ifs="$IFS"
 IFS=:
@@ -117,7 +117,7 @@ function cmdShimContent(agent: ShimAgent): string {
 	return `@echo off\r
 REM This shim is managed by CoDev. Manual edits will be overwritten.\r
 setlocal EnableDelayedExpansion\r
-set "SHIM_DIR=%USERPROFILE%\\.codev\\bin"\r
+set "SHIM_DIR=%USERPROFILE%\\.codev-hub\\bin"\r
 set "NEWPATH="\r
 for %%P in ("%PATH:;=";"%") do (\r
 \tif /I not "%%~P"=="%SHIM_DIR%" (\r
@@ -146,7 +146,7 @@ function writeShimFiles(agents: readonly ShimAgent[]): ShimAgent[] {
 	return written;
 }
 
-// Lists agents whose shim file currently lives in ~/.codev/bin. installShims
+// Lists agents whose shim file currently lives in ~/.codev-hub/bin. installShims
 // uses this to compute the rc-file alias union so a second `codevhub install`
 // for a different tool doesn't drop the first run's aliases.
 export function detectInstalledShims(): ShimAgent[] {
@@ -180,7 +180,7 @@ function escapeRegExp(s: string): string {
 }
 
 function posixShellSnippet(agents: readonly ShimAgent[]): string {
-	const dir = "$HOME/.codev/bin";
+	const dir = "$HOME/.codev-hub/bin";
 	const aliases = agents.map((a) => `alias ${a}="${dir}/${a}"`).join("\n");
 	return `# Routes claude/codex/opencode/codev through codevhub so they pick up CoDev's config.
 # Remove this block to disable.
@@ -190,7 +190,7 @@ ${aliases}
 }
 
 function fishShellSnippet(agents: readonly ShimAgent[]): string {
-	const dir = "$HOME/.codev/bin";
+	const dir = "$HOME/.codev-hub/bin";
 	const aliases = agents.map((a) => `alias ${a} "${dir}/${a}"`).join("\n");
 	return `# Routes claude/codex/opencode/codev through codevhub so they pick up CoDev's config.
 # Remove this block to disable.
@@ -200,7 +200,7 @@ ${aliases}
 }
 
 function powershellSnippet(agents: readonly ShimAgent[]): string {
-	const dir = "$HOME\\.codev\\bin";
+	const dir = "$HOME\\.codev-hub\\bin";
 	const functions = agents
 		.map((a) => `function ${a} { & "${dir}\\${a}.cmd" @args }`)
 		.join("\n");
@@ -265,10 +265,10 @@ function patchWindowsProfiles(agents: readonly ShimAgent[]): string[] {
 // if not already present. Uses PowerShell rather than `setx` to avoid setx's
 // 1024-char truncation and its habit of concatenating the volatile session PATH.
 function updateWindowsUserPath(): boolean {
-	const dir = join(homedir(), ".codev", "bin");
+	const dir = join(homedir(), ".codev-hub", "bin");
 	const script = [
 		"$ErrorActionPreference='Stop'",
-		"$dir = [Environment]::GetFolderPath('UserProfile') + '\\.codev\\bin'",
+		"$dir = [Environment]::GetFolderPath('UserProfile') + '\\.codev-hub\\bin'",
 		"$cur = [Environment]::GetEnvironmentVariable('Path','User')",
 		"if ($null -eq $cur) { $cur = '' }",
 		"$parts = $cur.Split([IO.Path]::PathSeparator)",
@@ -378,7 +378,7 @@ function removeShimFiles(): string[] {
 			removed.push(path);
 		}
 	}
-	// Remove the shim dir if it's now empty. Leave $HOME/.codev intact since
+	// Remove the shim dir if it's now empty. Leave $HOME/.codev-hub intact since
 	// other codev state lives there (auth.json, logs/).
 	try {
 		rmdirSync(dir);
@@ -438,7 +438,7 @@ function unpatchWindowsProfiles(): string[] {
 function removeFromWindowsUserPath(): boolean {
 	const script = [
 		"$ErrorActionPreference='Stop'",
-		"$dir = [Environment]::GetFolderPath('UserProfile') + '\\.codev\\bin'",
+		"$dir = [Environment]::GetFolderPath('UserProfile') + '\\.codev-hub\\bin'",
 		"$cur = [Environment]::GetEnvironmentVariable('Path','User')",
 		"if ($null -eq $cur -or $cur.Length -eq 0) { Write-Output 'unchanged'; exit 0 }",
 		"$sep = [IO.Path]::PathSeparator",

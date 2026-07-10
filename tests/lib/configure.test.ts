@@ -21,8 +21,8 @@ beforeEach(() => {
 	vi.stubEnv("USERPROFILE", tempDir);
 	// The configure* functions fall back to AI_GATEWAY_URL()/AI_GATEWAY_OPENAI_URL()
 	// whenever creds carry no baseUrl (the SSO-key path), and those accessors read
-	// gateway_url out of ~/.codev/auth.json. Seed it so the fallback resolves.
-	const codevDir = join(tempDir, ".codev");
+	// gateway_url out of ~/.codev-hub/auth.json. Seed it so the fallback resolves.
+	const codevDir = join(tempDir, ".codev-hub");
 	mkdirSync(codevDir, { recursive: true });
 	writeFileSync(
 		join(codevDir, "auth.json"),

@@ -25,7 +25,7 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 // The gateway-URL accessors (AI_GATEWAY_URL / AI_GATEWAY_OPENAI_URL) read the
-// cached gateway_url out of ~/.codev/auth.json. backend.ts falls back to them
+// cached gateway_url out of ~/.codev-hub/auth.json. backend.ts falls back to them
 // whenever a call has no explicit baseUrl (the SSO-key path), so every test in
 // this file gets a temp HOME with a known gateway_url seeded.
 const GATEWAY_URL = "https://gw.test/gateway";
@@ -34,7 +34,7 @@ beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-backend-"));
 	vi.stubEnv("HOME", tempDir);
 	vi.stubEnv("USERPROFILE", tempDir);
-	const dir = join(tempDir, ".codev");
+	const dir = join(tempDir, ".codev-hub");
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(
 		join(dir, "auth.json"),

@@ -29,7 +29,7 @@ afterEach(() => {
 });
 
 function writeAuthJson(data: Record<string, unknown>) {
-	const dir = join(tempDir, ".codev");
+	const dir = join(tempDir, ".codev-hub");
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, "auth.json"), JSON.stringify(data));
 }

@@ -63,9 +63,9 @@ function readDiagDocs(diagDir: string): DiagDoc[] {
 }
 
 function writeAuth() {
-	mkdirSync(join(tempHome, ".codev"), { recursive: true });
+	mkdirSync(join(tempHome, ".codev-hub"), { recursive: true });
 	writeFileSync(
-		join(tempHome, ".codev", "auth.json"),
+		join(tempHome, ".codev-hub", "auth.json"),
 		JSON.stringify({
 			access_token: "token",
 			id_token: "token",
@@ -78,7 +78,7 @@ function writeAuth() {
 }
 
 function writeLog(name = "a.md", content = "hello") {
-	const dir = join(tempHome, ".codev", "agent-logs", "project", "codex");
+	const dir = join(tempHome, ".codev-hub", "agent-logs", "project", "codex");
 	mkdirSync(dir, { recursive: true });
 	const path = join(dir, name);
 	writeFileSync(path, content);
@@ -127,8 +127,8 @@ function mockUploadHappyPath() {
 	}) as typeof fetch);
 }
 
-const lockPath = () => join(tempHome, ".codev", "upload.lock");
-const statusPath = () => join(tempHome, ".codev", "last-upload.json");
+const lockPath = () => join(tempHome, ".codev-hub", "upload.lock");
+const statusPath = () => join(tempHome, ".codev-hub", "last-upload.json");
 
 describe("runUploadDaemon", () => {
 	test("skips with a daemon.skip document when not logged in", async () => {
@@ -146,7 +146,7 @@ describe("runUploadDaemon", () => {
 	test("skips when lockfile is held by an alive process", async () => {
 		const diagDir = initDiag();
 		writeAuth();
-		mkdirSync(join(tempHome, ".codev"), { recursive: true });
+		mkdirSync(join(tempHome, ".codev-hub"), { recursive: true });
 		writeFileSync(
 			lockPath(),
 			JSON.stringify({
@@ -168,7 +168,7 @@ describe("runUploadDaemon", () => {
 	test("reclaims a stale lock past STALE_LOCK_MS and proceeds", async () => {
 		writeAuth();
 		writeLog("new.md", "hello");
-		mkdirSync(join(tempHome, ".codev"), { recursive: true });
+		mkdirSync(join(tempHome, ".codev-hub"), { recursive: true });
 		writeFileSync(
 			lockPath(),
 			JSON.stringify({
@@ -188,7 +188,7 @@ describe("runUploadDaemon", () => {
 	test("reclaims a corrupt lockfile and proceeds", async () => {
 		writeAuth();
 		writeLog("new.md", "hello");
-		mkdirSync(join(tempHome, ".codev"), { recursive: true });
+		mkdirSync(join(tempHome, ".codev-hub"), { recursive: true });
 		writeFileSync(lockPath(), "not json");
 		mockUploadHappyPath();
 		const code = await runUploadDaemon();

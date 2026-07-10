@@ -40,9 +40,9 @@ afterEach(() => {
 });
 
 function writeAuth() {
-	mkdirSync(join(tempHome, ".codev"), { recursive: true });
+	mkdirSync(join(tempHome, ".codev-hub"), { recursive: true });
 	writeFileSync(
-		join(tempHome, ".codev", "auth.json"),
+		join(tempHome, ".codev-hub", "auth.json"),
 		JSON.stringify({
 			access_token: "token",
 			id_token: "token",
@@ -55,7 +55,7 @@ function writeAuth() {
 }
 
 function writeLog(name = "a.md", content = "hello") {
-	const dir = join(tempHome, ".codev", "agent-logs", "project", "codex");
+	const dir = join(tempHome, ".codev-hub", "agent-logs", "project", "codex");
 	mkdirSync(dir, { recursive: true });
 	const path = join(dir, name);
 	writeFileSync(path, content);
@@ -66,11 +66,11 @@ describe("upload helpers", () => {
 	test("lists markdown logs under agent directories only", () => {
 		const path = writeLog();
 		writeFileSync(
-			join(tempHome, ".codev", "agent-logs", "project", "statistics.json"),
+			join(tempHome, ".codev-hub", "agent-logs", "project", "statistics.json"),
 			"{}",
 		);
 		expect(
-			listMarkdownLogs(join(tempHome, ".codev", "agent-logs", "project")),
+			listMarkdownLogs(join(tempHome, ".codev-hub", "agent-logs", "project")),
 		).toEqual([path]);
 	});
 
@@ -140,9 +140,9 @@ describe("runUpload", () => {
 		// null and ensureAuth() must log in. Mock login() to resolve immediately
 		// (no browser), then assert onLoginDone fired so the caller can dismiss
 		// the login prompt before the upload proceeds.
-		mkdirSync(join(tempHome, ".codev"), { recursive: true });
+		mkdirSync(join(tempHome, ".codev-hub"), { recursive: true });
 		writeFileSync(
-			join(tempHome, ".codev", "auth.json"),
+			join(tempHome, ".codev-hub", "auth.json"),
 			JSON.stringify({
 				supabase_url: "https://test.supabase.co",
 				supabase_anon_key: "anon",
@@ -480,9 +480,9 @@ describe("runUpload", () => {
 
 	test("refreshes config when Supabase coords are missing from cache", async () => {
 		// Auth file with SSO tokens but no supabase_* fields.
-		mkdirSync(join(tempHome, ".codev"), { recursive: true });
+		mkdirSync(join(tempHome, ".codev-hub"), { recursive: true });
 		writeFileSync(
-			join(tempHome, ".codev", "auth.json"),
+			join(tempHome, ".codev-hub", "auth.json"),
 			JSON.stringify({
 				access_token: "token",
 				id_token: "token",
@@ -740,7 +740,7 @@ describe("isRefreshableError", () => {
 		expect(
 			isRefreshableError(
 				new Error(
-					"Missing supabase_url in ~/.codev/auth.json. Run `codevhub install`...",
+					"Missing supabase_url in ~/.codev-hub/auth.json. Run `codevhub install`...",
 				),
 			),
 		).toBe(true);
