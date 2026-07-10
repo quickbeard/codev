@@ -16,7 +16,7 @@ Then run:
 codevhub install
 ```
 
-After install, go to your project and type `codev` (CoDev Code), `claude`, `codex`, or `opencode` to launch.
+After install, go to your project and type `codev`, `claude`, `codex`, or `opencode` to launch.
 
 ## CodeGraph integration
 
