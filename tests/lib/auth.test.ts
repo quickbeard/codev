@@ -315,7 +315,7 @@ describe("saveCodevConfig", () => {
 		expect(file.gateway_url).toBe("https://gw.example.com/gateway");
 	});
 
-	test("does not clobber SSO fields when saving codev config", () => {
+	test("does not clobber SSO fields when saving codevhub config", () => {
 		writeAuthFile(VALID_AUTH);
 		saveCodevConfig({
 			supabaseUrl: "https://x.supabase.co",
@@ -325,7 +325,7 @@ describe("saveCodevConfig", () => {
 		expect(loadAuth()?.access_token).toBe("test-access-token");
 	});
 
-	test("does not clobber api_key when saving codev config", () => {
+	test("does not clobber api_key when saving codevhub config", () => {
 		saveApiKey({ apiKey: "sk-merged" });
 		saveCodevConfig({
 			supabaseUrl: "https://x.supabase.co",
@@ -1268,9 +1268,9 @@ describe("login with force-login marker", () => {
 		);
 	});
 
-	test("forces login when auth.json is absent (e.g. after `codev remove`)", async () => {
+	test("forces login when auth.json is absent (e.g. after `codevhub remove`)", async () => {
 		// No marker written, AND no auth.json created — mirrors the state left
-		// behind by `codev remove`'s rmSync. The IdP's still-valid browser
+		// behind by `codevhub remove`'s rmSync. The IdP's still-valid browser
 		// session cookie must not be silently reused: the next login must
 		// take the wrapper-logout path so the user retypes credentials.
 		expect(existsSync(join(tempDir, ".codev", "auth.json"))).toBe(false);

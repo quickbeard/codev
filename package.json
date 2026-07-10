@@ -1,6 +1,6 @@
 {
   "name": "codev-ai",
-  "version": "0.3.16",
+  "version": "0.4.0",
   "description": "CoDev — AI Coding Agent Hub. Install, configure, and manage multiple AI coding agents.",
   "keywords": [
     "ai",
@@ -9,7 +9,7 @@
   ],
   "type": "module",
   "bin": {
-    "codev": "dist/index.js"
+    "codevhub": "dist/index.js"
   },
   "files": [
     "dist"

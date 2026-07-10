@@ -90,7 +90,7 @@ export async function ensureCodegraphInstalled(): Promise<string | null> {
 }
 
 // Is the global CodeGraph package present under `npm root -g`? This is the
-// signal `codev update` uses to decide whether to refresh CodeGraph: update
+// signal `codevhub update` uses to decide whether to refresh CodeGraph: update
 // only upgrades what's already on disk (the same "detect, then update"
 // contract the agent rows follow), so it never freshly installs CodeGraph.
 // Install/config gate on the selected tools instead — there's no tool
@@ -120,7 +120,7 @@ export async function runCodegraphInstall(
 
 // Run CodeGraph's uninstaller (the inverse of runCodegraphInstall): removes the
 // MCP server wiring from every agent, user-wide and non-interactively. Used by
-// `codev remove`. Returns an error string on failure — including ENOENT when
+// `codevhub remove`. Returns an error string on failure — including ENOENT when
 // the codegraph package was already removed, which the caller treats as a
 // non-fatal warning — or null on success.
 export async function runCodegraphUninstall(): Promise<string | null> {
@@ -175,7 +175,7 @@ export const codegraphRunner = {
 	spawn: nodeSpawn,
 };
 
-// Transparent passthrough: `codev codegraph <args>` ≡ `codegraph <args>`.
+// Transparent passthrough: `codevhub codegraph <args>` ≡ `codegraph <args>`.
 // Inherits stdio so interactive subcommands (the bare installer, prompts)
 // work, swallows SIGINT/SIGTERM in the parent so the child handles its own
 // cleanup, and prints an install hint on ENOENT. Mirrors lib/run.ts#runAgent,
@@ -218,7 +218,7 @@ export function forwardToCodegraph(args: string[]): Promise<number> {
 			});
 			if (err.code === "ENOENT") {
 				console.error(
-					`'${CODEGRAPH_BIN}' could not be launched. Install it with 'codev install' ` +
+					`'${CODEGRAPH_BIN}' could not be launched. Install it with 'codevhub install' ` +
 						`(select an agent) or 'npm i -g ${CODEGRAPH_PKG}'.`,
 				);
 			} else {

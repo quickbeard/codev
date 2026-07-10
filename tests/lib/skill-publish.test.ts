@@ -290,7 +290,7 @@ describe("runSkillPublish", () => {
 		const errs = captureErr();
 		const code = await runSkillPublish(["--json"]);
 		expect(code).toBe(1);
-		expect(errs.join("\n")).toMatch(/Usage: codev skill push/);
+		expect(errs.join("\n")).toMatch(/Usage: codevhub skill push/);
 	});
 
 	test("publishes a directory and prints the result (exit 0)", async () => {

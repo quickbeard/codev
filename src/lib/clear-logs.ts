@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { agentLogsDir, cliLogsDir } from "@/lib/paths.js";
 
-// Hidden `codev clear-logs`: deletes both ~/.codev log homes — the CLI's own
+// Hidden `codevhub clear-logs`: deletes both ~/.codev log homes — the CLI's own
 // diagnostics (cliLogsDir) and the conversation exports (agentLogsDir). Plain
 // console output, no Ink and no prompt, matching the other hidden utility
 // commands (hook/unhook). Each dir is removed only if it exists, so the report

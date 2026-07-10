@@ -4,7 +4,7 @@ import { type HubSkill, listHubSkills } from "@/lib/skillhub.js";
 const DEFAULT_LIMIT = 20;
 const DESCRIPTION_MAX = 90;
 
-// `codev skill search <query> [--json] [--limit <n>]`. Plain console output
+// `codevhub skill search <query> [--json] [--limit <n>]`. Plain console output
 // (no Ink) so results pipe cleanly and `--json` is script-friendly — mirrors
 // the deprecated `skillhub search`. The query is required. Returns the exit code.
 export async function runSkillSearch(args: string[]): Promise<number> {
@@ -34,7 +34,9 @@ export async function runSkillSearch(args: string[]): Promise<number> {
 	}
 	const query = positionals.join(" ").trim();
 	if (!query) {
-		console.error("Usage: codev skill search <query> [--json] [--limit <n>]");
+		console.error(
+			"Usage: codevhub skill search <query> [--json] [--limit <n>]",
+		);
 		return 1;
 	}
 

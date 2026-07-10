@@ -25,6 +25,7 @@ import {
 	activationHint,
 	detectCodevTools,
 	installShims,
+	repairShims,
 	SHIM_AGENTS,
 	type ShimAgent,
 	uninstallShims,
@@ -70,7 +71,7 @@ const [command, ...args] = process.argv.slice(2);
 
 // Read the value of a `--name value` / `--name=value` flag from argv, or
 // undefined when the flag is absent. Used for the non-interactive admin-login
-// credentials on `codev login`.
+// credentials on `codevhub login`.
 function flagValue(argv: string[], name: string): string | undefined {
 	const eq = `${name}=`;
 	for (let i = 0; i < argv.length; i++) {
@@ -86,18 +87,28 @@ function flagValue(argv: string[], name: string): string | undefined {
 // never stdout/stderr, which the Ink apps own.
 initLogging(command ?? "help", args);
 
+// Rewrite shims left behind by pre-0.4 hub versions (their bodies re-exec the
+// old `codev` hub command, which is now the agent). Best-effort: a filesystem
+// hiccup here must never block the actual command.
+try {
+	repairShims();
+} catch {
+	// Ignore — `codevhub install`/`hook` can rebuild shims explicitly.
+}
+
 switch (command) {
-	// Bare `codev` opens CoDev Code (the built-in coding agent) in the current
-	// directory. Fall back to the hub help when the agent isn't installed yet,
-	// so first-run users get orientation instead of a launch error.
+	// Bare `codevhub` opens CoDev Code (the built-in coding agent) in the
+	// current directory. Fall back to the hub help when the agent isn't
+	// installed yet, so first-run users get orientation instead of a launch
+	// error.
 	case undefined: {
-		if (!agentOnPath("codev-code")) {
+		if (!agentOnPath("codev")) {
 			printHelp();
 			process.exit(0);
 		}
 		spawnUploadDaemon();
 		await ensureFreshGatewayKey("codev-code");
-		process.exit(await runAgent("codev-code", []));
+		process.exit(await runAgent("codev", []));
 		break;
 	}
 	case "--help":
@@ -147,7 +158,8 @@ switch (command) {
 		const username = flagValue(args, "--username");
 		const password = flagValue(args, "--password");
 		// Passing either credential implies the admin (username/password) flow, so
-		// `codev login --username u --password p` works without also typing --admin.
+		// `codevhub login --username u --password p` works without also typing
+		// --admin.
 		const admin =
 			args.includes("--admin") ||
 			username !== undefined ||
@@ -155,7 +167,7 @@ switch (command) {
 		// Non-interactive admin login needs both halves; one alone is a usage error.
 		if ((username === undefined) !== (password === undefined)) {
 			console.error(
-				"codev login: --username and --password must be provided together.",
+				"codevhub login: --username and --password must be provided together.",
 			);
 			process.exit(1);
 		}
@@ -237,7 +249,7 @@ switch (command) {
 		process.exit(runRestore(toolForRestoreAgent(agent as RestoreAgent)));
 		break;
 	}
-	// `codev init` initializes the current project for CoDev. Hint that the
+	// `codevhub init` initializes the current project for CoDev. Hint that the
 	// generated `.codegraph/` directory should be committed so the whole team
 	// shares one knowledge graph — but only if it's actually on disk afterward.
 	// `codegraph init` exits 0 on no-ops too (e.g. `--help`), so we gate on the
@@ -257,7 +269,7 @@ switch (command) {
 		break;
 	}
 	// `skill <subcommand>`: operations against the SkillHub registry. Namespaced
-	// so it doesn't collide with `codev install` (which installs agents).
+	// so it doesn't collide with `codevhub install` (which installs agents).
 	// `pull` downloads/installs a skill (not `install`, to avoid that confusion);
 	// `push` publishes one; whoami migrates here next.
 	case "skill": {
@@ -269,7 +281,7 @@ switch (command) {
 			const parsed = parsePublishArgs(rest);
 			if (!parsed.path) {
 				console.error(
-					"Usage: codev skill push <path> [--draft-only] [--auto-approve] [--json]",
+					"Usage: codevhub skill push <path> [--draft-only] [--auto-approve] [--json]",
 				);
 				process.exit(1);
 			}
@@ -306,7 +318,7 @@ switch (command) {
 			}
 			if (!parsed.target) {
 				console.error(
-					"Usage: codev skill pull <name|id> [--dir <path>] [--force] [--json]",
+					"Usage: codevhub skill pull <name|id> [--dir <path>] [--force] [--json]",
 				);
 				process.exit(1);
 			}
@@ -336,7 +348,7 @@ switch (command) {
 		}
 		console.error(
 			sub === undefined
-				? "Usage: codev skill <search|pull|push> ..."
+				? "Usage: codevhub skill <search|pull|push> ..."
 				: `Unknown skill subcommand: ${sub}. Valid: search, pull, push.`,
 		);
 		process.exit(1);
@@ -357,13 +369,13 @@ switch (command) {
 		await ensureFreshGatewayKey("opencode");
 		process.exit(await runAgent("opencode", args));
 		break;
-	case "codev-code":
+	case "codev":
 		spawnUploadDaemon();
 		await ensureFreshGatewayKey("codev-code");
-		process.exit(await runAgent("codev-code", args));
+		process.exit(await runAgent("codev", args));
 		break;
-	// Transparent passthrough to CodeGraph: `codev codegraph <args>` ≡
-	// `codegraph <args>` (e.g. `codev codegraph init`). No upload daemon and
+	// Transparent passthrough to CodeGraph: `codevhub codegraph <args>` ≡
+	// `codegraph <args>` (e.g. `codevhub codegraph init`). No upload daemon and
 	// no shim handling — CodeGraph isn't a chat agent and isn't shimmed.
 	case "codegraph":
 		process.exit(await forwardToCodegraph(args));
@@ -373,15 +385,15 @@ switch (command) {
 	// grouped at the end of the switch, after every documented command.
 	//
 	// `hook`/`unhook`: install/remove the PATH shims that route
-	// `claude`/`codex`/`opencode` through codev.
+	// `claude`/`codex`/`opencode`/`codev` through codevhub.
 	case "hook": {
 		let agents: readonly ShimAgent[];
 		if (args.length === 0) {
 			agents = detectCodevTools();
 			if (agents.length === 0) {
 				console.log(
-					"No CoDev-installed tools found. Run `codev install` first, " +
-						"or specify agents explicitly: `codev hook claude|codex|opencode`.",
+					"No CoDev-installed tools found. Run `codevhub install` first, " +
+						"or specify agents explicitly: `codevhub hook claude|codex|opencode`.",
 				);
 				process.exit(0);
 			}
@@ -408,7 +420,7 @@ switch (command) {
 	case "unhook": {
 		const r = uninstallShims();
 		if (r.shimsRemoved.length === 0 && r.rcFilesUpdated.length === 0) {
-			console.log("No codev shims installed.");
+			console.log("No CoDev shims installed.");
 		} else {
 			console.log(`Removed ${r.shimsRemoved.length} shim(s) from ${r.shimDir}`);
 			for (const path of r.rcFilesUpdated) console.log(`  cleaned ${path}`);
@@ -425,12 +437,12 @@ switch (command) {
 		break;
 	}
 	// Every command not claimed by the hub above belongs to CoDev Code:
-	// `codev run "..."`, `codev serve`, `codev models`, a project path, etc.
-	// Hub commands always win on a name collision (the sync checklist in the
-	// codev-code repo watches for new upstream commands); running the
-	// `codev-code` binary directly is the escape hatch to a shadowed command.
+	// `codevhub run "..."`, `codevhub serve`, `codevhub models`, a project
+	// path, etc. Hub commands always win on a name collision (the sync
+	// checklist in the codev-code repo watches for new upstream commands);
+	// running `codev` directly is the escape hatch to a shadowed command.
 	default:
 		spawnUploadDaemon();
 		await ensureFreshGatewayKey("codev-code");
-		process.exit(await runAgent("codev-code", [command, ...args]));
+		process.exit(await runAgent("codev", [command, ...args]));
 }

@@ -75,7 +75,7 @@ describe("printHelp", () => {
 
 	test("does not surface bare-agent launch commands as documented", () => {
 		// Agents (claude/codex/opencode) are launched via PATH shims set up by
-		// `codev install` — the bare `codev <agent>` form is intentionally
+		// `codevhub install` — the bare `codev <agent>` form is intentionally
 		// undocumented. Help should not advertise it. Catches regressions where
 		// someone re-adds `claude   Run the CLI...`.
 		printHelp();

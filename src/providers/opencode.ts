@@ -61,7 +61,7 @@ function canonical(p: string): string {
 // OpenCode records project/session paths POSIX-style — forward slashes even on
 // Windows (e.g. it stores "C:/Users/me/project" while Node's realpathSync
 // returns "C:\\Users\\me\\project"). It can also capture a different
-// drive-letter case than the shell the user later runs `codev upload` from. A
+// drive-letter case than the shell the user later runs `codevhub upload` from. A
 // raw `worktree = ?` / `directory = ?` equality check therefore misses, and the
 // provider reports "No conversations found" for a project that was in fact used.
 // Normalize both sides for comparison: unify separators, uppercase a leading

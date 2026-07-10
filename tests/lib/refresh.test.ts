@@ -137,7 +137,7 @@ describe("ensureFreshGatewayKey", () => {
 
 		expect(fetchKey).not.toHaveBeenCalled();
 		expect(cfg).not.toHaveBeenCalled();
-		expect(stderrText()).toContain("codev install");
+		expect(stderrText()).toContain("codevhub install");
 	});
 
 	test("hints when a fresh key cannot be obtained", async () => {
@@ -151,7 +151,7 @@ describe("ensureFreshGatewayKey", () => {
 		await ensureFreshGatewayKey("claude-code");
 
 		expect(save).not.toHaveBeenCalled();
-		expect(stderrText()).toContain("codev install");
+		expect(stderrText()).toContain("codevhub install");
 	});
 
 	test("leaves config alone when validation errors (can't prove the key is dead)", async () => {

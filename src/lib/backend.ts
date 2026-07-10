@@ -131,7 +131,7 @@ export async function validateApiKey(
 }
 
 // Detects whether a thrown error from fetchModels was caused by an invalid
-// key (401/403) — as opposed to a network/5xx/timeout. Used by `codev model`
+// key (401/403) — as opposed to a network/5xx/timeout. Used by `codevhub model`
 // to decide whether to trigger the re-auth flow.
 export function isInvalidKeyError(err: unknown): boolean {
 	const msg = err instanceof Error ? err.message : String(err);

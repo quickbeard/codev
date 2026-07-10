@@ -27,9 +27,9 @@ const LABEL_WIDTH = Math.max(...FIELDS.map((f) => f.label.length));
 // after maxAttempts — no more retries.
 type Phase = "input" | "submitting" | "failed";
 
-// Interactive username/password form for `codev login --admin`. Only local
+// Interactive username/password form for `codevhub login --admin`. Only local
 // ADMIN/SUPERADMIN accounts can use this — regular users are rejected
-// server-side and must log in via SSO (`codev login`). On success it captures
+// server-side and must log in via SSO (`codevhub login`). On success it captures
 // the skill-hub-session cookie and persists it via saveSkillhubCookie.
 export function AdminLogin({
 	onDone,
@@ -171,7 +171,7 @@ export function AdminLogin({
 				<Box marginTop={1}>
 					<Text dimColor>
 						{
-							"Only ADMIN/SUPERADMIN accounts can sign in here — regular users use `codev login`."
+							"Only ADMIN/SUPERADMIN accounts can sign in here — regular users use `codevhub login`."
 						}
 					</Text>
 				</Box>

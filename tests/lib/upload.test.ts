@@ -740,7 +740,7 @@ describe("isRefreshableError", () => {
 		expect(
 			isRefreshableError(
 				new Error(
-					"Missing supabase_url in ~/.codev/auth.json. Run `codev install`...",
+					"Missing supabase_url in ~/.codev/auth.json. Run `codevhub install`...",
 				),
 			),
 		).toBe(true);

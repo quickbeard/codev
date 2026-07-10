@@ -1,6 +1,6 @@
 // Natural-English list join: "X", "X and Y", "X, Y, and Z".
-// Used by both `codev model` (joining configured tool labels in the
-// success message) and `codev install`'s Confirm step (joining restore
+// Used by both `codevhub model` (joining configured tool labels in the
+// success message) and `codevhub install`'s Confirm step (joining restore
 // commands in the heads-up warning).
 export function formatToolList(labels: string[]): string {
 	if (labels.length === 0) return "";

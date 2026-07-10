@@ -65,11 +65,11 @@ describe("Supabase const accessors", () => {
 			expect(err).toBeInstanceOf(Error);
 			const msg = (err as Error).message;
 			expect(msg).toContain(field);
-			expect(msg).toContain("Run `codev install`");
+			expect(msg).toContain("Run `codevhub install`");
 		});
 
 		test(`${name} hard-fails when auth.json does not exist`, () => {
-			expect(fn).toThrow(/Run `codev install`/);
+			expect(fn).toThrow(/Run `codevhub install`/);
 		});
 
 		test(`${name} hard-fails when its field is empty string`, () => {

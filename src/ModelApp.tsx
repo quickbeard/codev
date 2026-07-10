@@ -72,7 +72,7 @@ export function ModelApp() {
 	const [auth, setAuth] = useState<AuthData | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	// Re-auth happens at most once per session. If the new key is *also*
-	// invalid, give up and tell the user to re-run codev install.
+	// invalid, give up and tell the user to re-run codevhub install.
 	const reAuthed = useRef(false);
 	const configured = useRef(false);
 
@@ -103,14 +103,14 @@ export function ModelApp() {
 	// vs manual) based on whether the saved key had a baseUrl. Any other
 	// error (network/5xx/timeout/empty list) is left to ModelSelect's
 	// in-component retry prompt — we stay on this step so the user can press
-	// Enter to retry without re-running `codev model`.
+	// Enter to retry without re-running `codevhub model`.
 	const handleModelsError = useCallback(
 		(err: Error) => {
 			if (!isInvalidKeyError(err)) return;
 			logWarn("saved API key rejected by gateway; re-authenticating", { err });
 			if (reAuthed.current) {
 				setError(
-					`${err.message}\nRe-authentication did not produce a valid key. Run 'codev install' to refresh credentials.`,
+					`${err.message}\nRe-authentication did not produce a valid key. Run 'codevhub install' to refresh credentials.`,
 				);
 				setPhase("failed");
 				return;
@@ -250,7 +250,7 @@ export function ModelApp() {
 				{phase === "no-creds" && (
 					<Text color="red">
 						{"No CoDev credentials found. Run "}
-						<Text color="cyan">codev install</Text>
+						<Text color="cyan">codevhub install</Text>
 						{" first."}
 					</Text>
 				)}
@@ -258,7 +258,7 @@ export function ModelApp() {
 				{phase === "no-tools" && (
 					<Text color="red">
 						{"No CoDev-configured AI tools found. Run "}
-						<Text color="cyan">codev install</Text>
+						<Text color="cyan">codevhub install</Text>
 						{" first."}
 					</Text>
 				)}

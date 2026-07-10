@@ -30,7 +30,7 @@ export const GATEWAY_MAX_OUTPUT_TOKENS = 65536;
 
 export const VERSION: string = pkg.version;
 
-export const HELP_HINT = "Run `codev --help` to see all commands.";
+export const HELP_HINT = "Run `codevhub --help` to see all commands.";
 export const HAPPY_CODING = "Happy coding! 🎉";
 
 interface CodevAuthFile {
@@ -53,7 +53,7 @@ function readField(field: keyof CodevAuthFile, label: string): string {
 	const value = readCodevAuthFile()?.[field];
 	if (!value) {
 		throw new Error(
-			`Missing ${label} in ~/.codev/auth.json. Run \`codev install\` (or log in again) to fetch the latest configuration.`,
+			`Missing ${label} in ~/.codev/auth.json. Run \`codevhub install\` (or log in again) to fetch the latest configuration.`,
 		);
 	}
 	return value;

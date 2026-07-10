@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import type { Session } from "@/providers/types.js";
 
-// Conversation exports (the data `codev upload` ships). Lived at
+// Conversation exports (the data `codevhub upload` ships). Lived at
 // ~/.codev/logs/ before the CLI grew its own diagnostics — that path now
 // belongs to cliLogsDir, and runExport migrates legacy project folders over.
 export function agentLogsDir(): string {

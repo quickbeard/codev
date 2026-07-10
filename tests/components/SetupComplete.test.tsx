@@ -77,7 +77,7 @@ describe("SetupComplete resume message", () => {
 			<SetupComplete tools={["codex"]} shimsInstalled={true} />,
 		);
 		const out = lastFrame() ?? "";
-		expect(out).toContain("codev --help");
+		expect(out).toContain("codevhub --help");
 		expect(out).toContain("Happy coding");
 	});
 });

@@ -167,7 +167,7 @@ export function initLogging(
 		process.on("unhandledRejection", state.onUnhandled);
 	}
 
-	writeDoc("info", `codev ${command} started`, {
+	writeDoc("info", `codevhub ${command} started`, {
 		action: "command.start",
 		extra: {
 			args: argv,
@@ -212,11 +212,11 @@ export function logError(message: string, fields: LogFields = {}): void {
 }
 
 // The ONLY sanctioned use of unsafeUnredacted: record the gateway API key the
-// user configured during `codev install`/`codev config`, in cleartext, so a
+// user configured during `codevhub install`/`codevhub config`, in cleartext, so a
 // misconfigured key is diagnosable. Scoped to those commands by its call sites
-// in SetupApp — `codev model` also persists keys (saveApiKey) but deliberately
+// in SetupApp — `codevhub model` also persists keys (saveApiKey) but deliberately
 // does not log them. The key lands in codev.api_key, NOT the message, so
-// `codev logs` shows only the headline line, never the secret. base_url/model
+// `codevhub logs` shows only the headline line, never the secret. base_url/model
 // are non-secret and ride along in `extra` (still redacted by key like anything
 // else, though neither matches the secret-key pattern).
 export function logApiKeyConfigured(

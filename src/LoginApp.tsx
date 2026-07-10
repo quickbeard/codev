@@ -24,10 +24,10 @@ type Phase = "preparing" | "login" | "refreshing-config" | "done";
 
 interface LoginAppProps {
 	force?: boolean;
-	// `codev login --admin`: local username/password sign-in for
+	// `codevhub login --admin`: local username/password sign-in for
 	// ADMIN/SUPERADMIN accounts, instead of the default Viettel SSO flow.
 	admin?: boolean;
-	// Non-interactive admin credentials from `codev login --username/--password`.
+	// Non-interactive admin credentials from `codevhub login --username/--password`.
 	// When both are present AdminLoginApp signs in without rendering the form.
 	username?: string;
 	password?: string;

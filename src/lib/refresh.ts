@@ -24,7 +24,7 @@ const PREFLIGHT_TIMEOUT_MS = 2_500;
 // Rewrite the launched agent's OWN config with the fresh key — the agent reads
 // its config file (settings.json / config.toml / opencode.json), not
 // ~/.codev/auth.json, so saving auth.json alone wouldn't help. Only the three
-// chat agents are launchable via `codev <agent>`; the extension variants aren't.
+// chat agents are launchable via `codevhub <agent>`; the extension variants aren't.
 function reconfigure(tool: Tool, creds: Credentials): void {
 	switch (tool) {
 		case "claude-code":
@@ -48,7 +48,7 @@ function reconfigure(tool: Tool, creds: Credentials): void {
 // keys whose lifetime CoDev doesn't control (codev-backend delegates to the
 // gateway's add_user_and_generate_key endpoint); when one expires or is evicted,
 // every agent call 401/403s and the CLI otherwise keeps using the dead key until
-// the user re-runs `codev install`.
+// the user re-runs `codevhub install`.
 //
 // Pre-flight: if the configured key is rejected (401/403), silently mint a fresh
 // one — never prompting — and rewrite auth.json + the launched agent's config so
@@ -61,7 +61,7 @@ export async function ensureFreshGatewayKey(tool: Tool): Promise<void> {
 		// Not CoDev-managed (no gateway key on disk) — nothing to refresh.
 		if (!creds?.apiKey) return;
 		// A key with no chosen model can't be written back into an agent config
-		// (configure* requires a model); leave that for `codev install`.
+		// (configure* requires a model); leave that for `codevhub install`.
 		if (!creds.model) return;
 
 		// true = valid; false = 401/403 (dead key); null = error/timeout (can't
@@ -84,14 +84,14 @@ export async function ensureFreshGatewayKey(tool: Tool): Promise<void> {
 		if (!auth) {
 			process.stderr.write(
 				"Your gateway API key was rejected and your session can't be refreshed " +
-					"automatically. Run `codev install` to re-authenticate.\n",
+					"automatically. Run `codevhub install` to re-authenticate.\n",
 			);
 			return;
 		}
 		const apiKey = await fetchApiKey(auth.access_token).catch(() => "");
 		if (!apiKey) {
 			process.stderr.write(
-				"Couldn't obtain a fresh gateway API key. Run `codev install` to re-authenticate.\n",
+				"Couldn't obtain a fresh gateway API key. Run `codevhub install` to re-authenticate.\n",
 			);
 			return;
 		}

@@ -16,12 +16,7 @@ import {
 	type Tool,
 } from "@/lib/configure.js";
 
-export const SHIM_AGENTS = [
-	"claude",
-	"opencode",
-	"codex",
-	"codev-code",
-] as const;
+export const SHIM_AGENTS = ["claude", "opencode", "codex", "codev"] as const;
 export type ShimAgent = (typeof SHIM_AGENTS)[number];
 
 // Editor extension variants (vscode-claude-code / jetbrains-claude-code /
@@ -33,11 +28,11 @@ export function toolToShimAgent(tool: Tool): ShimAgent | null {
 	if (tool === "claude-code") return "claude";
 	if (tool === "codex") return "codex";
 	if (tool === "opencode") return "opencode";
-	if (tool === "codev-code") return "codev-code";
+	if (tool === "codev-code") return "codev";
 	return null;
 }
 
-// Tools CoDev has touched on this machine. Used by bare `codev hook` so it
+// Tools CoDev has touched on this machine. Used by bare `codevhub hook` so it
 // shims exactly what the user picked during install, instead of unconditionally
 // all three agents. Signals are unioned so every legitimate install path is
 // covered:
@@ -70,7 +65,7 @@ export function shimDir(): string {
 }
 
 // run.ts uses this to strip our shim dir from the child's PATH so that
-// `codev claude` -> spawn("claude") resolves the real npm-installed binary
+// `codevhub claude` -> spawn("claude") resolves the real npm-installed binary
 // instead of recursing through the shim.
 export function stripShimDirFromPath(
 	path: string | undefined,
@@ -92,11 +87,12 @@ export interface ShimResult {
 }
 
 function posixShimContent(agent: ShimAgent): string {
-	// Strip our shim dir from PATH *inside the shim* so that whichever `codev`
-	// resolves it (including older versions that don't filter their own shim
-	// dir) won't loop back through this script when it spawns the real agent.
+	// Strip our shim dir from PATH *inside the shim* so that whichever
+	// `codevhub` resolves it (including older versions that don't filter their
+	// own shim dir) won't loop back through this script when it spawns the
+	// real agent.
 	return `#!/bin/sh
-# This shim is managed by codev. Manual edits will be overwritten.
+# This shim is managed by CoDev. Manual edits will be overwritten.
 SHIM_DIR="$HOME/.codev/bin"
 new_path=""
 old_ifs="$IFS"
@@ -111,15 +107,15 @@ set +f
 IFS="$old_ifs"
 PATH="$new_path"
 export PATH
-exec codev ${agent} "$@"
+exec codevhub ${agent} "$@"
 `;
 }
 
 function cmdShimContent(agent: ShimAgent): string {
 	// Same recursion guard as the POSIX shim: strip our shim dir from PATH so
-	// older codev versions that don't filter their own shim dir don't loop.
+	// older hub versions that don't filter their own shim dir don't loop.
 	return `@echo off\r
-REM This shim is managed by codev. Manual edits will be overwritten.\r
+REM This shim is managed by CoDev. Manual edits will be overwritten.\r
 setlocal EnableDelayedExpansion\r
 set "SHIM_DIR=%USERPROFILE%\\.codev\\bin"\r
 set "NEWPATH="\r
@@ -129,7 +125,7 @@ for %%P in ("%PATH:;=";"%") do (\r
 \t)\r
 )\r
 endlocal & set "PATH=%NEWPATH%"\r
-codev ${agent} %*\r
+codevhub ${agent} %*\r
 `;
 }
 
@@ -151,7 +147,7 @@ function writeShimFiles(agents: readonly ShimAgent[]): ShimAgent[] {
 }
 
 // Lists agents whose shim file currently lives in ~/.codev/bin. installShims
-// uses this to compute the rc-file alias union so a second `codev install`
+// uses this to compute the rc-file alias union so a second `codevhub install`
 // for a different tool doesn't drop the first run's aliases.
 export function detectInstalledShims(): ShimAgent[] {
 	const dir = shimDir();
@@ -186,7 +182,7 @@ function escapeRegExp(s: string): string {
 function posixShellSnippet(agents: readonly ShimAgent[]): string {
 	const dir = "$HOME/.codev/bin";
 	const aliases = agents.map((a) => `alias ${a}="${dir}/${a}"`).join("\n");
-	return `# Routes claude/codex/opencode through codev so they pick up CoDev's config.
+	return `# Routes claude/codex/opencode/codev through codevhub so they pick up CoDev's config.
 # Remove this block to disable.
 export PATH="${dir}:$PATH"
 ${aliases}
@@ -196,7 +192,7 @@ ${aliases}
 function fishShellSnippet(agents: readonly ShimAgent[]): string {
 	const dir = "$HOME/.codev/bin";
 	const aliases = agents.map((a) => `alias ${a} "${dir}/${a}"`).join("\n");
-	return `# Routes claude/codex/opencode through codev so they pick up CoDev's config.
+	return `# Routes claude/codex/opencode/codev through codevhub so they pick up CoDev's config.
 # Remove this block to disable.
 fish_add_path -p ${dir}
 ${aliases}
@@ -208,7 +204,7 @@ function powershellSnippet(agents: readonly ShimAgent[]): string {
 	const functions = agents
 		.map((a) => `function ${a} { & "${dir}\\${a}.cmd" @args }`)
 		.join("\n");
-	return `# Routes claude/codex/opencode through codev so they pick up CoDev's config.
+	return `# Routes claude/codex/opencode/codev through codevhub so they pick up CoDev's config.
 # Remove this block to disable.
 $env:PATH = "${dir}" + [IO.Path]::PathSeparator + $env:PATH
 ${functions}
@@ -311,7 +307,7 @@ export function installShims(
 ): ShimResult {
 	const shimsWritten = writeShimFiles(agents);
 	// rc-file aliases reflect every shim on disk (just-written ∪ pre-existing
-	// from earlier installs), so a second `codev install` that picks a
+	// from earlier installs), so a second `codevhub install` that picks a
 	// different tool doesn't orphan the first run's aliases.
 	const aliasAgents = detectInstalledShims();
 	const rcFilesUpdated: string[] = [];
@@ -330,6 +326,37 @@ export function installShims(
 	};
 }
 
+// Heals shims written by hub versions before the 0.4.0 command rename: their
+// bodies re-exec the bare `codev` command, which now belongs to CoDev Code
+// (the agent), so a stale `claude` shim would hand `claude` to the agent as an
+// argument instead of routing through the hub. Called on every hub startup;
+// the common case (no shim dir, or already-current shims) does no writes.
+// Returns true when anything was repaired.
+export function repairShims(): boolean {
+	const dir = shimDir();
+	if (!existsSync(dir)) return false;
+	// `codev-code` is the pre-0.4 shim name for the agent; it carries forward
+	// as the `codev` shim.
+	const legacyPath = join(
+		dir,
+		process.platform === "win32" ? "codev-code.cmd" : "codev-code",
+	);
+	const hadLegacy = existsSync(legacyPath);
+	if (hadLegacy) rmSync(legacyPath, { force: true });
+	const installed = detectInstalledShims();
+	const stale = installed.some((agent) => {
+		const name = process.platform === "win32" ? `${agent}.cmd` : agent;
+		return !readFileSync(join(dir, name), "utf-8").includes("codevhub");
+	});
+	if (!hadLegacy && !stale) return false;
+	const agents =
+		hadLegacy && !installed.includes("codev")
+			? [...installed, "codev" as const]
+			: installed;
+	if (agents.length > 0) installShims(agents);
+	return true;
+}
+
 export interface UninstallResult {
 	shimDir: string;
 	shimsRemoved: string[];
@@ -341,7 +368,9 @@ function removeShimFiles(): string[] {
 	const dir = shimDir();
 	if (!existsSync(dir)) return [];
 	const removed: string[] = [];
-	for (const agent of SHIM_AGENTS) {
+	// `codev-code` is the pre-0.4 name of the `codev` shim; sweep it too so
+	// unhooking cleans up installs made by older hub versions.
+	for (const agent of [...SHIM_AGENTS, "codev-code"]) {
 		const name = process.platform === "win32" ? `${agent}.cmd` : agent;
 		const path = join(dir, name);
 		if (existsSync(path)) {
