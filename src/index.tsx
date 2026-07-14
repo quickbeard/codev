@@ -7,6 +7,7 @@ import { forwardToCodegraph } from "@/lib/codegraph.js";
 import { printHelp, printVersion } from "@/lib/help.js";
 import { initLogging } from "@/lib/log.js";
 import { runLogs } from "@/lib/logs.js";
+import { runReadiness } from "@/lib/readiness.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
 import { ensureFreshGatewayKey } from "@/lib/refresh.js";
 import {
@@ -209,6 +210,14 @@ switch (command) {
 	}
 	case "logs": {
 		process.exit(runLogs(args));
+		break;
+	}
+	case "readiness": {
+		if (args.length > 0) {
+			console.error("Usage: codev readiness");
+			process.exit(1);
+		}
+		process.exit(await runReadiness());
 		break;
 	}
 	case "restore": {

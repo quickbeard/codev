@@ -16,6 +16,7 @@ Commands:
   upload              Export and upload logs to the monitor module
                       (--force, -f re-uploads every conversation)
   model               Switch the default model
+  readiness           Analyze and upload readiness for the current repository
   restore [agent]     Restore an agent's pre-CoDev config from its *.backup
                       (no arg processes every agent)
   logs                Show the last run from the diagnostic log
