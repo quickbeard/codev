@@ -37,8 +37,8 @@ export function toolToCodegraphTarget(tool: Tool): CodegraphTarget | null {
 		case "opencode":
 			return "opencode";
 		// The codegraph CLI doesn't know the codev-code fork (its `opencode`
-		// target writes MCP wiring into ~/.config/opencode, not the fork's
-		// ~/.config/codev-code). No target until codegraph learns the fork.
+		// target writes MCP wiring into ~/.config/opencode/opencode.json, not the
+		// fork's ~/.config/codev/codev.json). No target until codegraph learns it.
 		case "codev-code":
 			return null;
 		case "vscode-continue":

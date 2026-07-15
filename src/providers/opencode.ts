@@ -45,7 +45,7 @@ function dataDir(app: string): string {
 }
 
 // The codev-code fork keeps the `opencode.db` filename; only the app dir
-// segment differs (its `Global.Path` constant is "codev-code").
+// segment differs (its `Global.Path` constant is "codev").
 function dbPath(app: string): string {
 	return join(dataDir(app), "opencode.db");
 }

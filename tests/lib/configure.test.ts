@@ -516,11 +516,11 @@ describe("configureOpenCode", () => {
 });
 
 describe("configureCodevCode", () => {
-	test("creates ~/.config/codev-code/opencode.json with aigateway provider when file does not exist", async () => {
+	test("creates ~/.config/codev/codev.json with aigateway provider when file does not exist", async () => {
 		const { configureCodevCode } = await import("@/lib/configure.js");
 		configureCodevCode({ apiKey: "sk-xyz", model: "chosen-model" });
 
-		const filePath = join(tempDir, ".config", "codev-code", "opencode.json");
+		const filePath = join(tempDir, ".config", "codev", "codev.json");
 		expect(existsSync(filePath)).toBe(true);
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
@@ -553,9 +553,9 @@ describe("configureCodevCode", () => {
 		).toBe(false);
 	});
 
-	test("replaces existing opencode.json and backs up the file", async () => {
-		const dir = join(tempDir, ".config", "codev-code");
-		const filePath = join(dir, "opencode.json");
+	test("replaces existing codev.json and backs up the file", async () => {
+		const dir = join(tempDir, ".config", "codev");
+		const filePath = join(dir, "codev.json");
 		const backupPath = `${filePath}.backup`;
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
@@ -581,9 +581,9 @@ describe("configureCodevCode", () => {
 		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
 	});
 
-	test("preserves a pre-existing opencode.json backup across repeated runs", async () => {
-		const dir = join(tempDir, ".config", "codev-code");
-		const filePath = join(dir, "opencode.json");
+	test("preserves a pre-existing codev.json backup across repeated runs", async () => {
+		const dir = join(tempDir, ".config", "codev");
+		const filePath = join(dir, "codev.json");
 		const backupPath = `${filePath}.backup`;
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(backupPath, JSON.stringify({ marker: "original" }));
@@ -916,7 +916,7 @@ describe("getBackupStatus", () => {
 		const statuses = getBackupStatus("codev-code");
 		expect(statuses.map((s) => s.kind)).toEqual(["codev-code-config"]);
 		expect(statuses[0]?.sourcePath).toBe(
-			join(tempDir, ".config", "codev-code", "opencode.json"),
+			join(tempDir, ".config", "codev", "codev.json"),
 		);
 	});
 
@@ -1057,9 +1057,9 @@ describe("restoreTool", () => {
 		expect(readFileSync(livePath, "utf-8")).toContain('marker = "backup"');
 	});
 
-	test("replaces the live CoDev Code opencode.json with the backup", async () => {
-		const dir = join(tempDir, ".config", "codev-code");
-		const livePath = join(dir, "opencode.json");
+	test("replaces the live CoDev Code codev.json with the backup", async () => {
+		const dir = join(tempDir, ".config", "codev");
+		const livePath = join(dir, "codev.json");
 		const backupPath = `${livePath}.backup`;
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(livePath, '{"marker":"live"}');
@@ -1425,10 +1425,10 @@ describe("detectConfiguredTools", () => {
 	}
 
 	function seedCodevCodeWithCodevMarkers() {
-		const dir = join(tempDir, ".config", "codev-code");
+		const dir = join(tempDir, ".config", "codev");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
-			join(dir, "opencode.json"),
+			join(dir, "codev.json"),
 			JSON.stringify({
 				$schema: "https://opencode.ai/config.json",
 				model: "aigateway/m",

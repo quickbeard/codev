@@ -221,8 +221,8 @@ function readCodexConfig(): AgentConfigResult {
 	}
 }
 
-// Shared by opencode and codev-code — the fork reads the same opencode.json
-// shape, just from ~/.config/codev-code instead of ~/.config/opencode.
+// Shared by opencode and codev-code — the fork reads the same config shape,
+// just from ~/.config/codev/codev.json instead of ~/.config/opencode/opencode.json.
 function readOpenCodeConfig(
 	kind: "opencode-config" | "codev-code-config",
 ): AgentConfigResult {
@@ -282,10 +282,12 @@ function sourcePathOf(kind: BackupKind): string {
 			return join(homedir(), ".codex", "config.toml");
 		case "opencode-config":
 			return join(homedir(), ".config", "opencode", "opencode.json");
-		// The codev-code fork keeps upstream's config filename but relocates the
-		// XDG app dir (its `Global.Path` constant is "codev-code").
+		// The codev-code fork renamed both halves of upstream's path: the XDG app
+		// dir (its `Global.Path` constant is "codev") and the config filename
+		// ("codev.json"). Neither old name is read anymore — the fork dropped the
+		// fallback — so this must stay in lockstep with the fork.
 		case "codev-code-config":
-			return join(homedir(), ".config", "codev-code", "opencode.json");
+			return join(homedir(), ".config", "codev", "codev.json");
 		case "continue-config":
 			return join(homedir(), ".continue", "config.yaml");
 	}
@@ -680,8 +682,8 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 	return configureOpenCodeKind("opencode-config", creds);
 }
 
-// The codev-code fork consumes the exact same opencode.json shape; only the
-// config directory differs (see sourcePathOf).
+// The codev-code fork consumes the exact same config shape; only the directory
+// and filename differ (see sourcePathOf).
 export function configureCodevCode(creds: Credentials): ConfigureResult[] {
 	return configureOpenCodeKind("codev-code-config", creds);
 }

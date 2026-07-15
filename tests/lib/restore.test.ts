@@ -146,7 +146,7 @@ describe("runRestore", () => {
 
 	test("restores CoDev Code from backup and prints success", () => {
 		const { livePath, backupPath } = seedBackup(
-			".config/codev-code/opencode.json",
+			".config/codev/codev.json",
 			"codev-code-backup",
 		);
 
