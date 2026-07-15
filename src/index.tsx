@@ -7,7 +7,6 @@ import { forwardToCodegraph } from "@/lib/codegraph.js";
 import { printHelp, printVersion } from "@/lib/help.js";
 import { initLogging } from "@/lib/log.js";
 import { runLogs } from "@/lib/logs.js";
-import { runReadiness } from "@/lib/readiness.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
 import { ensureFreshGatewayKey } from "@/lib/refresh.js";
 import {
@@ -28,6 +27,7 @@ import {
 } from "@/lib/shims.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
 import { ModelApp } from "@/ModelApp.js";
+import { ReadinessApp } from "@/ReadinessApp.js";
 import { RemoveApp } from "@/RemoveApp.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
@@ -213,11 +213,19 @@ switch (command) {
 		break;
 	}
 	case "readiness": {
-		if (args.length > 0) {
-			console.error("Usage: codev readiness");
+		const modelIndex = args.indexOf("--model");
+		const model = modelIndex >= 0 ? args[modelIndex + 1] : undefined;
+		if ((modelIndex >= 0 && !model) || args.length !== (model ? 2 : 0)) {
+			console.error("Usage: codev readiness [--model <model-id>]");
 			process.exit(1);
 		}
-		process.exit(await runReadiness());
+		const { waitUntilExit } = render(<ReadinessApp options={{ model }} />);
+		try {
+			await waitUntilExit();
+			process.exit(0);
+		} catch {
+			process.exit(1);
+		}
 		break;
 	}
 	case "restore": {
