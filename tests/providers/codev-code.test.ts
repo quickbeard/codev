@@ -49,7 +49,7 @@ beforeEach(() => {
 	vi.stubEnv("USERPROFILE", tempHome);
 	projectCwd = join(tempHome, "works", "myapp");
 	mkdirSync(projectCwd, { recursive: true });
-	const dataDir = join(tempHome, ".local", "share", "codev-code");
+	const dataDir = join(tempHome, ".local", "share", "codev");
 	mkdirSync(dataDir, { recursive: true });
 	dbPath = join(dataDir, "opencode.db");
 });
@@ -111,14 +111,14 @@ describe("codevCodeProvider", () => {
 
 	test("describeTarget points at the fork's XDG app dir, not opencode's", () => {
 		expect(codevCodeProvider.describeTarget(projectCwd)).toBe(
-			join(tempHome, ".local", "share", "codev-code", "opencode.db"),
+			join(tempHome, ".local", "share", "codev", "opencode.db"),
 		);
 	});
 
 	test("honors XDG_DATA_HOME for the database location", () => {
 		process.env.XDG_DATA_HOME = join(tempHome, "xdg-data");
 		expect(codevCodeProvider.describeTarget(projectCwd)).toBe(
-			join(tempHome, "xdg-data", "codev-code", "opencode.db"),
+			join(tempHome, "xdg-data", "codev", "opencode.db"),
 		);
 	});
 });

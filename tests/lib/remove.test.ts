@@ -138,13 +138,10 @@ describe("runRemove", () => {
 
 	test("CoDev Code config: restores from backup when one exists", async () => {
 		stubFetchOk();
-		// The fork's gateway config lives at ~/.config/codev-code/opencode.json
+		// The fork's gateway config lives at ~/.config/codev/codev.json
 		// (distinct from OpenCode's ~/.config/opencode/opencode.json).
-		seedFile(".config/codev-code/opencode.json", '{"live":true}');
-		seedFile(
-			".config/codev-code/opencode.json.backup",
-			'{"original":"codev-code"}',
-		);
+		seedFile(".config/codev/codev.json", '{"live":true}');
+		seedFile(".config/codev/codev.json.backup", '{"original":"codev-code"}');
 
 		const result = await runRemove();
 
@@ -152,16 +149,13 @@ describe("runRemove", () => {
 		// Backup renamed over the live config — the user's pre-CoDev state.
 		expect(
 			JSON.parse(
-				readFileSync(
-					join(tempDir, ".config/codev-code/opencode.json"),
-					"utf-8",
-				),
+				readFileSync(join(tempDir, ".config/codev/codev.json"), "utf-8"),
 			),
 		).toEqual({ original: "codev-code" });
 		// The rename consumes the backup, so it no longer sits alongside.
-		expect(
-			existsSync(join(tempDir, ".config/codev-code/opencode.json.backup")),
-		).toBe(false);
+		expect(existsSync(join(tempDir, ".config/codev/codev.json.backup"))).toBe(
+			false,
+		);
 		const step = result.steps.find((s) => s.label === "CoDev Code config");
 		expect(step?.status).toBe("ok");
 		expect(step?.detail).toContain("restored from");
@@ -171,19 +165,17 @@ describe("runRemove", () => {
 		stubFetchOk();
 		// A fresh install writes this with no prior user config, so there's no
 		// backup — with nothing to restore from, remove leaves the live file be.
-		seedFile(".config/codev-code/opencode.json", '{"codev":"wrote-this"}');
+		seedFile(".config/codev/codev.json", '{"codev":"wrote-this"}');
 
 		const result = await runRemove();
 
 		expect(result.anyFailed).toBe(false);
-		expect(existsSync(join(tempDir, ".config/codev-code/opencode.json"))).toBe(
-			true,
-		);
+		expect(existsSync(join(tempDir, ".config/codev/codev.json"))).toBe(true);
 		const step = result.steps.find((s) => s.label === "CoDev Code config");
 		expect(step?.status).toBe("ok");
 		expect(step?.detail).toContain("no backup; kept");
 		expect(result.keptPaths).toContain(
-			join(tempDir, ".config/codev-code/opencode.json"),
+			join(tempDir, ".config/codev/codev.json"),
 		);
 	});
 
