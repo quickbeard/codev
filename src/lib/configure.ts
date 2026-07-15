@@ -11,6 +11,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import TOML from "@iarna/toml";
+import { type ParseError, parse } from "jsonc-parser";
 import {
 	AI_GATEWAY_OPENAI_URL,
 	AI_GATEWAY_URL,
@@ -221,15 +222,26 @@ function readCodexConfig(): AgentConfigResult {
 	}
 }
 
-// Shared by opencode and codev-code — the fork reads the same config shape,
-// just from ~/.config/codev/codev.json instead of ~/.config/opencode/opencode.json.
+// Both agents accept .json and .jsonc, and codev-code's config may legitimately
+// be a .jsonc (see codevCodeConfigPath). Parse the superset so a comment or a
+// trailing comma can't throw — matching how the agents themselves read it. Still
+// throws on genuinely malformed input, per the contract above.
+function parseJsonc(text: string): unknown {
+	const errors: ParseError[] = [];
+	const value: unknown = parse(text, errors, { allowTrailingComma: true });
+	if (errors.length > 0) throw new Error("invalid JSON/JSONC");
+	return value;
+}
+
+// Shared by opencode and codev-code — the fork reads the same config shape, just
+// from ~/.config/codev/codev.json(c) instead of ~/.config/opencode/opencode.json.
 function readOpenCodeConfig(
 	kind: "opencode-config" | "codev-code-config",
 ): AgentConfigResult {
 	const path = sourcePathOf(kind);
 	if (!existsSync(path)) return {};
 	try {
-		const raw = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		const raw = parseJsonc(readFileSync(path, "utf-8"));
 		// Guard: skip non-CoDev configs (no aigateway provider).
 		if (!hasNestedKey(raw, OPENCODE_K.provider, OPENCODE_K.providerKey))
 			return {};
@@ -270,6 +282,34 @@ const CONTINUE_K = {
 	configVersion: atob("MC4wLjE="),
 };
 
+// The codev-code fork renamed both halves of upstream's path: the XDG app dir
+// (its `Global.Path` constant is "codev") and the config filename ("codev.json").
+// Neither old name is read anymore — the fork dropped the fallback.
+//
+// It reads *both* codev.json and codev.jsonc, deep-merging json then jsonc, so a
+// jsonc silently wins leaf-by-leaf over anything we write to json. Its own
+// writers (`codev configure`, and the loader's auto-seeded `$schema` stub) go
+// through `globalConfigFile()`, which prefers .jsonc. Target the same file the
+// fork would, so exactly one gateway block exists.
+//
+// The order matters, and each rule earns its place:
+//  1. A `*.backup` pins the file we already configured. Without this, a jsonc
+//     appearing after configure would send restore to the wrong candidate and
+//     strand the backup forever.
+//  2. An existing jsonc is the fork's write target, and would shadow us.
+//  3. Otherwise codev.json — which also keeps the fork's loader from ever
+//     auto-seeding a jsonc later, since `globalConfigFile()` finds codev.json
+//     first and leaves well enough alone.
+function codevCodeConfigPath(): string {
+	const dir = join(homedir(), ".config", "codev");
+	const jsonc = join(dir, "codev.jsonc");
+	const json = join(dir, "codev.json");
+	for (const candidate of [jsonc, json]) {
+		if (existsSync(`${candidate}.backup`)) return candidate;
+	}
+	return existsSync(jsonc) ? jsonc : json;
+}
+
 function sourcePathOf(kind: BackupKind): string {
 	switch (kind) {
 		case "claude-settings":
@@ -282,12 +322,8 @@ function sourcePathOf(kind: BackupKind): string {
 			return join(homedir(), ".codex", "config.toml");
 		case "opencode-config":
 			return join(homedir(), ".config", "opencode", "opencode.json");
-		// The codev-code fork renamed both halves of upstream's path: the XDG app
-		// dir (its `Global.Path` constant is "codev") and the config filename
-		// ("codev.json"). Neither old name is read anymore — the fork dropped the
-		// fallback — so this must stay in lockstep with the fork.
 		case "codev-code-config":
-			return join(homedir(), ".config", "codev", "codev.json");
+			return codevCodeConfigPath();
 		case "continue-config":
 			return join(homedir(), ".continue", "config.yaml");
 	}
@@ -365,7 +401,7 @@ function isCodevOpenCodeConfig(
 	const path = sourcePathOf(kind);
 	if (!existsSync(path)) return false;
 	try {
-		const config = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		const config = parseJsonc(readFileSync(path, "utf-8"));
 		return hasNestedKey(config, OPENCODE_K.provider, OPENCODE_K.providerKey);
 	} catch {
 		return false;

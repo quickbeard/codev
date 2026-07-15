@@ -892,6 +892,99 @@ describe("configureContinue", () => {
 	});
 });
 
+// The fork loads codev.json *and* codev.jsonc, deep-merging json then jsonc, so
+// a jsonc it wrote (via `codev configure`, or the loader's auto-seeded stub)
+// would silently shadow anything we put in codev.json. We target whichever file
+// the fork's own globalConfigFile() would.
+describe("CoDev Code config targeting (codev.json vs codev.jsonc)", () => {
+	const codevDir = () => join(tempDir, ".config", "codev");
+	const seed = (name: string, body: string) => {
+		mkdirSync(codevDir(), { recursive: true });
+		writeFileSync(join(codevDir(), name), body);
+	};
+	const target = async () => {
+		const { getBackupStatus } = await import("@/lib/configure.js");
+		return getBackupStatus("codev-code")[0]?.sourcePath;
+	};
+
+	test("targets codev.json when neither file exists", async () => {
+		// Also keeps the fork's loader from auto-seeding a jsonc later: its
+		// globalConfigFile() finds codev.json first and leaves it alone.
+		expect(await target()).toBe(join(codevDir(), "codev.json"));
+	});
+
+	test("targets an existing codev.jsonc, which would otherwise shadow us", async () => {
+		seed("codev.jsonc", '{"$schema":"https://opencode.ai/config.json"}');
+		expect(await target()).toBe(join(codevDir(), "codev.jsonc"));
+	});
+
+	test("prefers codev.jsonc over codev.json when both exist, matching the fork's merge order", async () => {
+		seed("codev.json", "{}");
+		seed("codev.jsonc", "{}");
+		expect(await target()).toBe(join(codevDir(), "codev.jsonc"));
+	});
+
+	test("a backup pins the file we already configured, even once a jsonc appears", async () => {
+		// Without this the backup would strand: restore would follow the live
+		// jsonc, find no codev.jsonc.backup, and never restore codev.json.
+		seed("codev.json", "{}");
+		seed("codev.json.backup", '{"original":true}');
+		seed("codev.jsonc", "{}");
+		expect(await target()).toBe(join(codevDir(), "codev.json"));
+	});
+
+	test("configures a jsonc in place and backs it up under the .jsonc name", async () => {
+		seed("codev.jsonc", '{"marker":"original"}');
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		const [result] = configureCodevCode({
+			apiKey: "k",
+			baseUrl: "https://gw.test/v1",
+			model: "m",
+		});
+
+		expect(result?.sourcePath).toBe(join(codevDir(), "codev.jsonc"));
+		expect(result?.backupPath).toBe(join(codevDir(), "codev.jsonc.backup"));
+		// No stray codev.json — one gateway block, in the file the fork reads.
+		expect(existsSync(join(codevDir(), "codev.json"))).toBe(false);
+		expect(
+			JSON.parse(readFileSync(join(codevDir(), "codev.jsonc.backup"), "utf-8")),
+		).toEqual({ marker: "original" });
+		const written = JSON.parse(
+			readFileSync(join(codevDir(), "codev.jsonc"), "utf-8"),
+		);
+		expect(written.provider.aigateway.options.apiKey).toBe("k");
+	});
+
+	test("reads a jsonc containing comments and trailing commas", async () => {
+		// A hand-written jsonc is the whole reason .jsonc exists; JSON.parse would
+		// throw here and take `codevhub upload` down with it.
+		seed(
+			"codev.jsonc",
+			`{
+				// the gateway CoDev configured
+				"provider": { "aigateway": { "options": { "baseURL": "https://gw.test/v1" } } },
+			}`,
+		);
+		const { readAgentConfig } = await import("@/lib/configure.js");
+		expect(readAgentConfig("codev-code")).toEqual({
+			baseUrl: "https://gw.test/v1",
+		});
+	});
+
+	test("restores a configured jsonc from its backup", async () => {
+		seed("codev.jsonc", '{"marker":"live"}');
+		seed("codev.jsonc.backup", '{"marker":"backup"}');
+		const { restoreTool } = await import("@/lib/configure.js");
+		const [result] = restoreTool("codev-code");
+
+		expect(result?.status).toBe("restored");
+		expect(
+			JSON.parse(readFileSync(join(codevDir(), "codev.jsonc"), "utf-8")),
+		).toEqual({ marker: "backup" });
+		expect(existsSync(join(codevDir(), "codev.jsonc.backup"))).toBe(false);
+	});
+});
+
 describe("getBackupStatus", () => {
 	test("returns claude-settings for claude-code", async () => {
 		const { getBackupStatus } = await import("@/lib/configure.js");
