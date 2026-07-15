@@ -892,6 +892,105 @@ describe("configureContinue", () => {
 	});
 });
 
+// OpenCode and the codev-code fork share a config loader, so they share its
+// hazard: each reads <base>.json *and* <base>.jsonc, deep-merging json then
+// jsonc, so a jsonc the agent wrote (via its auto-seeded stub, or `codev
+// configure`) would silently shadow anything we put in the json. We target
+// whichever file the agent's own globalConfigFile() would.
+describe.each([
+	{ tool: "opencode", dir: "opencode", base: "opencode" },
+	{ tool: "codev-code", dir: "codev", base: "codev" },
+] as const)("$tool config targeting ($base.json vs $base.jsonc)", (agent) => {
+	const configDir = () => join(tempDir, ".config", agent.dir);
+	const at = (suffix: string) => join(configDir(), `${agent.base}${suffix}`);
+	const seed = (suffix: string, body: string) => {
+		mkdirSync(configDir(), { recursive: true });
+		writeFileSync(at(suffix), body);
+	};
+	const target = async () => {
+		const { getBackupStatus } = await import("@/lib/configure.js");
+		return getBackupStatus(agent.tool)[0]?.sourcePath;
+	};
+	const configure = async (creds: { apiKey: string; model: string }) => {
+		const mod = await import("@/lib/configure.js");
+		const fn =
+			agent.tool === "opencode"
+				? mod.configureOpenCode
+				: mod.configureCodevCode;
+		return fn({ ...creds, baseUrl: "https://gw.test/v1" });
+	};
+
+	test("targets the .json when neither file exists", async () => {
+		// Also keeps the agent from auto-seeding a jsonc later: its
+		// globalConfigFile() finds the .json first and leaves it alone.
+		expect(await target()).toBe(at(".json"));
+	});
+
+	test("targets an existing .jsonc, which would otherwise shadow us", async () => {
+		seed(".jsonc", '{"$schema":"https://opencode.ai/config.json"}');
+		expect(await target()).toBe(at(".jsonc"));
+	});
+
+	test("prefers the .jsonc when both exist, matching the agent's merge order", async () => {
+		seed(".json", "{}");
+		seed(".jsonc", "{}");
+		expect(await target()).toBe(at(".jsonc"));
+	});
+
+	test("a backup pins the file we already configured, even once a jsonc appears", async () => {
+		// Without this the backup would strand: restore would follow the live
+		// jsonc, find no .jsonc.backup, and never restore the .json.
+		seed(".json", "{}");
+		seed(".json.backup", '{"original":true}');
+		seed(".jsonc", "{}");
+		expect(await target()).toBe(at(".json"));
+	});
+
+	test("configures a jsonc in place and backs it up under the .jsonc name", async () => {
+		seed(".jsonc", '{"marker":"original"}');
+		const [result] = await configure({ apiKey: "k", model: "m" });
+
+		expect(result?.sourcePath).toBe(at(".jsonc"));
+		expect(result?.backupPath).toBe(at(".jsonc.backup"));
+		// No stray .json — one gateway block, in the file the agent reads.
+		expect(existsSync(at(".json"))).toBe(false);
+		expect(JSON.parse(readFileSync(at(".jsonc.backup"), "utf-8"))).toEqual({
+			marker: "original",
+		});
+		const written = JSON.parse(readFileSync(at(".jsonc"), "utf-8"));
+		expect(written.provider.aigateway.options.apiKey).toBe("k");
+	});
+
+	test("reads a jsonc containing comments and trailing commas", async () => {
+		// A hand-written jsonc is the whole reason .jsonc exists; JSON.parse would
+		// throw here and take `codevhub upload` down with it.
+		seed(
+			".jsonc",
+			`{
+				// the gateway CoDev configured
+				"provider": { "aigateway": { "options": { "baseURL": "https://gw.test/v1" } } },
+			}`,
+		);
+		const { readAgentConfig } = await import("@/lib/configure.js");
+		expect(readAgentConfig(agent.tool)).toEqual({
+			baseUrl: "https://gw.test/v1",
+		});
+	});
+
+	test("restores a configured jsonc from its backup", async () => {
+		seed(".jsonc", '{"marker":"live"}');
+		seed(".jsonc.backup", '{"marker":"backup"}');
+		const { restoreTool } = await import("@/lib/configure.js");
+		const [result] = restoreTool(agent.tool);
+
+		expect(result?.status).toBe("restored");
+		expect(JSON.parse(readFileSync(at(".jsonc"), "utf-8"))).toEqual({
+			marker: "backup",
+		});
+		expect(existsSync(at(".jsonc.backup"))).toBe(false);
+	});
+});
+
 describe("getBackupStatus", () => {
 	test("returns claude-settings for claude-code", async () => {
 		const { getBackupStatus } = await import("@/lib/configure.js");
