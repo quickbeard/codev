@@ -222,10 +222,10 @@ function readCodexConfig(): AgentConfigResult {
 	}
 }
 
-// Both agents accept .json and .jsonc, and codev-code's config may legitimately
-// be a .jsonc (see codevCodeConfigPath). Parse the superset so a comment or a
-// trailing comma can't throw — matching how the agents themselves read it. Still
-// throws on genuinely malformed input, per the contract above.
+// Both agents accept .json and .jsonc, and either config may legitimately be a
+// .jsonc (see openCodeConfigPath). Parse the superset so a comment or a trailing
+// comma can't throw — matching how the agents themselves read it. Still throws
+// on genuinely malformed input, per the contract above.
 function parseJsonc(text: string): unknown {
 	const errors: ParseError[] = [];
 	const value: unknown = parse(text, errors, { allowTrailingComma: true });
@@ -282,28 +282,33 @@ const CONTINUE_K = {
 	configVersion: atob("MC4wLjE="),
 };
 
-// The codev-code fork renamed both halves of upstream's path: the XDG app dir
-// (its `Global.Path` constant is "codev") and the config filename ("codev.json").
-// Neither old name is read anymore — the fork dropped the fallback.
+// OpenCode and the codev-code fork share one config loader, so they share this
+// hazard: each reads *both* `<base>.json` and `<base>.jsonc` from its config
+// dir and deep-merges them, json first, jsonc second — so a jsonc silently wins
+// leaf-by-leaf over anything we write to the json.
 //
-// It reads *both* codev.json and codev.jsonc, deep-merging json then jsonc, so a
-// jsonc silently wins leaf-by-leaf over anything we write to json. Its own
-// writers (`codev configure`, and the loader's auto-seeded `$schema` stub) go
-// through `globalConfigFile()`, which prefers .jsonc. Target the same file the
-// fork would, so exactly one gateway block exists.
+// Their own writers go through the loader's `globalConfigFile()`, which prefers
+// .jsonc and *creates* one when no config exists — upstream seeds a `$schema`
+// stub on any default run, and `codev configure` patches into whatever it picks.
+// A user who launches the agent before `codevhub install` therefore already has
+// a jsonc waiting to shadow us. Target the same file the agent would, so exactly
+// one gateway block exists.
 //
 // The order matters, and each rule earns its place:
 //  1. A `*.backup` pins the file we already configured. Without this, a jsonc
 //     appearing after configure would send restore to the wrong candidate and
 //     strand the backup forever.
-//  2. An existing jsonc is the fork's write target, and would shadow us.
-//  3. Otherwise codev.json — which also keeps the fork's loader from ever
-//     auto-seeding a jsonc later, since `globalConfigFile()` finds codev.json
-//     first and leaves well enough alone.
-function codevCodeConfigPath(): string {
-	const dir = join(homedir(), ".config", "codev");
-	const jsonc = join(dir, "codev.jsonc");
-	const json = join(dir, "codev.json");
+//  2. An existing jsonc is the agent's write target, and would shadow us.
+//  3. Otherwise `<base>.json` — which also keeps the agent from auto-seeding a
+//     jsonc later, since `globalConfigFile()` finds `<base>.json` first and
+//     leaves well enough alone.
+//
+// Upstream lists a third candidate, `config.json`, that we deliberately never
+// target: it is merged *first*, i.e. lowest priority, so writing there would
+// leave us shadowed by both of the others.
+function openCodeConfigPath(dir: string, base: string): string {
+	const jsonc = join(dir, `${base}.jsonc`);
+	const json = join(dir, `${base}.json`);
 	for (const candidate of [jsonc, json]) {
 		if (existsSync(`${candidate}.backup`)) return candidate;
 	}
@@ -321,9 +326,15 @@ function sourcePathOf(kind: BackupKind): string {
 		case "codex-config":
 			return join(homedir(), ".codex", "config.toml");
 		case "opencode-config":
-			return join(homedir(), ".config", "opencode", "opencode.json");
+			return openCodeConfigPath(
+				join(homedir(), ".config", "opencode"),
+				"opencode",
+			);
+		// The fork renamed both halves of upstream's path: the XDG app dir (its
+		// `Global.Path` constant is "codev") and the config basename. Neither old
+		// name is read anymore — the fork dropped the fallback.
 		case "codev-code-config":
-			return codevCodeConfigPath();
+			return openCodeConfigPath(join(homedir(), ".config", "codev"), "codev");
 		case "continue-config":
 			return join(homedir(), ".continue", "config.yaml");
 	}
