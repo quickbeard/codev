@@ -4,7 +4,6 @@ import { join } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
 
 const BASE_URL = atob("aHR0cHM6Ly9uZXRtaW5kLnZpZXR0ZWwudm4=");
-// Local dev override: export const BACKEND_URL = `http://localhost:8787`;
 export const BACKEND_URL = `${BASE_URL}/codev-backend`;
 export const SSO_URL = `${BASE_URL}/sso-wrapper`;
 export const LOGIN_SUCCESS_URL = `${BASE_URL}/codev-landing-page/oauth/success`;
