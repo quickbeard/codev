@@ -11,11 +11,15 @@ function sessionsRoot(): string {
 	return join(homedir(), ".codex", "sessions");
 }
 
+// NFC-normalize so a decomposed (NFD) path compares equal to its composed form.
+// Codex realpaths both the stored session cwd and the upload cwd, so on the same
+// machine they already agree; this only matters on the realpath-throws fallback,
+// where the raw string is used — but it keeps all three providers consistent.
 function canonical(p: string): string {
 	try {
-		return realpathSync(p);
+		return realpathSync(p).normalize("NFC");
 	} catch {
-		return p;
+		return p.normalize("NFC");
 	}
 }
 

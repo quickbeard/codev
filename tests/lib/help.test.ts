@@ -45,6 +45,14 @@ describe("printHelp", () => {
 		expect(output()).toContain("Usage: codev");
 	});
 
+	test("documents the CoDev Code passthrough", () => {
+		// Bare `codev` and unknown commands forward to the built-in agent;
+		// the help must orient users to that before the hub command list.
+		printHelp();
+		expect(output()).toContain("CoDev Code");
+		expect(output()).toContain("passed through");
+	});
+
 	test("lists the restore subcommand", () => {
 		printHelp();
 		expect(output()).toContain("restore [agent]");
@@ -55,6 +63,11 @@ describe("printHelp", () => {
 		expect(output()).toContain("login");
 	});
 
+	test("lists the init command", () => {
+		printHelp();
+		expect(output()).toContain("init");
+	});
+
 	test("lists the remove command", () => {
 		printHelp();
 		expect(output()).toContain("remove");
@@ -62,7 +75,7 @@ describe("printHelp", () => {
 
 	test("does not surface bare-agent launch commands as documented", () => {
 		// Agents (claude/codex/opencode) are launched via PATH shims set up by
-		// `codev install` — the bare `codev <agent>` form is intentionally
+		// `codevhub install` — the bare `codev <agent>` form is intentionally
 		// undocumented. Help should not advertise it. Catches regressions where
 		// someone re-adds `claude   Run the CLI...`.
 		printHelp();

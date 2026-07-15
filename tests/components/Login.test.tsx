@@ -93,10 +93,13 @@ describe("Login", () => {
 	});
 
 	test("shows pre-URL log messages from login", async () => {
+		// Stay pending so the component sits in the pre-URL state, where login()'s
+		// transient status lines are surfaced (once it resolves, the frame collapses
+		// to the green "Signed in" line).
 		vi.spyOn(auth, "login").mockImplementation((onLog) => {
 			onLog("Starting SSO login...");
 			onLog("Already logged in as test@example.com");
-			return Promise.resolve(fakeAuth());
+			return new Promise<auth.AuthData>(() => {});
 		});
 
 		const onDone = vi.fn();
@@ -276,7 +279,8 @@ describe("Login", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		const output = lastFrame() ?? "";
-		expect(output).toContain("Already logged in as test@example.com");
+		// On completion the frame collapses to the green signed-in line.
+		expect(output).toContain("✓ Signed in as test@example.com");
 		// No URL ever became ready, so the manual fallback (a live branch in the
 		// URL-ready state) must not appear.
 		expect(output).not.toContain("copy the code shown");

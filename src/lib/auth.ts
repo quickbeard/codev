@@ -28,11 +28,11 @@ const SSO_FETCH_TIMEOUT_MS = 10_000;
 const AUTH_CALLBACK_TIMEOUT_MS = 300_000;
 
 function authFilePath() {
-	return join(homedir(), ".codev", "auth.json");
+	return join(homedir(), ".codev-hub", "auth.json");
 }
 
 function forceLoginPath() {
-	return join(homedir(), ".codev", "force-login");
+	return join(homedir(), ".codev-hub", "force-login");
 }
 
 function markForceLogin() {
@@ -77,7 +77,7 @@ export interface ApiKeyCreds {
 // /config endpoint on every successful SSO login). They share a file because
 // they're written together on a fresh install, but each is updated in
 // isolation — saving SSO must not clobber the api_key or codev-config blocks,
-// and `codev logout` strips SSO while preserving the rest for reuse.
+// and `codevhub logout` strips SSO while preserving the rest for reuse.
 interface AuthFileContents {
 	access_token?: string;
 	id_token?: string;
@@ -89,11 +89,17 @@ interface AuthFileContents {
 	model?: string;
 	supabase_url?: string;
 	supabase_anon_key?: string;
+	gateway_url?: string;
+	// SkillHub session cookie (`skill-hub-session=…`), captured by
+	// `codevhub login --admin` for local ADMIN/SUPERADMIN accounts that can't use
+	// SSO. SSO users don't have one — skillhubFetch falls back to a Bearer token.
+	skillhub_cookie?: string;
 }
 
 export interface CodevConfig {
 	supabaseUrl: string;
 	supabaseAnonKey: string;
+	gatewayUrl: string;
 }
 
 interface TokenResponse {
@@ -208,6 +214,7 @@ export function saveCodevConfig(config: CodevConfig): void {
 		...existing,
 		supabase_url: config.supabaseUrl,
 		supabase_anon_key: config.supabaseAnonKey,
+		gateway_url: config.gatewayUrl,
 	});
 }
 
@@ -219,6 +226,38 @@ export function loadApiKey(): ApiKeyCreds | null {
 		baseUrl: raw.base_url,
 		model: raw.model,
 	};
+}
+
+// The SkillHub session cookie is stored as the raw `name=value` pair we send
+// back verbatim in the Cookie header (matching how the deprecated @skillhub/cli
+// persisted it). Written by `codevhub login --admin`; read by skillhubFetch.
+export function saveSkillhubCookie(cookie: string): void {
+	const existing = readAuthFile() ?? {};
+	writeAuthFile({ ...existing, skillhub_cookie: cookie });
+}
+
+export function loadSkillhubCookie(): string | null {
+	return readAuthFile()?.skillhub_cookie ?? null;
+}
+
+// Drops just the SkillHub cookie block, leaving SSO tokens and gateway config
+// intact. The `codevhub logout` command calls this alongside logout() for a full
+// sign-out; kept separate so the SSO-only logout() (reused by `login --force`)
+// never disturbs an admin cookie.
+export function clearSkillhubCookie(): boolean {
+	const raw = readAuthFile();
+	if (!raw?.skillhub_cookie) return false;
+	const { skillhub_cookie: _dropped, ...rest } = raw;
+	try {
+		if (Object.values(rest).some((v) => v !== undefined)) {
+			writeAuthFile(rest);
+		} else {
+			unlinkSync(authFilePath());
+		}
+	} catch {
+		return false;
+	}
+	return true;
 }
 
 export async function logout(): Promise<boolean> {
@@ -233,6 +272,8 @@ export async function logout(): Promise<boolean> {
 			model: raw.model,
 			supabase_url: raw.supabase_url,
 			supabase_anon_key: raw.supabase_anon_key,
+			gateway_url: raw.gateway_url,
+			skillhub_cookie: raw.skillhub_cookie,
 		};
 		const hasAnything = Object.values(preserved).some((v) => v !== undefined);
 		if (hasAnything) {
@@ -310,7 +351,7 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
  * 2. Try a silent refresh if a refresh_token is on disk
  * 3. Otherwise: start a loopback HTTP server, send the user to /authorize
  *    with state + nonce + PKCE, wait for the callback, exchange code for
- *    tokens, fetch userinfo, and persist to ~/.codev/auth.json
+ *    tokens, fetch userinfo, and persist to ~/.codev-hub/auth.json
  */
 export async function login(
 	onLog: (msg: string) => void,
@@ -326,11 +367,11 @@ export async function login(
 
 	// Dev escape hatch: when CODEV_BYPASS_LOGIN=1 is set, skip the OAuth flow
 	// entirely and persist a stub session. Useful when the SSO wrapper is down
-	// and you still need to walk through `codev install` to test downstream
+	// and you still need to walk through `codevhub install` to test downstream
 	// steps (npm install, configure, model select, etc.). The stub is real
-	// auth.json on disk, so subsequent `codev claude/codex/opencode` runs and
+	// auth.json on disk, so subsequent `codevhub claude/codex/opencode` runs and
 	// the upload daemon also see a "logged in" state — clear it with
-	// `codev logout` or by unsetting the env var + `codev remove`.
+	// `codevhub logout` or by unsetting the env var + `codevhub remove`.
 	if (process.env.CODEV_BYPASS_LOGIN === "1") {
 		log("CODEV_BYPASS_LOGIN=1 — skipping SSO, using stub session.");
 		const authData: AuthData = {
@@ -370,18 +411,18 @@ export async function login(
 	}
 
 	// Force re-auth via the IdP login form (prompt=login) when:
-	//   1. ~/.codev/auth.json doesn't exist — typically the user just ran
-	//      `codev remove` (which wipes the dir), or this is a truly fresh
+	//   1. ~/.codev-hub/auth.json doesn't exist — typically the user just ran
+	//      `codevhub remove` (which wipes the dir), or this is a truly fresh
 	//      install. We have no record of prior auth on this machine, so don't
 	//      silently ride any IdP browser-session cookie that might still be
 	//      valid from another app on the same SSO realm.
-	//   2. The force-login sentinel is set — `codev logout` writes it because
+	//   2. The force-login sentinel is set — `codevhub logout` writes it because
 	//      revoking tokens does not terminate the IdP's session cookie.
 	//
-	// Keyed off auth.json rather than the ~/.codev/ dir: unrelated code creates
+	// Keyed off auth.json rather than the ~/.codev-hub/ dir: unrelated code creates
 	// the dir as a side effect before login can run — diagnostic logging
 	// (lib/log.ts) at the entry of every command, runExport during
-	// `codev upload` — and a dir-existence probe would misread those as "prior
+	// `codevhub upload` — and a dir-existence probe would misread those as "prior
 	// auth on this machine" and skip the forced credential form.
 	const forceLogin =
 		!existsSync(authFilePath()) || existsSync(forceLoginPath());
@@ -465,7 +506,7 @@ export async function silentSso(): Promise<AuthData | null> {
 // Best-effort: pull the latest Supabase coordinates from the backend and
 // persist them next to the SSO session. Failure is logged but not thrown —
 // downstream accessors (SUPABASE_URL/ANON_KEY in const.ts) will hard-fail
-// later if no values were ever fetched, with a "run codev install" message
+// later if no values were ever fetched, with a "run codevhub install" message
 // that's actionable for the user.
 //
 // Callers are responsible for invoking this after a successful login:

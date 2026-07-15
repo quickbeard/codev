@@ -97,7 +97,7 @@ export function UploadApp({ force = false }: { force?: boolean }) {
 				<Text color="yellow">No conversations found for this project.</Text>
 				{targets.length > 0 && (
 					<Box flexDirection="column" marginTop={1}>
-						<Text dimColor>codev looked in:</Text>
+						<Text dimColor>codevhub looked in:</Text>
 						{targets.map((t) => (
 							<Text key={t.agent} dimColor>
 								{"  • "}

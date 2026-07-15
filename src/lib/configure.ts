@@ -14,8 +14,11 @@ import TOML from "@iarna/toml";
 import {
 	AI_GATEWAY_OPENAI_URL,
 	AI_GATEWAY_URL,
-	CLAUDE_AUTO_COMPACT_WINDOW,
-	CLAUDE_AUTOCOMPACT_PCT,
+	GATEWAY_COMPACT_PCT,
+	GATEWAY_COMPACT_RESERVED,
+	GATEWAY_COMPACT_TRIGGER,
+	GATEWAY_CONTEXT_WINDOW,
+	GATEWAY_MAX_OUTPUT_TOKENS,
 } from "@/lib/const.js";
 import { logInfo } from "@/lib/log.js";
 import type { Agent } from "@/providers/types.js";
@@ -24,6 +27,7 @@ export type Tool =
 	| "claude-code"
 	| "codex"
 	| "opencode"
+	| "codev-code"
 	| "vscode-claude-code"
 	| "jetbrains-claude-code"
 	| "vscode-continue"
@@ -34,6 +38,7 @@ export type BackupKind =
 	| "claude-credentials"
 	| "codex-config"
 	| "opencode-config"
+	| "codev-code-config"
 	| "continue-config";
 
 export interface BackupStatus {
@@ -107,6 +112,8 @@ const CLAUDE_K = {
 const CODEX_K = {
 	model: atob("bW9kZWw="),
 	modelProvider: atob("bW9kZWxfcHJvdmlkZXI="),
+	modelContextWindow: atob("bW9kZWxfY29udGV4dF93aW5kb3c="),
+	autoCompactTokenLimit: atob("bW9kZWxfYXV0b19jb21wYWN0X3Rva2VuX2xpbWl0"),
 	modelProviders: atob("bW9kZWxfcHJvdmlkZXJz"),
 	providerId: atob("YWlnYXRld2F5"),
 	name: atob("bmFtZQ=="),
@@ -133,6 +140,12 @@ const OPENCODE_K = {
 	baseURL: atob("YmFzZVVSTA=="),
 	apiKey: atob("YXBpS2V5"),
 	models: atob("bW9kZWxz"),
+	limit: atob("bGltaXQ="),
+	context: atob("Y29udGV4dA=="),
+	output: atob("b3V0cHV0"),
+	compaction: atob("Y29tcGFjdGlvbg=="),
+	auto: atob("YXV0bw=="),
+	reserved: atob("cmVzZXJ2ZWQ="),
 };
 
 // The base URL CoDev writes to each tool's config. Read back at export time so
@@ -157,7 +170,9 @@ export function readAgentConfig(agent: Agent): AgentConfigResult {
 		case "codex":
 			return readCodexConfig();
 		case "opencode":
-			return readOpenCodeConfig();
+			return readOpenCodeConfig("opencode-config");
+		case "codev-code":
+			return readOpenCodeConfig("codev-code-config");
 	}
 }
 
@@ -206,8 +221,12 @@ function readCodexConfig(): AgentConfigResult {
 	}
 }
 
-function readOpenCodeConfig(): AgentConfigResult {
-	const path = sourcePathOf("opencode-config");
+// Shared by opencode and codev-code — the fork reads the same opencode.json
+// shape, just from ~/.config/codev-code instead of ~/.config/opencode.
+function readOpenCodeConfig(
+	kind: "opencode-config" | "codev-code-config",
+): AgentConfigResult {
+	const path = sourcePathOf(kind);
 	if (!existsSync(path)) return {};
 	try {
 		const raw = JSON.parse(readFileSync(path, "utf-8")) as unknown;
@@ -263,6 +282,10 @@ function sourcePathOf(kind: BackupKind): string {
 			return join(homedir(), ".codex", "config.toml");
 		case "opencode-config":
 			return join(homedir(), ".config", "opencode", "opencode.json");
+		// The codev-code fork keeps upstream's config filename but relocates the
+		// XDG app dir (its `Global.Path` constant is "codev-code").
+		case "codev-code-config":
+			return join(homedir(), ".config", "codev-code", "opencode.json");
 		case "continue-config":
 			return join(homedir(), ".continue", "config.yaml");
 	}
@@ -285,7 +308,7 @@ export function getBackupStatus(tool: Tool): BackupStatus[] {
 }
 
 // Detect which AI tools currently have a CoDev-managed config on disk. Used
-// by `codev model` to know whose configs to rewrite when the user switches
+// by `codevhub model` to know whose configs to rewrite when the user switches
 // the default model. Each marker is something CoDev distinctly writes — the
 // `aigateway` provider id (codex/opencode) or `ANTHROPIC_DEFAULT_OPUS_MODEL`
 // (claude-code) — none of which would appear in a user-authored config.
@@ -293,13 +316,14 @@ export function getBackupStatus(tool: Tool): BackupStatus[] {
 // Continue's config file is shared across editors (VS Code + JetBrains both
 // read the same ~/.continue/config.yaml), so when the marker is present we
 // return `vscode-continue` as the canonical pointer rather than enumerating
-// both editor tools. That keeps `codev model` rewriting the YAML once
+// both editor tools. That keeps `codevhub model` rewriting the YAML once
 // instead of twice; the resulting file is correct for both editors.
 export function detectConfiguredTools(): Tool[] {
 	const tools: Tool[] = [];
 	if (isCodevClaudeConfig()) tools.push("claude-code");
 	if (isCodevCodexConfig()) tools.push("codex");
-	if (isCodevOpenCodeConfig()) tools.push("opencode");
+	if (isCodevOpenCodeConfig("opencode-config")) tools.push("opencode");
+	if (isCodevOpenCodeConfig("codev-code-config")) tools.push("codev-code");
 	if (isCodevContinueConfig()) tools.push("vscode-continue");
 	return tools;
 }
@@ -333,8 +357,10 @@ function isCodevCodexConfig(): boolean {
 	}
 }
 
-function isCodevOpenCodeConfig(): boolean {
-	const path = sourcePathOf("opencode-config");
+function isCodevOpenCodeConfig(
+	kind: "opencode-config" | "codev-code-config",
+): boolean {
+	const path = sourcePathOf(kind);
 	if (!existsSync(path)) return false;
 	try {
 		const config = JSON.parse(readFileSync(path, "utf-8")) as unknown;
@@ -373,6 +399,8 @@ export function kindForTool(tool: Tool): BackupKind {
 			return "codex-config";
 		case "opencode":
 			return "opencode-config";
+		case "codev-code":
+			return "codev-code-config";
 		case "vscode-continue":
 		case "jetbrains-continue":
 			return "continue-config";
@@ -502,7 +530,7 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 
 	const baseUrl = creds.baseUrl
 		? normalizeClaudeBaseUrl(creds.baseUrl)
-		: AI_GATEWAY_URL;
+		: AI_GATEWAY_URL();
 	const model = requireModel(creds);
 
 	writeJson(sourcePath, {
@@ -515,15 +543,16 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 			[CLAUDE_K.sonnet]: model,
 			[CLAUDE_K.haiku]: model,
 			[CLAUDE_K.agentTeams]: "1",
-			[CLAUDE_K.autoCompactWindow]: CLAUDE_AUTO_COMPACT_WINDOW,
-			[CLAUDE_K.autoCompactPct]: CLAUDE_AUTOCOMPACT_PCT,
+			// Env-var values are strings; the shared window/percentage are numeric.
+			[CLAUDE_K.autoCompactWindow]: String(GATEWAY_CONTEXT_WINDOW),
+			[CLAUDE_K.autoCompactPct]: String(GATEWAY_COMPACT_PCT),
 		},
 	});
 
 	return [{ kind: "claude-settings", sourcePath, backupPath, created }];
 }
 
-export type RestoreStatus = "restored" | "deleted-live" | "noop";
+export type RestoreStatus = "restored" | "kept-live" | "noop";
 
 export interface RestoreResult {
 	status: RestoreStatus;
@@ -534,11 +563,9 @@ export interface RestoreResult {
 // "Make this file look pre-CoDev." Three terminal states:
 //   - backup present → swap it over the live file (the user's pre-CoDev
 //     state is reinstated).
-//   - no backup, but a live file exists → delete the live file. CoDev only
-//     skips the backup step when there was nothing to back up in the first
-//     place, so any live file here is post-CoDev (CoDev-authored, or created
-//     by the tool after CoDev wiped it); removing it lands the user at
-//     "no file", which IS the pre-CoDev state.
+//   - no backup, but a live file exists → leave the live file untouched. With
+//     no backup we can't know what (if anything) preceded CoDev, so we don't
+//     destroy the current config; the user can remove it by hand if they want.
 //   - neither file exists → noop; already at pre-CoDev state.
 function restoreKind(kind: BackupKind): RestoreResult {
 	const sourcePath = sourcePathOf(kind);
@@ -559,8 +586,7 @@ function restoreKind(kind: BackupKind): RestoreResult {
 	}
 
 	if (existsSync(sourcePath)) {
-		rmSync(sourcePath, { force: true });
-		return log({ status: "deleted-live", sourcePath, backupPath });
+		return log({ status: "kept-live", sourcePath, backupPath });
 	}
 
 	return log({ status: "noop", sourcePath, backupPath });
@@ -593,12 +619,17 @@ export function configureCodex(creds: Credentials): ConfigureResult[] {
 
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
-		: AI_GATEWAY_OPENAI_URL;
+		: AI_GATEWAY_OPENAI_URL();
 	const model = requireModel(creds);
 
 	writeToml(sourcePath, {
 		[CODEX_K.model]: model,
 		[CODEX_K.modelProvider]: CODEX_K.providerId,
+		// The gateway model isn't in Codex's catalog, so Codex would otherwise
+		// assume a 272K fallback window — larger than the real 196608 ceiling.
+		// Pin the true window and compact at ~85% of it, mirroring Claude Code.
+		[CODEX_K.modelContextWindow]: GATEWAY_CONTEXT_WINDOW,
+		[CODEX_K.autoCompactTokenLimit]: GATEWAY_COMPACT_TRIGGER,
 		[CODEX_K.modelProviders]: {
 			[CODEX_K.providerId]: {
 				[CODEX_K.name]: CODEX_K.displayName,
@@ -621,7 +652,7 @@ export function configureContinue(creds: Credentials): ConfigureResult[] {
 	// same normalization as Codex/OpenCode.
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
-		: AI_GATEWAY_OPENAI_URL;
+		: AI_GATEWAY_OPENAI_URL();
 	const defaultModel = requireModel(creds);
 	const allModels =
 		creds.models && creds.models.length > 0 ? creds.models : [defaultModel];
@@ -646,13 +677,26 @@ export function configureContinue(creds: Credentials): ConfigureResult[] {
 }
 
 export function configureOpenCode(creds: Credentials): ConfigureResult[] {
-	const { path: backupPath, created } = ensureBackup("opencode-config");
-	const sourcePath = sourcePathOf("opencode-config");
+	return configureOpenCodeKind("opencode-config", creds);
+}
+
+// The codev-code fork consumes the exact same opencode.json shape; only the
+// config directory differs (see sourcePathOf).
+export function configureCodevCode(creds: Credentials): ConfigureResult[] {
+	return configureOpenCodeKind("codev-code-config", creds);
+}
+
+function configureOpenCodeKind(
+	kind: "opencode-config" | "codev-code-config",
+	creds: Credentials,
+): ConfigureResult[] {
+	const { path: backupPath, created } = ensureBackup(kind);
+	const sourcePath = sourcePathOf(kind);
 	mkdirSync(dirname(sourcePath), { recursive: true });
 
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
-		: AI_GATEWAY_OPENAI_URL;
+		: AI_GATEWAY_OPENAI_URL();
 	const defaultModel = requireModel(creds);
 	// Fall back to [defaultModel] when `models` is unset so callers that don't
 	// know about the list (e.g. older fixtures, the fallback path with no
@@ -660,8 +704,21 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 	const allModels =
 		creds.models && creds.models.length > 0 ? creds.models : [defaultModel];
 
+	// A custom-provider model with no `limit` defaults to context 0, which both
+	// mis-sizes the window and disables OpenCode's auto-compaction entirely.
+	// Declare the gateway's real window so compaction works; `output` is required
+	// whenever a `limit` object is present.
 	const modelsMap = Object.fromEntries(
-		allModels.map((id) => [id, { [OPENCODE_K.name]: id }]),
+		allModels.map((id) => [
+			id,
+			{
+				[OPENCODE_K.name]: id,
+				[OPENCODE_K.limit]: {
+					[OPENCODE_K.context]: GATEWAY_CONTEXT_WINDOW,
+					[OPENCODE_K.output]: GATEWAY_MAX_OUTPUT_TOKENS,
+				},
+			},
+		]),
 	);
 
 	writeJson(sourcePath, {
@@ -669,6 +726,13 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 		// Top-level `model` pins the initial active model OpenCode uses on
 		// launch. Format is `<provider>/<modelId>` per OpenCode's schema.
 		[OPENCODE_K.model]: `${OPENCODE_K.providerKey}/${defaultModel}`,
+		// OpenCode has no percentage trigger; it compacts at `context − reserved`.
+		// Reserve the headroom that lands the trigger at ~85% of the window, to
+		// match Claude Code and Codex.
+		[OPENCODE_K.compaction]: {
+			[OPENCODE_K.auto]: true,
+			[OPENCODE_K.reserved]: GATEWAY_COMPACT_RESERVED,
+		},
 		[OPENCODE_K.provider]: {
 			[OPENCODE_K.providerKey]: {
 				[OPENCODE_K.npm]: OPENCODE_K.npmPkg,
@@ -682,5 +746,5 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 		},
 	});
 
-	return [{ kind: "opencode-config", sourcePath, backupPath, created }];
+	return [{ kind, sourcePath, backupPath, created }];
 }

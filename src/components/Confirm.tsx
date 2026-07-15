@@ -15,12 +15,13 @@ interface ConfirmProps {
 // they're never reached at runtime. Continue's two editor variants share
 // `continue-config`, so the alias is editor-neutral.
 const KIND_RESTORE_CMD: Record<BackupKind, string> = {
-	"claude-settings": "codev restore claude",
-	"claude-json": "codev restore claude",
-	"claude-credentials": "codev restore claude",
-	"codex-config": "codev restore codex",
-	"opencode-config": "codev restore opencode",
-	"continue-config": "codev restore continue",
+	"claude-settings": "codevhub restore claude",
+	"claude-json": "codevhub restore claude",
+	"claude-credentials": "codevhub restore claude",
+	"codex-config": "codevhub restore codex",
+	"opencode-config": "codevhub restore opencode",
+	"codev-code-config": "codevhub restore codev",
+	"continue-config": "codevhub restore continue",
 };
 
 // Render the restore-command list with cyan emphasis on each command,

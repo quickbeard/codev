@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	fetchApiKey,
 	fetchCodevConfig,
@@ -21,8 +24,28 @@ function jsonResponse(status: number, body: unknown): Response {
 	});
 }
 
+// The gateway-URL accessors (AI_GATEWAY_URL / AI_GATEWAY_OPENAI_URL) read the
+// cached gateway_url out of ~/.codev-hub/auth.json. backend.ts falls back to them
+// whenever a call has no explicit baseUrl (the SSO-key path), so every test in
+// this file gets a temp HOME with a known gateway_url seeded.
+const GATEWAY_URL = "https://gw.test/gateway";
+let tempDir: string;
+beforeEach(() => {
+	tempDir = mkdtempSync(join(tmpdir(), "codev-backend-"));
+	vi.stubEnv("HOME", tempDir);
+	vi.stubEnv("USERPROFILE", tempDir);
+	const dir = join(tempDir, ".codev-hub");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(
+		join(dir, "auth.json"),
+		JSON.stringify({ gateway_url: GATEWAY_URL }),
+	);
+});
+
 afterEach(() => {
 	(globalThis.fetch as unknown as { mockRestore?: () => void }).mockRestore?.();
+	vi.unstubAllEnvs();
+	rmSync(tempDir, { recursive: true, force: true });
 });
 
 describe("fetchApiKey", () => {
@@ -101,7 +124,7 @@ describe("validateApiKey", () => {
 			string,
 			{ method?: string; headers?: Record<string, string> },
 		];
-		expect(url).toBe(`${AI_GATEWAY_URL}/key/info`);
+		expect(url).toBe(`${AI_GATEWAY_URL()}/key/info`);
 		expect(init.method).toBe("GET");
 		expect(init.headers?.Authorization).toBe("Bearer sk-abc");
 	});
@@ -185,7 +208,7 @@ describe("fetchModels", () => {
 			string,
 			{ method?: string; headers?: Record<string, string> },
 		];
-		expect(url).toBe(`${AI_GATEWAY_OPENAI_URL}/models`);
+		expect(url).toBe(`${AI_GATEWAY_OPENAI_URL()}/models`);
 		expect(init.method).toBe("GET");
 		expect(init.headers?.Authorization).toBe("Bearer sk-test");
 		expect(init.headers?.accept).toBe("application/json");
@@ -354,16 +377,18 @@ describe("fetchSupabaseSession", () => {
 });
 
 describe("fetchCodevConfig", () => {
-	test("returns the Supabase coordinates on a 2xx response", async () => {
+	test("returns the Supabase coordinates and gateway URL on a 2xx response", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
 				supabaseUrl: "https://x.supabase.co",
 				supabaseAnonKey: "anon",
+				gatewayUrl: "https://gw.example.com/gateway",
 			}),
 		);
 		expect(await fetchCodevConfig("sso-token")).toEqual({
 			supabaseUrl: "https://x.supabase.co",
 			supabaseAnonKey: "anon",
+			gatewayUrl: "https://gw.example.com/gateway",
 		});
 	});
 
@@ -372,6 +397,7 @@ describe("fetchCodevConfig", () => {
 			jsonResponse(200, {
 				supabaseUrl: "u",
 				supabaseAnonKey: "a",
+				gatewayUrl: "g",
 			}),
 		);
 		await fetchCodevConfig("my-token");
@@ -396,6 +422,15 @@ describe("fetchCodevConfig", () => {
 	test("throws when the response is missing required fields", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, { supabaseUrl: "only-this" }),
+		);
+		await expect(fetchCodevConfig("token")).rejects.toThrow(
+			/incomplete payload/,
+		);
+	});
+
+	test("throws when only the gatewayUrl is missing", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, { supabaseUrl: "u", supabaseAnonKey: "a" }),
 		);
 		await expect(fetchCodevConfig("token")).rejects.toThrow(
 			/incomplete payload/,

@@ -91,15 +91,21 @@ afterEach(() => {
 });
 
 describe("runExport", () => {
-	test("writes markdown to ~/.codev/agent-logs/<project>/ and returns a summary", async () => {
+	test("writes markdown to ~/.codev-hub/agent-logs/<project>/ and returns a summary", async () => {
 		seedClaudeSession();
 		const summary = await runExport();
-		const expectedDir = join(tempHome, ".codev", "agent-logs", "works-myapp");
+		const expectedDir = join(
+			tempHome,
+			".codev-hub",
+			"agent-logs",
+			"works-myapp",
+		);
 		expect(summary.outDir).toBe(expectedDir);
 		expect(summary.exported).toBe(1);
 		expect(summary.byAgent["claude-code"]).toBe(1);
 		expect(summary.skipped).toContain("codex");
 		expect(summary.skipped).toContain("opencode");
+		expect(summary.skipped).toContain("codev-code");
 
 		const expectedFile = join(
 			expectedDir,
@@ -117,7 +123,7 @@ describe("runExport", () => {
 		await runExport();
 		const statsPath = join(
 			tempHome,
-			".codev",
+			".codev-hub",
 			"agent-logs",
 			"works-myapp",
 			"statistics.json",
@@ -132,13 +138,19 @@ describe("runExport", () => {
 	test("skips all providers when no agents are active", async () => {
 		const summary = await runExport();
 		expect(summary.exported).toBe(0);
-		expect(summary.skipped).toEqual(["claude-code", "codex", "opencode"]);
-		// Each skipped provider records where it looked, so `codev upload` can
+		expect(summary.skipped).toEqual([
+			"claude-code",
+			"codex",
+			"opencode",
+			"codev-code",
+		]);
+		// Each skipped provider records where it looked, so `codevhub upload` can
 		// explain an empty result instead of a bare "0/0".
 		expect(summary.targets.map((t) => t.agent)).toEqual([
 			"claude-code",
 			"codex",
 			"opencode",
+			"codev-code",
 		]);
 		expect(summary.targets.every((t) => t.path.length > 0)).toBe(true);
 	});
@@ -179,14 +191,15 @@ describe("runExport", () => {
 		expect(existsSync(join(summary.outDir, "claude-code"))).toBe(true);
 		expect(existsSync(join(summary.outDir, "codex"))).toBe(false);
 		expect(existsSync(join(summary.outDir, "opencode"))).toBe(false);
+		expect(existsSync(join(summary.outDir, "codev-code"))).toBe(false);
 	});
 });
 
 describe("migrateLegacyAgentLogs", () => {
-	const legacyRoot = () => join(tempHome, ".codev", "logs");
-	const targetRoot = () => join(tempHome, ".codev", "agent-logs");
+	const legacyRoot = () => join(tempHome, ".codev-hub", "logs");
+	const targetRoot = () => join(tempHome, ".codev-hub", "agent-logs");
 
-	test("moves legacy project folders into ~/.codev/agent-logs/", () => {
+	test("moves legacy project folders into ~/.codev-hub/agent-logs/", () => {
 		const legacyFile = join(legacyRoot(), "works-myapp", "codex", "a.md");
 		mkdirSync(join(legacyRoot(), "works-myapp", "codex"), { recursive: true });
 		writeFileSync(legacyFile, "hello");

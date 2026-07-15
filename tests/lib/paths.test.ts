@@ -35,14 +35,14 @@ afterEach(() => {
 });
 
 describe("agentLogsDir", () => {
-	test("returns ~/.codev/agent-logs", () => {
-		expect(agentLogsDir()).toBe(join(tempHome, ".codev", "agent-logs"));
+	test("returns ~/.codev-hub/agent-logs", () => {
+		expect(agentLogsDir()).toBe(join(tempHome, ".codev-hub", "agent-logs"));
 	});
 });
 
 describe("cliLogsDir", () => {
-	test("returns ~/.codev/logs", () => {
-		expect(cliLogsDir()).toBe(join(tempHome, ".codev", "logs"));
+	test("returns ~/.codev-hub/logs", () => {
+		expect(cliLogsDir()).toBe(join(tempHome, ".codev-hub", "logs"));
 	});
 });
 
@@ -88,7 +88,7 @@ describe("projectLogsDir", () => {
 		const cwd = join(tempHome, "works", "codev");
 		mkdirSync(cwd, { recursive: true });
 		expect(projectLogsDir(cwd)).toBe(
-			join(tempHome, ".codev", "agent-logs", "works-codev"),
+			join(tempHome, ".codev-hub", "agent-logs", "works-codev"),
 		);
 	});
 });

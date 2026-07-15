@@ -1,8 +1,9 @@
 import { type RestoreResult, restoreTool, type Tool } from "@/lib/configure.js";
 
-// Launch-name aliases that `codev restore <name>` accepts. The first three
-// match the agent launchers (`codev claude`, `codev codex`, `codev opencode`)
-// — `claude-code` is an internal Tool name and isn't exposed here. `continue`
+// Launch-name aliases that `codevhub restore <name>` accepts. The first three
+// match the agent launchers (`codevhub claude`, `codevhub codex`,
+// `codevhub opencode`) — `claude-code` is an internal Tool name and isn't
+// exposed here. `continue`
 // has no launcher (the user opens VS Code or a JetBrains IDE directly), and
 // the underlying ~/.continue/config.yaml is shared across both editors —
 // hence one editor-neutral alias rather than `vscode` + `jetbrains` for the
@@ -11,6 +12,7 @@ export const RESTORE_AGENTS = [
 	"claude",
 	"codex",
 	"opencode",
+	"codev",
 	"continue",
 ] as const;
 export type RestoreAgent = (typeof RESTORE_AGENTS)[number];
@@ -19,6 +21,7 @@ const TOOL_FOR_AGENT: Record<RestoreAgent, Tool> = {
 	claude: "claude-code",
 	codex: "codex",
 	opencode: "opencode",
+	codev: "codev-code",
 	// Either editor Tool routes to the same `continue-config` BackupKind
 	// — picking `vscode-continue` is canonical, not editor-specific.
 	continue: "vscode-continue",
@@ -33,8 +36,10 @@ function reportRestoreResult(result: RestoreResult): void {
 		case "restored":
 			console.log(`Restored ${result.sourcePath} from ${result.backupPath}.`);
 			return;
-		case "deleted-live":
-			console.log(`No backup at ${result.backupPath}.`);
+		case "kept-live":
+			console.log(
+				`No backup at ${result.backupPath}; left ${result.sourcePath} in place.`,
+			);
 			return;
 		case "noop":
 			console.log(
@@ -54,19 +59,22 @@ export function runRestore(tool: Tool): number {
 
 // One Tool per BackupKind. The extension variants (`vscode-claude-code`,
 // `jetbrains-claude-code`, `jetbrains-continue`) share their config file with
-// the canonical entry, so iterating them too would have the second visit see
-// no backup and then delete the file the first visit just restored.
+// the canonical entry, so iterating them too would redundantly re-report the
+// same file (the second visit sees no backup left and reports keeping the file
+// the first visit just restored).
 const SWEEP_TOOLS: Tool[] = [
 	"claude-code",
 	"codex",
 	"opencode",
+	"codev-code",
 	"vscode-continue",
 ];
 
-// Bare `codev restore` — process every tool. Each result ends in one of
-// three states (restored / deleted-live / noop). Counters aggregate across
-// all results from all sweep tools (claude-code contributes three results,
-// the others one). Exit 1 only if every result was noop or any tool threw;
+// Bare `codevhub restore` — process every tool. Each result ends in one of
+// three states (restored / kept-live / noop); only `restored` actually reverts
+// a file. Counters aggregate across all results from all sweep tools
+// (claude-code contributes three results, the others one). Exit 1 if nothing
+// was restored (every result was kept-live or noop) or any tool threw;
 // otherwise 0.
 export function runRestoreAll(): number {
 	let acted = 0;
@@ -78,8 +86,10 @@ export function runRestoreAll(): number {
 			const results = restoreTool(tool);
 			for (const result of results) {
 				reportRestoreResult(result);
-				if (result.status === "noop") noop++;
-				else acted++;
+				// Only a genuine restore counts as action; kept-live left the file
+				// untouched, so it falls in with noop for the "nothing restored" check.
+				if (result.status === "restored") acted++;
+				else noop++;
 			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);

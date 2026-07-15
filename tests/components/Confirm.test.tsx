@@ -28,10 +28,10 @@ describe("Confirm", () => {
 		);
 		const out = flatten(lastFrame() ?? "");
 		expect(out).toContain("To revert to your pre-CoDev state, run");
-		expect(out).toContain("codev restore claude");
+		expect(out).toContain("codevhub restore claude");
 		// No "and" or commas for a singleton.
-		expect(out).not.toContain("codev restore claude,");
-		expect(out).not.toContain("codev restore claude and");
+		expect(out).not.toContain("codevhub restore claude,");
+		expect(out).not.toContain("codevhub restore claude and");
 	});
 
 	test("two tools join with 'and' (no comma)", () => {
@@ -40,7 +40,9 @@ describe("Confirm", () => {
 			<Confirm tools={["claude-code", "opencode"]} onConfirm={onConfirm} />,
 		);
 		const out = flatten(lastFrame() ?? "");
-		expect(out).toContain("codev restore claude and codev restore opencode");
+		expect(out).toContain(
+			"codevhub restore claude and codevhub restore opencode",
+		);
 	});
 
 	test("three tools use Oxford comma", () => {
@@ -53,7 +55,7 @@ describe("Confirm", () => {
 		);
 		const out = flatten(lastFrame() ?? "");
 		expect(out).toContain(
-			"codev restore claude, codev restore codex, and codev restore opencode",
+			"codevhub restore claude, codevhub restore codex, and codevhub restore opencode",
 		);
 	});
 
@@ -67,8 +69,8 @@ describe("Confirm", () => {
 		);
 		const out = lastFrame() ?? "";
 		// Editor-neutral alias appears once, not twice.
-		expect(out).toContain("codev restore continue");
-		const matches = out.match(/codev restore continue/g) ?? [];
+		expect(out).toContain("codevhub restore continue");
+		const matches = out.match(/codevhub restore continue/g) ?? [];
 		expect(matches.length).toBe(1);
 	});
 
@@ -81,7 +83,7 @@ describe("Confirm", () => {
 			/>,
 		);
 		const out = lastFrame() ?? "";
-		const matches = out.match(/codev restore claude/g) ?? [];
+		const matches = out.match(/codevhub restore claude/g) ?? [];
 		expect(matches.length).toBe(1);
 	});
 
@@ -92,7 +94,7 @@ describe("Confirm", () => {
 		);
 		const out = lastFrame() ?? "";
 		// The sentence is still rendered as history.
-		expect(out).toContain("codev restore claude");
+		expect(out).toContain("codevhub restore claude");
 		// YesNo's "(y/N)" prompt should not be present.
 		expect(out).not.toContain("(y/N)");
 		expect(out).not.toContain("(Y/n)");

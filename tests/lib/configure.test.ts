@@ -19,6 +19,15 @@ beforeEach(() => {
 	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
 	// hit the temp home on every platform.
 	vi.stubEnv("USERPROFILE", tempDir);
+	// The configure* functions fall back to AI_GATEWAY_URL()/AI_GATEWAY_OPENAI_URL()
+	// whenever creds carry no baseUrl (the SSO-key path), and those accessors read
+	// gateway_url out of ~/.codev-hub/auth.json. Seed it so the fallback resolves.
+	const codevDir = join(tempDir, ".codev-hub");
+	mkdirSync(codevDir, { recursive: true });
+	writeFileSync(
+		join(codevDir, "auth.json"),
+		JSON.stringify({ gateway_url: "https://gw.test/gateway" }),
+	);
 });
 
 afterEach(() => {
@@ -266,7 +275,7 @@ describe("configureClaudeCode", () => {
 			"https://json.schemastore.org/claude-code-settings.json",
 		);
 		expect(config.env).toEqual({
-			ANTHROPIC_BASE_URL: AI_GATEWAY_URL,
+			ANTHROPIC_BASE_URL: AI_GATEWAY_URL(),
 			ANTHROPIC_API_KEY: "sk-abc",
 			ANTHROPIC_MODEL: "chosen-model",
 			ANTHROPIC_DEFAULT_OPUS_MODEL: "chosen-model",
@@ -383,7 +392,7 @@ describe("configureOpenCode", () => {
 		expect(config.$schema).toBe("https://opencode.ai/config.json");
 		expect(config.provider.aigateway.npm).toBe("@ai-sdk/openai-compatible");
 		expect(config.provider.aigateway.options.baseURL).toBe(
-			AI_GATEWAY_OPENAI_URL,
+			AI_GATEWAY_OPENAI_URL(),
 		);
 		expect(config.provider.aigateway.options.apiKey).toBe("sk-xyz");
 		expect(config.provider.aigateway.models["chosen-model"].name).toBe(
@@ -391,6 +400,16 @@ describe("configureOpenCode", () => {
 		);
 		// Top-level `model` pins the active default in <provider>/<modelId> form.
 		expect(config.model).toBe("aigateway/chosen-model");
+		// Declares the gateway window so OpenCode sizes context correctly and its
+		// auto-compaction fires (a model with no `limit` defaults to context 0,
+		// which disables compaction). `output` is required alongside `context`.
+		expect(config.provider.aigateway.models["chosen-model"].limit).toEqual({
+			context: 196608,
+			output: 65536,
+		});
+		// Reserve lands the compaction trigger at ~85% of the window (196608 −
+		// 29491 ≈ 167K), matching Claude Code and Codex.
+		expect(config.compaction).toEqual({ auto: true, reserved: 29491 });
 	});
 
 	test("writes every fetched model into the provider's models map", async () => {
@@ -407,6 +426,7 @@ describe("configureOpenCode", () => {
 		expect(Object.keys(map).sort()).toEqual(["model-a", "model-b", "model-c"]);
 		for (const id of ["model-a", "model-b", "model-c"]) {
 			expect(map[id].name).toBe(id);
+			expect(map[id].limit).toEqual({ context: 196608, output: 65536 });
 		}
 		// Top-level default still points at the chosen one.
 		expect(config.model).toBe("aigateway/model-a");
@@ -495,6 +515,97 @@ describe("configureOpenCode", () => {
 	});
 });
 
+describe("configureCodevCode", () => {
+	test("creates ~/.config/codev-code/opencode.json with aigateway provider when file does not exist", async () => {
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "chosen-model" });
+
+		const filePath = join(tempDir, ".config", "codev-code", "opencode.json");
+		expect(existsSync(filePath)).toBe(true);
+
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		expect(config.$schema).toBe("https://opencode.ai/config.json");
+		expect(config.provider.aigateway.npm).toBe("@ai-sdk/openai-compatible");
+		expect(config.provider.aigateway.options.baseURL).toBe(
+			AI_GATEWAY_OPENAI_URL(),
+		);
+		expect(config.provider.aigateway.options.apiKey).toBe("sk-xyz");
+		expect(config.provider.aigateway.models["chosen-model"].name).toBe(
+			"chosen-model",
+		);
+		// Top-level `model` pins the active default in <provider>/<modelId> form.
+		expect(config.model).toBe("aigateway/chosen-model");
+		// The fork shares OpenCode's window/compaction handling, so the same
+		// limit + compaction blocks must land in its config.
+		expect(config.provider.aigateway.models["chosen-model"].limit).toEqual({
+			context: 196608,
+			output: 65536,
+		});
+		expect(config.compaction).toEqual({ auto: true, reserved: 29491 });
+	});
+
+	test("does not touch ~/.config/opencode/opencode.json (fork-only install)", async () => {
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "m" });
+
+		expect(
+			existsSync(join(tempDir, ".config", "opencode", "opencode.json")),
+		).toBe(false);
+	});
+
+	test("replaces existing opencode.json and backs up the file", async () => {
+		const dir = join(tempDir, ".config", "codev-code");
+		const filePath = join(dir, "opencode.json");
+		const backupPath = `${filePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			filePath,
+			JSON.stringify({
+				someSetting: "keep",
+				provider: { other: { name: "Other" } },
+			}),
+		);
+
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		const results = configureCodevCode({ apiKey: "sk-new", model: "m" });
+
+		expect(results[0]?.kind).toBe("codev-code-config");
+		expect(results[0]?.backupPath).toBe(backupPath);
+		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
+		expect(backup.someSetting).toBe("keep");
+		expect(backup.provider.other.name).toBe("Other");
+
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		expect(config.someSetting).toBeUndefined();
+		expect(config.provider.other).toBeUndefined();
+		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
+	});
+
+	test("preserves a pre-existing opencode.json backup across repeated runs", async () => {
+		const dir = join(tempDir, ".config", "codev-code");
+		const filePath = join(dir, "opencode.json");
+		const backupPath = `${filePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(backupPath, JSON.stringify({ marker: "original" }));
+		writeFileSync(
+			filePath,
+			JSON.stringify({
+				provider: { aigateway: { options: { apiKey: "prev-codev-run" } } },
+			}),
+		);
+
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		const results = configureCodevCode({ apiKey: "sk-new", model: "m" });
+
+		const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
+		expect(backup.marker).toBe("original");
+		expect(results[0]?.backupPath).toBe(backupPath);
+
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
+	});
+});
+
 describe("configureCodex", () => {
 	function readCodexToml() {
 		return TOML.parse(
@@ -502,6 +613,8 @@ describe("configureCodex", () => {
 		) as {
 			model: string;
 			model_provider: string;
+			model_context_window: number;
+			model_auto_compact_token_limit: number;
 			model_providers: Record<
 				string,
 				{
@@ -527,12 +640,21 @@ describe("configureCodex", () => {
 		expect(config.model_providers.aigateway).toBeDefined();
 		expect(config.model_providers.aigateway?.name).toBe("AI Gateway");
 		expect(config.model_providers.aigateway?.base_url).toBe(
-			AI_GATEWAY_OPENAI_URL,
+			AI_GATEWAY_OPENAI_URL(),
 		);
 		expect(config.model_providers.aigateway?.wire_api).toBe("responses");
 		expect(config.model_providers.aigateway?.experimental_bearer_token).toBe(
 			"sk-codex",
 		);
+	});
+
+	test("pins the gateway window and compaction trigger (Codex would otherwise assume a larger fallback window)", async () => {
+		const { configureCodex } = await import("@/lib/configure.js");
+		configureCodex({ apiKey: "sk-codex", model: "m" });
+
+		const config = readCodexToml();
+		expect(config.model_context_window).toBe(196608);
+		expect(config.model_auto_compact_token_limit).toBe(167117); // ≈85% of the window
 	});
 
 	test("does not touch ~/.claude.json (Codex-only install)", async () => {
@@ -655,7 +777,7 @@ describe("configureContinue", () => {
 		expect(raw).toContain("CoDev (AI Gateway)");
 		// OpenAI-compatible provider entry pinned to the gateway's /v1 endpoint.
 		expect(raw).toContain(`provider: "openai"`);
-		expect(raw).toContain(`apiBase: "${AI_GATEWAY_OPENAI_URL}"`);
+		expect(raw).toContain(`apiBase: "${AI_GATEWAY_OPENAI_URL()}"`);
 		expect(raw).toContain(`apiKey: "sk-vscode"`);
 		expect(raw).toContain(`name: "chosen-model"`);
 		expect(raw).toContain(`model: "chosen-model"`);
@@ -789,6 +911,15 @@ describe("getBackupStatus", () => {
 		expect(statuses.map((s) => s.kind)).toEqual(["codex-config"]);
 	});
 
+	test("returns codev-code-config for codev-code", async () => {
+		const { getBackupStatus } = await import("@/lib/configure.js");
+		const statuses = getBackupStatus("codev-code");
+		expect(statuses.map((s) => s.kind)).toEqual(["codev-code-config"]);
+		expect(statuses[0]?.sourcePath).toBe(
+			join(tempDir, ".config", "codev-code", "opencode.json"),
+		);
+	});
+
 	test("returns continue-config for vscode-continue", async () => {
 		const { getBackupStatus } = await import("@/lib/configure.js");
 		const statuses = getBackupStatus("vscode-continue");
@@ -876,7 +1007,7 @@ describe("restoreTool", () => {
 		);
 	});
 
-	test("deletes the live CoDev config when no backup exists", async () => {
+	test("keeps the live CoDev config when no backup exists", async () => {
 		const dir = join(tempDir, ".claude");
 		const livePath = join(dir, "settings.json");
 		const backupPath = `${livePath}.backup`;
@@ -887,8 +1018,10 @@ describe("restoreTool", () => {
 		const results = restoreTool("claude-code");
 		const settingsResult = results.find((r) => r.sourcePath === livePath);
 
-		expect(settingsResult?.status).toBe("deleted-live");
-		expect(existsSync(livePath)).toBe(false);
+		expect(settingsResult?.status).toBe("kept-live");
+		// No backup to restore from, so the live file is left untouched.
+		expect(existsSync(livePath)).toBe(true);
+		expect(readFileSync(livePath, "utf-8")).toBe('{"marker":"codev-live"}');
 		expect(existsSync(backupPath)).toBe(false);
 	});
 
@@ -922,6 +1055,23 @@ describe("restoreTool", () => {
 		expect(result?.status).toBe("restored");
 		expect(existsSync(backupPath)).toBe(false);
 		expect(readFileSync(livePath, "utf-8")).toContain('marker = "backup"');
+	});
+
+	test("replaces the live CoDev Code opencode.json with the backup", async () => {
+		const dir = join(tempDir, ".config", "codev-code");
+		const livePath = join(dir, "opencode.json");
+		const backupPath = `${livePath}.backup`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(livePath, '{"marker":"live"}');
+		writeFileSync(backupPath, '{"marker":"backup"}');
+
+		const { restoreTool } = await import("@/lib/configure.js");
+		const [result] = restoreTool("codev-code");
+
+		expect(result?.status).toBe("restored");
+		expect(existsSync(backupPath)).toBe(false);
+		const restored = JSON.parse(readFileSync(livePath, "utf-8"));
+		expect(restored.marker).toBe("backup");
 	});
 
 	test("Claude bundle: restores all three files when all backups exist", async () => {
@@ -965,11 +1115,11 @@ describe("restoreTool", () => {
 		expect(existsSync(credBackup)).toBe(false);
 	});
 
-	test("Claude bundle: deletes live files that have no backup", async () => {
+	test("Claude bundle: keeps live files that have no backup", async () => {
 		const claudeDir = join(tempDir, ".claude");
 		mkdirSync(claudeDir, { recursive: true });
 
-		// Settings has a backup → restored. Others have only live files → deleted.
+		// Settings has a backup → restored. Others have only live files → kept.
 		const settingsLive = join(claudeDir, "settings.json");
 		writeFileSync(settingsLive, '{"env":{}}');
 		writeFileSync(`${settingsLive}.backup`, '{"marker":"orig"}');
@@ -985,13 +1135,17 @@ describe("restoreTool", () => {
 
 		const byKind = new Map(results.map((r) => [r.sourcePath, r.status]));
 		expect(byKind.get(settingsLive)).toBe("restored");
-		expect(byKind.get(jsonLive)).toBe("deleted-live");
-		expect(byKind.get(credLive)).toBe("deleted-live");
+		expect(byKind.get(jsonLive)).toBe("kept-live");
+		expect(byKind.get(credLive)).toBe("kept-live");
 
-		// All live files are now gone (no backup left to restore from for the two
-		// deleted-live cases, and the restored one's backup was consumed).
-		expect(existsSync(jsonLive)).toBe(false);
-		expect(existsSync(credLive)).toBe(false);
+		// The two backup-less files are left in place untouched; only the one with
+		// a backup was restored (and its backup consumed).
+		expect(JSON.parse(readFileSync(jsonLive, "utf-8"))).toEqual({
+			hasCompletedOnboarding: true,
+		});
+		expect(JSON.parse(readFileSync(credLive, "utf-8"))).toEqual({
+			session: "post-install",
+		});
 		expect(JSON.parse(readFileSync(settingsLive, "utf-8"))).toEqual({
 			marker: "orig",
 		});
@@ -1235,7 +1389,7 @@ describe("detectConfiguredTools", () => {
 			join(dir, "settings.json"),
 			JSON.stringify({
 				env: {
-					ANTHROPIC_BASE_URL: AI_GATEWAY_URL,
+					ANTHROPIC_BASE_URL: AI_GATEWAY_URL(),
 					ANTHROPIC_API_KEY: "sk",
 					ANTHROPIC_MODEL: "m",
 					ANTHROPIC_DEFAULT_OPUS_MODEL: "m",
@@ -1270,6 +1424,21 @@ describe("detectConfiguredTools", () => {
 		);
 	}
 
+	function seedCodevCodeWithCodevMarkers() {
+		const dir = join(tempDir, ".config", "codev-code");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "opencode.json"),
+			JSON.stringify({
+				$schema: "https://opencode.ai/config.json",
+				model: "aigateway/m",
+				provider: {
+					aigateway: { npm: "@ai-sdk/openai-compatible" },
+				},
+			}),
+		);
+	}
+
 	function seedContinueWithCodevMarkers() {
 		const dir = join(tempDir, ".continue");
 		mkdirSync(dir, { recursive: true });
@@ -1284,18 +1453,28 @@ describe("detectConfiguredTools", () => {
 		expect(detectConfiguredTools()).toEqual([]);
 	});
 
-	test("detects all four when each tool has CoDev markers", async () => {
+	test("detects all five when each tool has CoDev markers", async () => {
 		seedClaudeWithCodevMarkers();
 		seedCodexWithCodevMarkers();
 		seedOpenCodeWithCodevMarkers();
+		seedCodevCodeWithCodevMarkers();
 		seedContinueWithCodevMarkers();
 		const { detectConfiguredTools } = await import("@/lib/configure.js");
 		expect(detectConfiguredTools().sort()).toEqual([
 			"claude-code",
+			"codev-code",
 			"codex",
 			"opencode",
 			"vscode-continue",
 		]);
+	});
+
+	test("detects a codev-code config independently of opencode's", async () => {
+		// The fork's config lives in its own XDG dir, so seeding it must not
+		// light up `opencode` (and vice versa — see the seed-all test above).
+		seedCodevCodeWithCodevMarkers();
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools()).toEqual(["codev-code"]);
 	});
 
 	test("ignores a Continue config without the CoDev marker", async () => {

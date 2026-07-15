@@ -277,7 +277,7 @@ describe("logApiKeyConfigured (unsafeUnredacted)", () => {
 		expect(doc.codev?.api_key).toBe("sk-litellm0realkey0value");
 		expect(doc.codev?.source).toBe("new");
 		expect(doc.codev?.model).toBe("gpt-5");
-		// The key rides in codev.api_key, never the message, so `codev logs`'
+		// The key rides in codev.api_key, never the message, so `codevhub logs`'
 		// pretty printer (message-only) never echoes it to the terminal.
 		expect(doc.message).toBe("configured gateway API key");
 	});
@@ -345,7 +345,7 @@ describe("loggedFetch", () => {
 		try {
 			const res = await loggedFetch(
 				"backend.config",
-				"https://proxy.example.com/codev-proxy/config?x=1",
+				"https://proxy.example.com/codev-backend/config?x=1",
 				{
 					method: "POST",
 					headers: { Authorization: "Bearer topsecrettokenvalue" },
@@ -377,7 +377,7 @@ describe("loggedFetch", () => {
 			expect(start.event?.type).toEqual(["start"]);
 			expect(start.codev?.endpoint).toBe("backend.config");
 			expect(start.url?.domain).toBe("proxy.example.com");
-			expect(start.url?.path).toBe("/codev-proxy/config");
+			expect(start.url?.path).toBe("/codev-backend/config");
 			expect(end.event?.type).toEqual(["end"]);
 			expect(end.event?.outcome).toBe("success");
 			expect(end.http?.request?.method).toBe("POST");

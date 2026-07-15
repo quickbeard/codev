@@ -132,7 +132,7 @@ describe("UploadApp", () => {
 		const painted = () => frames.join("\n");
 		await waitFor(() => painted().includes("No conversations found"));
 		const out = painted();
-		expect(out).toContain("codev looked in:");
+		expect(out).toContain("codevhub looked in:");
 		expect(out).toContain(
 			"claude-code: C:\\Users\\me\\.claude\\projects\\D--x",
 		);

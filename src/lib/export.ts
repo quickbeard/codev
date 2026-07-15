@@ -29,7 +29,7 @@ export interface ExportSummary {
 	skipped: Agent[];
 	errors: { agent: Agent; message: string }[];
 	// Where each inactive provider looked for this project's sessions, captured
-	// from Provider.describeTarget. `codev upload` surfaces these when nothing was
+	// from Provider.describeTarget. `codevhub upload` surfaces these when nothing was
 	// found at all, so the user can see every path checked and spot a wrong-dir
 	// or wrong-tool mistake (the original Windows "Uploaded 0/0" confusion).
 	targets: { agent: Agent; path: string }[];
@@ -56,11 +56,16 @@ const PROVIDER_LOADERS: { agent: Agent; load: () => Promise<Provider> }[] = [
 		load: async () =>
 			(await import("@/providers/opencode.js")).openCodeProvider,
 	},
+	{
+		agent: "codev-code",
+		load: async () =>
+			(await import("@/providers/codev-code.js")).codevCodeProvider,
+	},
 ];
 
-// Conversation exports used to live in ~/.codev/logs/<project>/; that root now
+// Conversation exports used to live in ~/.codev-hub/logs/<project>/; that root now
 // belongs to the CLI's own diagnostic logs (lib/log.ts) and exports moved to
-// ~/.codev/agent-logs/<project>/. Relocate any legacy project folders once so
+// ~/.codev-hub/agent-logs/<project>/. Relocate any legacy project folders once so
 // prior exports don't sit orphaned inside the diagnostics dir. Only
 // directories are moved — files at the legacy root (codev-*.ndjson diagnostics
 // written by a newer run) are not export data. Best-effort throughout: a
@@ -147,7 +152,7 @@ export async function runExport(
 			// Surface where we looked. Detection misses are almost always a
 			// path-encoding mismatch (notably Windows project-dir munging), and the
 			// only way to debug that remotely is to see the exact path the provider
-			// inspected — so it goes in the message, visible in plain `codev logs`,
+			// inspected — so it goes in the message, visible in plain `codevhub logs`,
 			// not just behind --verbose.
 			const target = provider.describeTarget(cwd);
 			summary.targets.push({ agent: provider.agent, path: target });

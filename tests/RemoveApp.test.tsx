@@ -53,9 +53,10 @@ const SUCCESS_RESULT: remove.RemoveResult = {
 			detail: "nothing to restore",
 			status: "noop",
 		},
-		{ label: "~/.codev", detail: "removed /x/.codev", status: "ok" },
+		{ label: "~/.codev-hub", detail: "removed /x/.codev", status: "ok" },
 	],
 	anyFailed: false,
+	keptPaths: [],
 };
 
 const FAILED_RESULT: remove.RemoveResult = {
@@ -69,9 +70,10 @@ const FAILED_RESULT: remove.RemoveResult = {
 		},
 		{ label: "Codex config", detail: "nothing to restore", status: "noop" },
 		{ label: "OpenCode config", detail: "nothing to restore", status: "noop" },
-		{ label: "~/.codev", detail: "permission denied", status: "failed" },
+		{ label: "~/.codev-hub", detail: "permission denied", status: "failed" },
 	],
 	anyFailed: true,
+	keptPaths: [],
 };
 
 describe("RemoveApp", () => {
@@ -145,12 +147,32 @@ describe("RemoveApp", () => {
 				},
 			],
 			anyFailed: false,
+			keptPaths: [],
 		});
 		const { frames } = render(<RemoveApp skipConfirm />);
 		await waitForFrame(frames, "Removed successfully.");
 		const out = flat(history(frames));
 		expect(out).toContain("▲ CodeGraph: CodeGraph not available");
 		// A warning does not fail the remove — the success message still shows.
+		expect(out).toContain("Removed successfully.");
+	});
+
+	test("hints about backup-less config files that were left in place", async () => {
+		stubRunRemove({
+			...SUCCESS_RESULT,
+			keptPaths: [
+				"/x/.config/codev-code/opencode.json",
+				"/x/.claude/settings.json",
+			],
+		});
+		const { frames } = render(<RemoveApp skipConfirm />);
+		await waitForFrame(frames, "Removed successfully.");
+		const out = flat(history(frames));
+		expect(out).toContain("Left 2 config files in place (no backup");
+		expect(out).toContain("Delete manually for a clean state:");
+		expect(out).toContain("- /x/.config/codev-code/opencode.json");
+		expect(out).toContain("- /x/.claude/settings.json");
+		// The success message still shows alongside the hint.
 		expect(out).toContain("Removed successfully.");
 	});
 
@@ -161,7 +183,7 @@ describe("RemoveApp", () => {
 		const out = history(frames);
 		expect(out).toContain("Some steps failed:");
 		expect(out).toContain("Shims: boom");
-		expect(out).toContain("~/.codev: permission denied");
+		expect(out).toContain("~/.codev-hub: permission denied");
 		// noop/ok steps are not listed under the failure block.
 		expect(out).not.toContain("SSO: signed out");
 	});

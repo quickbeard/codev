@@ -81,7 +81,8 @@ export function ReadinessApp({
 			<Frame tag="AGENT READINESS">
 				{!hasAvailableAgent && (
 					<Text color="red">
-						No supported coding agent is available. Run `codev install` first.
+						No supported coding agent is available. Run `codevhub install`
+						first.
 					</Text>
 				)}
 				<Step

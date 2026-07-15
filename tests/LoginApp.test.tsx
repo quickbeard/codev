@@ -2,6 +2,7 @@ import { cleanup, render } from "ink-testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { LoginApp } from "@/LoginApp.js";
 import * as auth from "@/lib/auth.js";
+import * as skillhub from "@/lib/skillhub.js";
 
 afterEach(() => {
 	cleanup();
@@ -41,8 +42,8 @@ describe("LoginApp", () => {
 		await new Promise((r) => setTimeout(r, 200));
 
 		const history = allFrames(frames);
-		expect(history).toContain("Already logged in as test@example.com");
-		expect(history).toContain("✓ Logged in as test@example.com");
+		// <Login>'s completed state renders the green signed-in line.
+		expect(history).toContain("✓ Signed in as test@example.com");
 	});
 
 	test("refreshes the Supabase config with the new access token", async () => {
@@ -82,6 +83,46 @@ describe("LoginApp", () => {
 		// after logout() resolved but before React re-rendered and Login's
 		// effect fired login(). Poll until both have happened instead.
 		await vi.waitFor(() => expect(order).toEqual(["logout", "login"]));
+	});
+
+	test("non-interactive admin login signs in with the given credentials", async () => {
+		const signInSpy = vi.spyOn(skillhub, "skillhubSignIn").mockResolvedValue({
+			cookie: "skill-hub-session=abc",
+			user: { id: "a", username: "root", role: "SUPERADMIN" },
+		});
+		const saveSpy = vi
+			.spyOn(auth, "saveSkillhubCookie")
+			.mockImplementation(() => {});
+
+		const { frames } = render(
+			<LoginApp admin={true} username="  root  " password="secret " />,
+		);
+		await vi.waitFor(() =>
+			expect(allFrames(frames)).toContain("✓ Logged in as root (SUPERADMIN)"),
+		);
+
+		// Username is trimmed; password is passed through untouched.
+		expect(signInSpy).toHaveBeenCalledWith("root", "secret ");
+		expect(saveSpy).toHaveBeenCalledWith("skill-hub-session=abc");
+	});
+
+	test("non-interactive admin login surfaces a sign-in failure", async () => {
+		vi.spyOn(skillhub, "skillhubSignIn").mockRejectedValue(
+			new Error("Invalid username or password"),
+		);
+		const saveSpy = vi
+			.spyOn(auth, "saveSkillhubCookie")
+			.mockImplementation(() => {});
+
+		const { frames } = render(
+			<LoginApp admin={true} username="root" password="wrong" />,
+		);
+		await vi.waitFor(() =>
+			expect(allFrames(frames)).toContain(
+				"Login failed: Invalid username or password",
+			),
+		);
+		expect(saveSpy).not.toHaveBeenCalled();
 	});
 
 	test("force=true shows the signing-out step before mounting Login", async () => {

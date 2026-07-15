@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { claudeNativeBinaryMissing } from "@/lib/npm.js";
-import { runAgent, spawner } from "@/lib/run.js";
+import { agentOnPath, runAgent, spawner } from "@/lib/run.js";
 
 // Stub the native-binary probe so the runtime repair hint can be exercised
 // without a real npm-global Claude Code install. Defaults to "present" so
@@ -83,7 +83,7 @@ describe("runAgent", () => {
 			expect(
 				messages.some((m: string) =>
 					m.includes(
-						"could not be launched. If it isn't installed, run 'codev install'",
+						"could not be launched. If it isn't installed, run 'codevhub install'",
 					),
 				),
 			).toBe(true);
@@ -190,7 +190,7 @@ describe("runAgent", () => {
 		expect(stderr.some((m) => m.includes("native binary is missing"))).toBe(
 			true,
 		);
-		expect(stderr.some((m) => m.includes("codev install"))).toBe(true);
+		expect(stderr.some((m) => m.includes("codevhub install"))).toBe(true);
 	});
 
 	test("stays quiet when claude exits non-zero but the binary is present", async () => {
@@ -212,5 +212,59 @@ describe("runAgent", () => {
 		const { code } = await runWithFakeExit("codex", 1);
 		expect(code).toBe(1);
 		expect(claudeNativeBinaryMissing).not.toHaveBeenCalled();
+	});
+
+	// Capture the env runAgent hands to spawn. The options bag is always the
+	// last argument (3rd on POSIX, 2nd in the Windows single-string form).
+	function runCapturingEnv(
+		cmd: string,
+	): Promise<NodeJS.ProcessEnv | undefined> {
+		const fakeChild = new EventEmitter() as unknown as ChildProcess;
+		let env: NodeJS.ProcessEnv | undefined;
+		const spawnSpy = vi.spyOn(spawner, "spawn").mockImplementation(((
+			...args: unknown[]
+		) => {
+			env = (args[args.length - 1] as { env?: NodeJS.ProcessEnv }).env;
+			queueMicrotask(() => fakeChild.emit("exit", 0, null));
+			return fakeChild;
+		}) as unknown as typeof spawner.spawn);
+
+		return runAgent(cmd, [])
+			.then(() => env)
+			.finally(() => {
+				spawnSpy.mockRestore();
+			});
+	}
+
+	test("disables CoDev Code's self-updater via OPENCODE_DISABLE_AUTOUPDATE", async () => {
+		// The hub owns updates (`codevhub update`), so every launch of the agent
+		// must pin the kill switch on its own updater.
+		const env = await runCapturingEnv("codev");
+		expect(env?.OPENCODE_DISABLE_AUTOUPDATE).toBe("1");
+	});
+
+	test("does not set OPENCODE_DISABLE_AUTOUPDATE for the other agents", async () => {
+		// Guard against the parent process's own env leaking into the assertion.
+		vi.stubEnv("OPENCODE_DISABLE_AUTOUPDATE", undefined);
+		try {
+			for (const cmd of ["opencode", "claude", "codex"]) {
+				const env = await runCapturingEnv(cmd);
+				expect(env?.OPENCODE_DISABLE_AUTOUPDATE).toBeUndefined();
+			}
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+});
+
+describe("agentOnPath", () => {
+	test("finds an executable that is on PATH", () => {
+		// The test runner itself is a node process, so `node` (node.exe's
+		// resolution goes through PATHEXT on Windows) must be findable.
+		expect(agentOnPath("node")).toBe(true);
+	});
+
+	test("returns false for a binary that does not exist", () => {
+		expect(agentOnPath("codev-definitely-not-installed-xyzzy")).toBe(false);
 	});
 });

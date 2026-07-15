@@ -12,7 +12,7 @@ import {
 // hosted success page, which shows their authorization code with a "Copy code"
 // button; they paste that code here. (A full callback URL still works too —
 // submitManualCode accepts either.) Both <Login> (install/config) and
-// <UploadApp> (codev upload) drive the same auth.login() submitManualCode
+// <UploadApp> (codevhub upload) drive the same auth.login() submitManualCode
 // closure, so they share this hook and the matching <PasteBackPrompt> renderer.
 
 export interface PasteBack {

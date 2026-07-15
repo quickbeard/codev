@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { diffFromEditInput, diffFromWriteContent } from "@/lib/diff.js";
 import { codeFence } from "@/lib/markdown.js";
-import type { Message, Provider, Session } from "@/providers/types.js";
+import type { Agent, Message, Provider, Session } from "@/providers/types.js";
 
 interface Stmt<P extends unknown[], R> {
 	get(...args: P): R | undefined;
@@ -38,14 +38,16 @@ async function openDb(path: string): Promise<DB> {
 	};
 }
 
-function dataDir(): string {
+function dataDir(app: string): string {
 	const xdg = process.env.XDG_DATA_HOME;
-	if (xdg) return join(xdg, "opencode");
-	return join(homedir(), ".local", "share", "opencode");
+	if (xdg) return join(xdg, app);
+	return join(homedir(), ".local", "share", app);
 }
 
-function dbPath(): string {
-	return join(dataDir(), "opencode.db");
+// The codev-code fork keeps the `opencode.db` filename; only the app dir
+// segment differs (its `Global.Path` constant is "codev-code").
+function dbPath(app: string): string {
+	return join(dataDir(app), "opencode.db");
 }
 
 function canonical(p: string): string {
@@ -54,6 +56,23 @@ function canonical(p: string): string {
 	} catch {
 		return p;
 	}
+}
+
+// OpenCode records project/session paths POSIX-style — forward slashes even on
+// Windows (e.g. it stores "C:/Users/me/project" while Node's realpathSync
+// returns "C:\\Users\\me\\project"). It can also capture a different
+// drive-letter case than the shell the user later runs `codevhub upload` from. A
+// raw `worktree = ?` / `directory = ?` equality check therefore misses, and the
+// provider reports "No conversations found" for a project that was in fact used.
+// Normalize both sides for comparison: unify separators, uppercase a leading
+// drive letter, and NFC-normalize Unicode. This is match-only — the actual
+// stored string is still used for the follow-up session query so it stays exact.
+function normalizePathForMatch(p: string): string {
+	const unified = p.normalize("NFC").replace(/\\/g, "/");
+	return unified.replace(
+		/^([a-zA-Z]):/,
+		(_m, drive: string) => `${drive.toUpperCase()}:`,
+	);
 }
 
 interface ProjectMatch {
@@ -94,21 +113,37 @@ interface PartRow {
 // sessions under a "global" project, distinguished by the session's own
 // `directory` column.
 function resolveProject(db: DB, cwd: string): ProjectMatch | null {
-	const target = canonical(cwd);
-	const direct = db
-		.prepare<[string], { id: string }>(
-			"SELECT id FROM project WHERE worktree = ?",
-		)
-		.get(target);
-	if (direct?.id) return { projectId: direct.id, directoryFilter: "" };
+	const target = normalizePathForMatch(canonical(cwd));
 
-	const fallback = db
-		.prepare<[string], { count: number }>(
-			"SELECT COUNT(*) as count FROM session WHERE project_id = 'global' AND directory = ?",
+	// Compare normalized worktrees in JS rather than via `worktree = ?` — the
+	// stored value may use forward slashes / a different drive-letter case than
+	// realpathSync yields. The project table is tiny, so scanning it is cheap.
+	const projects = db
+		.prepare<[], { id: string; worktree: string | null }>(
+			"SELECT id, worktree FROM project",
 		)
-		.get(target);
-	if (fallback && fallback.count > 0) {
-		return { projectId: "global", directoryFilter: target };
+		.all();
+	for (const project of projects) {
+		if (
+			project.worktree &&
+			normalizePathForMatch(project.worktree) === target
+		) {
+			return { projectId: project.id, directoryFilter: "" };
+		}
+	}
+
+	// Global fallback: VCS-less sessions live under project_id='global',
+	// distinguished by their own `directory`. Match on the normalized form but
+	// return the exact stored string so the follow-up session query stays exact.
+	const globalDirs = db
+		.prepare<[], { directory: string | null }>(
+			"SELECT DISTINCT directory FROM session WHERE project_id = 'global'",
+		)
+		.all();
+	for (const row of globalDirs) {
+		if (row.directory && normalizePathForMatch(row.directory) === target) {
+			return { projectId: "global", directoryFilter: row.directory };
+		}
 	}
 	return null;
 }
@@ -418,6 +453,7 @@ function buildSession(
 	row: SessionRow,
 	db: DB,
 	hasParentId: boolean,
+	agent: Agent,
 ): Session | null {
 	const messages: Message[] = [];
 	let firstUserMessage = "";
@@ -461,7 +497,7 @@ function buildSession(
 
 	return {
 		id: row.id,
-		agent: "opencode",
+		agent,
 		createdAt: createdMs ? new Date(createdMs) : new Date(),
 		updatedAt: updatedMs ? new Date(updatedMs) : undefined,
 		title: row.title || undefined,
@@ -473,53 +509,62 @@ function buildSession(
 	};
 }
 
-export const openCodeProvider: Provider = {
-	agent: "opencode",
+// One implementation serves both OpenCode and the codev-code fork: they share
+// the storage schema, differing only in which XDG app dir holds opencode.db.
+export function createOpenCodeProvider(agent: Agent, app: string): Provider {
+	return {
+		agent,
 
-	// OpenCode stores all sessions in a single SQLite db, keyed by project path
-	// inside the db rather than by folder — the db file is the location to report.
-	describeTarget(_cwd: string): string {
-		return dbPath();
-	},
+		// OpenCode stores all sessions in a single SQLite db, keyed by project path
+		// inside the db rather than by folder — the db file is the location to report.
+		describeTarget(_cwd: string): string {
+			return dbPath(app);
+		},
 
-	async detect(cwd: string): Promise<boolean> {
-		const path = dbPath();
-		if (!existsSync(path)) return false;
-		let db: DB | null = null;
-		try {
-			db = await openDb(path);
-			const match = resolveProject(db, cwd);
-			if (!match) return false;
-			const rows = listSessionRows(db, match, sessionHasParentId(db));
-			return rows.length > 0;
-		} catch {
-			return false;
-		} finally {
-			db?.close();
-		}
-	},
-
-	async listSessions(cwd: string): Promise<Session[]> {
-		const path = dbPath();
-		if (!existsSync(path)) return [];
-		const db = await openDb(path);
-		try {
-			const match = resolveProject(db, cwd);
-			if (!match) return [];
-			const hasParentId = sessionHasParentId(db);
-			const rows = listSessionRows(db, match, hasParentId);
-			const sessions: Session[] = [];
-			for (const row of rows) {
-				try {
-					const session = buildSession(row, db, hasParentId);
-					if (session) sessions.push(session);
-				} catch {
-					// Skip malformed sessions.
-				}
+		async detect(cwd: string): Promise<boolean> {
+			const path = dbPath(app);
+			if (!existsSync(path)) return false;
+			let db: DB | null = null;
+			try {
+				db = await openDb(path);
+				const match = resolveProject(db, cwd);
+				if (!match) return false;
+				const rows = listSessionRows(db, match, sessionHasParentId(db));
+				return rows.length > 0;
+			} catch {
+				return false;
+			} finally {
+				db?.close();
 			}
-			return sessions;
-		} finally {
-			db.close();
-		}
-	},
-};
+		},
+
+		async listSessions(cwd: string): Promise<Session[]> {
+			const path = dbPath(app);
+			if (!existsSync(path)) return [];
+			const db = await openDb(path);
+			try {
+				const match = resolveProject(db, cwd);
+				if (!match) return [];
+				const hasParentId = sessionHasParentId(db);
+				const rows = listSessionRows(db, match, hasParentId);
+				const sessions: Session[] = [];
+				for (const row of rows) {
+					try {
+						const session = buildSession(row, db, hasParentId, agent);
+						if (session) sessions.push(session);
+					} catch {
+						// Skip malformed sessions.
+					}
+				}
+				return sessions;
+			} finally {
+				db.close();
+			}
+		},
+	};
+}
+
+export const openCodeProvider: Provider = createOpenCodeProvider(
+	"opencode",
+	"opencode",
+);

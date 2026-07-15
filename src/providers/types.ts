@@ -1,7 +1,12 @@
-export type Agent = "claude-code" | "codex" | "opencode";
+export type Agent = "claude-code" | "codex" | "opencode" | "codev-code";
 
 // Canonical display order shared by export and upload flows.
-export const AGENTS: Agent[] = ["claude-code", "codex", "opencode"];
+export const AGENTS: Agent[] = [
+	"claude-code",
+	"codex",
+	"opencode",
+	"codev-code",
+];
 
 export interface Message {
 	role: "user" | "assistant";
@@ -38,7 +43,7 @@ export interface Provider {
 	 * Human-readable filesystem location this provider inspects for `cwd` — the
 	 * project session dir (Claude Code), the sessions root (Codex), or the db
 	 * file (OpenCode). Surfaced in the "inactive for this project" log so a user
-	 * (or we, reading their `codev logs`) can see exactly where detection looked
+	 * (or we, reading their `codevhub logs`) can see exactly where detection looked
 	 * and compare it against what's actually on disk. Pure path computation, no
 	 * I/O — safe to call even when detect() returned false.
 	 */

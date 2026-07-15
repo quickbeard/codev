@@ -13,7 +13,7 @@ export const CLAUDE_CODE_EXTENSION_ID = "anthropic.claude-code";
 // install flow continue; the per-tool config file is the source of truth and
 // Configure surfaces the warning to the user with a manual-install hint. We
 // never want a transient extension-install failure to abort the entire
-// `codev install` flow.
+// `codevhub install` flow.
 export type InstallExtensionResult = null | { warning: string };
 
 async function installExtension(
@@ -39,7 +39,7 @@ export function installClaudeCodeExtension(): Promise<InstallExtensionResult> {
 	return installExtension(CLAUDE_CODE_EXTENSION_ID);
 }
 
-// Whether `code` resolves on PATH. Used by `codev update` to decide
+// Whether `code` resolves on PATH. Used by `codevhub update` to decide
 // whether to schedule the VS Code extension update — if the launcher
 // isn't there, CoDev has nothing to update (the user never had us
 // auto-install in the first place, or has since removed the CLI).
