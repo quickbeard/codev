@@ -8,9 +8,16 @@ type Phase = "confirm" | "running" | "done" | "aborted";
 
 interface RemoveAppProps {
 	skipConfirm?: boolean;
+	// Undocumented escape hatch (`--force`): deletes backup-less configs whoever
+	// wrote them, instead of preserving the ones that aren't CoDev's. Not in
+	// help.ts and intentionally unadvertised, so the only way here is to type it.
+	force?: boolean;
 }
 
-export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
+export function RemoveApp({
+	skipConfirm = false,
+	force = false,
+}: RemoveAppProps) {
 	const { exit } = useApp();
 	const [phase, setPhase] = useState<Phase>(
 		skipConfirm ? "running" : "confirm",
@@ -21,7 +28,7 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 	const start = useCallback(() => {
 		if (hasRun.current) return;
 		hasRun.current = true;
-		runRemove()
+		runRemove(force)
 			.then((r) => {
 				setResult(r);
 				setPhase("done");
@@ -40,7 +47,7 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 				});
 				setPhase("done");
 			});
-	}, []);
+	}, [force]);
 
 	useEffect(() => {
 		if (phase === "running") start();

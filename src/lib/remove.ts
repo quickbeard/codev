@@ -70,14 +70,14 @@ const TOOL_LABEL: Record<Tool, string> = {
 // the final writer on the files it owns, while CodeGraph still cleans the
 // files codev doesn't (e.g. opencode.jsonc); it's best-effort and never fails
 // the remove.
-export async function runRemove(): Promise<RemoveResult> {
+export async function runRemove(force = false): Promise<RemoveResult> {
 	const steps: StepResult[] = [];
 
 	steps.push(recordStep(await runLogout()));
 	steps.push(recordStep(runUnhook()));
 	steps.push(recordStep(await runCodegraphRemoval()));
 	for (const tool of TOOLS) {
-		steps.push(recordStep(runRestoreOrKeep(tool)));
+		steps.push(recordStep(runRestoreOrKeep(tool, force)));
 	}
 	steps.push(recordStep(runWipeCodevDir()));
 
@@ -167,10 +167,10 @@ function runUnhook(): StepResult {
 	}
 }
 
-function runRestoreOrKeep(tool: Tool): StepResult {
+function runRestoreOrKeep(tool: Tool, force = false): StepResult {
 	const label = TOOL_LABEL[tool];
 	try {
-		const results = restoreTool(tool);
+		const results = restoreTool(tool, force);
 		// Single-file tools surface their per-file message verbatim. Claude
 		// returns three results; we roll them up into one counts-based detail
 		// since the per-file noise would otherwise overwhelm the remove view.
@@ -189,7 +189,9 @@ function runRestoreOrKeep(tool: Tool): StepResult {
 				case "deleted":
 					return {
 						label,
-						detail: `no backup; deleted CoDev's ${result.sourcePath}`,
+						detail: result.forced
+							? `no backup; force-deleted ${result.sourcePath} (not CoDev's)`
+							: `no backup; deleted CoDev's ${result.sourcePath}`,
 						status: "ok",
 					};
 				case "kept-live":
@@ -205,12 +207,15 @@ function runRestoreOrKeep(tool: Tool): StepResult {
 		}
 		let restored = 0;
 		let deleted = 0;
+		let forced = 0;
 		let noop = 0;
 		const keptPaths: string[] = [];
 		for (const r of results) {
 			if (r.status === "restored") restored++;
-			else if (r.status === "deleted") deleted++;
-			else if (r.status === "kept-live") keptPaths.push(r.sourcePath);
+			else if (r.status === "deleted") {
+				deleted++;
+				if (r.forced) forced++;
+			} else if (r.status === "kept-live") keptPaths.push(r.sourcePath);
 			else noop++;
 		}
 		const kept = keptPaths.length;
@@ -220,10 +225,14 @@ function runRestoreOrKeep(tool: Tool): StepResult {
 		const parts: string[] = [];
 		if (restored > 0)
 			parts.push(`restored ${restored} file${restored === 1 ? "" : "s"}`);
-		if (deleted > 0)
+		if (deleted > 0) {
+			// Count force-deleted files separately: those weren't CoDev's, so
+			// folding them into the plain total would overstate what we owned.
+			const suffix = forced > 0 ? `, ${forced} forced` : "";
 			parts.push(
-				`deleted ${deleted} file${deleted === 1 ? "" : "s"} (no backup)`,
+				`deleted ${deleted} file${deleted === 1 ? "" : "s"} (no backup${suffix})`,
 			);
+		}
 		if (kept > 0)
 			parts.push(`kept ${kept} of your file${kept === 1 ? "" : "s"}`);
 		if (noop > 0) parts.push(`${noop} already clean`);

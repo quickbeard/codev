@@ -343,6 +343,74 @@ describe("runRestore", () => {
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
+	test("force deletes a live user-written config that the gate would keep", () => {
+		const livePath = seedUserConfig(".codex/config.toml", 'model = "gpt-5"\n');
+
+		const code = runRestore("codex", true);
+
+		expect(code).toBe(0);
+		expect(existsSync(livePath)).toBe(false);
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		// The default message claims CoDev authorship, which is false here — a
+		// forced delete has to say what actually happened.
+		expect(logs).toContain(
+			`Deleted ${livePath}; no backup exists and CoDev did not write it (forced).`,
+		);
+	});
+
+	test("force still restores from a backup rather than deleting", () => {
+		const { livePath, backupPath } = seedBackup(
+			".codex/config.toml",
+			"my-original",
+		);
+		writeFileSync(livePath, 'model = "codev-wrote-this"\n');
+
+		const code = runRestore("codex", true);
+
+		expect(code).toBe(0);
+		// force skips the authorship gate, not the backup branch: the user's
+		// pre-CoDev original is still reinstated.
+		expect(existsSync(livePath)).toBe(true);
+		expect(JSON.parse(readFileSync(livePath, "utf-8")).marker).toBe(
+			"my-original",
+		);
+		expect(existsSync(backupPath)).toBe(false);
+	});
+
+	test("force reports a CoDev-authored delete as ours, not as forced", () => {
+		configureCodex(CODEV_CREDS);
+		const livePath = join(tempDir, ".codex", "config.toml");
+
+		expect(runRestore("codex", true)).toBe(0);
+
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(logs).toContain(
+			`Deleted ${livePath}; CoDev wrote it and no backup exists, so nothing preceded it.`,
+		);
+	});
+
+	// Regression: restoreTool maps over CLAUDE_RESTORE_KINDS, and a bare
+	// `.map(restoreKind)` would pass the array index into `force` — silently
+	// forcing every kind after the first.
+	test("without force, the Claude bundle keeps all three user files", () => {
+		const settings = seedUserConfig(
+			".claude/settings.json",
+			'{"marker":"user"}',
+		);
+		const claudeJson = seedUserConfig(
+			".claude.json",
+			'{"projects":{"/a":{}},"hasCompletedOnboarding":true}',
+		);
+		const creds = seedUserConfig(".claude/.credentials.json", "{}");
+		// .credentials.json is always treated as CoDev's, so it goes regardless;
+		// the other two must survive.
+		expect(runRestore("claude-code")).toBe(0);
+
+		expect(existsSync(settings)).toBe(true);
+		expect(existsSync(claudeJson)).toBe(true);
+		expect(existsSync(creds)).toBe(false);
+	});
+
 	// The gate's whole reason for existing: restore consumes the backup, so a
 	// second run sees "no backup + live file" — and that live file is the user's
 	// pristine original, which the first run just reinstated. Deleting it here

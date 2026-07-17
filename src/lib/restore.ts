@@ -40,8 +40,12 @@ function reportRestoreResult(result: RestoreResult): void {
 			console.log(`Restored ${result.sourcePath} from ${result.backupPath}.`);
 			return;
 		case "deleted":
+			// The normal message asserts CoDev authorship, which is exactly what a
+			// forced delete can't claim — say what actually happened instead.
 			console.log(
-				`Deleted ${result.sourcePath}; CoDev wrote it and no backup exists, so nothing preceded it.`,
+				result.forced
+					? `Deleted ${result.sourcePath}; no backup exists and CoDev did not write it (forced).`
+					: `Deleted ${result.sourcePath}; CoDev wrote it and no backup exists, so nothing preceded it.`,
 			);
 			return;
 		case "kept-live":
@@ -63,8 +67,8 @@ function reportRestoreResult(result: RestoreResult): void {
 	}
 }
 
-export function runRestore(tool: Tool): number {
-	const results = restoreTool(tool);
+export function runRestore(tool: Tool, force = false): number {
+	const results = restoreTool(tool, force);
 	for (const result of results) {
 		reportRestoreResult(result);
 	}
@@ -90,14 +94,14 @@ const SWEEP_TOOLS: Tool[] = [
 // tools (claude-code contributes three results, the others one). Exit 1 if
 // nothing changed (every result was kept-live or noop) or any tool threw;
 // otherwise 0.
-export function runRestoreAll(): number {
+export function runRestoreAll(force = false): number {
 	let acted = 0;
 	let failed = 0;
 	let noop = 0;
 
 	for (const tool of SWEEP_TOOLS) {
 		try {
-			const results = restoreTool(tool);
+			const results = restoreTool(tool, force);
 			for (const result of results) {
 				reportRestoreResult(result);
 				// Restoring a backup and deleting a CoDev-written config both revert

@@ -664,6 +664,10 @@ export interface RestoreResult {
 	status: RestoreStatus;
 	sourcePath: string;
 	backupPath: string;
+	// Set on `deleted` only, and only when the file was removed *despite* not
+	// looking CoDev-authored — i.e. `force` overrode the gate. Lets callers say
+	// what actually happened instead of claiming CoDev wrote the file.
+	forced?: boolean;
 }
 
 // "Make this file look pre-CoDev." Four terminal states:
@@ -682,14 +686,23 @@ export interface RestoreResult {
 // run just reinstated, or that the user hand-wrote a config for a tool CoDev
 // never configured (both `remove` and the bare `restore` sweep visit every
 // tool). Only the first case is ours to delete.
-function restoreKind(kind: BackupKind): RestoreResult {
+// `force` bypasses the authorship gate, so a backup-less live file is deleted
+// whoever wrote it and `kept-live` never happens. It deliberately does NOT touch
+// the backup branch: a `*.backup` still wins and is still restored, because that
+// file is the user's pre-CoDev original and reinstating it is the whole point.
+function restoreKind(kind: BackupKind, force = false): RestoreResult {
 	const sourcePath = sourcePathOf(kind);
 	const backupPath = `${sourcePath}.backup`;
 
 	const log = (result: RestoreResult): RestoreResult => {
 		logInfo(`restore ${kind}: ${result.status}`, {
 			action: "restore.kind",
-			extra: { kind, status: result.status, source_path: result.sourcePath },
+			extra: {
+				kind,
+				status: result.status,
+				source_path: result.sourcePath,
+				forced: result.forced === true,
+			},
 		});
 		return result;
 	};
@@ -701,9 +714,17 @@ function restoreKind(kind: BackupKind): RestoreResult {
 	}
 
 	if (existsSync(sourcePath)) {
-		if (isCodevAuthored(kind)) {
+		// Evaluated even under force, so the result can tell "this was ours" apart
+		// from "force took a file that wasn't" instead of misreporting the latter.
+		const authored = isCodevAuthored(kind);
+		if (authored || force) {
 			rmSync(sourcePath, { force: true });
-			return log({ status: "deleted", sourcePath, backupPath });
+			return log({
+				status: "deleted",
+				sourcePath,
+				backupPath,
+				forced: !authored,
+			});
 		}
 		return log({ status: "kept-live", sourcePath, backupPath });
 	}
@@ -720,15 +741,17 @@ const CLAUDE_RESTORE_KINDS: BackupKind[] = [
 	"claude-credentials",
 ];
 
-export function restoreTool(tool: Tool): RestoreResult[] {
+export function restoreTool(tool: Tool, force = false): RestoreResult[] {
 	if (
 		tool === "claude-code" ||
 		tool === "vscode-claude-code" ||
 		tool === "jetbrains-claude-code"
 	) {
-		return CLAUDE_RESTORE_KINDS.map(restoreKind);
+		// Not a bare `.map(restoreKind)`: map's second arg is the index, which
+		// would land in `force` and silently force every kind after the first.
+		return CLAUDE_RESTORE_KINDS.map((kind) => restoreKind(kind, force));
 	}
-	return [restoreKind(kindForTool(tool))];
+	return [restoreKind(kindForTool(tool), force)];
 }
 
 export function configureCodex(creds: Credentials): ConfigureResult[] {

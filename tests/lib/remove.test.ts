@@ -153,6 +153,42 @@ describe("runRemove", () => {
 		expect(result.keptPaths).toContain(join(tempDir, ".claude/settings.json"));
 	});
 
+	test("force: deletes a live user config the gate would otherwise keep", async () => {
+		stubFetchOk();
+		seedFile(".claude/settings.json", '{"marker":"user-authored"}');
+
+		const result = await runRemove(true);
+
+		expect(result.anyFailed).toBe(false);
+		expect(existsSync(join(tempDir, ".claude/settings.json"))).toBe(false);
+		const claudeStep = result.steps.find((s) => s.label.startsWith("Claude"));
+		expect(claudeStep?.status).toBe("ok");
+		// Reported as forced, so the count doesn't imply the file was CoDev's.
+		expect(claudeStep?.detail).toMatch(
+			/deleted 1 file \(no backup, 1 forced\)/,
+		);
+		// Nothing was preserved, so there's nothing to list as kept.
+		expect(result.keptPaths).toEqual([]);
+	});
+
+	test("force: still restores from a backup instead of deleting", async () => {
+		stubFetchOk();
+		seedFile(".config/codev/codev.json", '{"live":true}');
+		seedFile(".config/codev/codev.json.backup", '{"original":"codev-code"}');
+
+		const result = await runRemove(true);
+
+		expect(result.anyFailed).toBe(false);
+		// force skips the authorship gate, never the backup branch.
+		expect(
+			JSON.parse(
+				readFileSync(join(tempDir, ".config/codev/codev.json"), "utf-8"),
+			),
+		).toEqual({ original: "codev-code" });
+		const step = result.steps.find((s) => s.label === "CoDev Code config");
+		expect(step?.detail).toContain("restored from");
+	});
+
 	test("no backup and no live config: reports nothing-to-restore as noop", async () => {
 		stubFetchOk();
 
