@@ -601,7 +601,7 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 	return [{ kind: "claude-settings", sourcePath, backupPath, created }];
 }
 
-export type RestoreStatus = "restored" | "kept-live" | "noop";
+export type RestoreStatus = "restored" | "deleted-live" | "noop";
 
 export interface RestoreResult {
 	status: RestoreStatus;
@@ -612,9 +612,11 @@ export interface RestoreResult {
 // "Make this file look pre-CoDev." Three terminal states:
 //   - backup present → swap it over the live file (the user's pre-CoDev
 //     state is reinstated).
-//   - no backup, but a live file exists → leave the live file untouched. With
-//     no backup we can't know what (if anything) preceded CoDev, so we don't
-//     destroy the current config; the user can remove it by hand if they want.
+//   - no backup, but a live file exists → delete the live file. CoDev only
+//     skips the backup step when there was nothing to back up in the first
+//     place, so any live file here is post-CoDev (CoDev-authored, or created
+//     by the tool after CoDev wiped it); removing it lands the user at
+//     "no file", which IS the pre-CoDev state.
 //   - neither file exists → noop; already at pre-CoDev state.
 function restoreKind(kind: BackupKind): RestoreResult {
 	const sourcePath = sourcePathOf(kind);
@@ -635,7 +637,8 @@ function restoreKind(kind: BackupKind): RestoreResult {
 	}
 
 	if (existsSync(sourcePath)) {
-		return log({ status: "kept-live", sourcePath, backupPath });
+		rmSync(sourcePath, { force: true });
+		return log({ status: "deleted-live", sourcePath, backupPath });
 	}
 
 	return log({ status: "noop", sourcePath, backupPath });

@@ -96,7 +96,7 @@ describe("runRestore", () => {
 		).toBe(true);
 	});
 
-	test("keeps the live CoDev config when no backup exists for Claude", () => {
+	test("deletes the live CoDev config when no backup exists for Claude", () => {
 		const livePath = join(tempDir, ".claude", "settings.json");
 		mkdirSync(join(livePath, ".."), { recursive: true });
 		writeFileSync(livePath, '{"marker":"codev-live"}');
@@ -104,11 +104,9 @@ describe("runRestore", () => {
 		const code = runRestore("claude-code");
 
 		expect(code).toBe(0);
-		expect(existsSync(livePath)).toBe(true);
+		expect(existsSync(livePath)).toBe(false);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-		expect(logs).toContain(
-			`No backup at ${livePath}.backup; left ${livePath} in place.`,
-		);
+		expect(logs).toContain(`No backup at ${livePath}.backup.`);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
@@ -128,7 +126,7 @@ describe("runRestore", () => {
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
-	test("keeps the live CoDev config when no backup exists for OpenCode", () => {
+	test("deletes the live CoDev config when no backup exists for OpenCode", () => {
 		const livePath = join(tempDir, ".config", "opencode", "opencode.json");
 		mkdirSync(join(livePath, ".."), { recursive: true });
 		writeFileSync(livePath, '{"marker":"codev-live"}');
@@ -136,11 +134,9 @@ describe("runRestore", () => {
 		const code = runRestore("opencode");
 
 		expect(code).toBe(0);
-		expect(existsSync(livePath)).toBe(true);
+		expect(existsSync(livePath)).toBe(false);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-		expect(logs).toContain(
-			`No backup at ${livePath}.backup; left ${livePath} in place.`,
-		);
+		expect(logs).toContain(`No backup at ${livePath}.backup.`);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
@@ -190,7 +186,7 @@ describe("runRestore", () => {
 		).toBe(true);
 	});
 
-	test("keeps the live CoDev config when no backup exists for Codex", () => {
+	test("deletes the live CoDev config when no backup exists for Codex", () => {
 		const livePath = join(tempDir, ".codex", "config.toml");
 		mkdirSync(join(livePath, ".."), { recursive: true });
 		writeFileSync(livePath, 'marker = "codev-live"\n');
@@ -198,11 +194,9 @@ describe("runRestore", () => {
 		const code = runRestore("codex");
 
 		expect(code).toBe(0);
-		expect(existsSync(livePath)).toBe(true);
+		expect(existsSync(livePath)).toBe(false);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-		expect(logs).toContain(
-			`No backup at ${livePath}.backup; left ${livePath} in place.`,
-		);
+		expect(logs).toContain(`No backup at ${livePath}.backup.`);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
@@ -229,7 +223,7 @@ describe("runRestore", () => {
 		).toBe(true);
 	});
 
-	test("keeps the live CoDev config when no backup exists for VS Code/Continue", () => {
+	test("deletes the live CoDev config when no backup exists for VS Code/Continue", () => {
 		const livePath = join(tempDir, ".continue", "config.yaml");
 		mkdirSync(join(livePath, ".."), { recursive: true });
 		writeFileSync(livePath, 'name: "codev-live"\n');
@@ -237,11 +231,9 @@ describe("runRestore", () => {
 		const code = runRestore("vscode-continue");
 
 		expect(code).toBe(0);
-		expect(existsSync(livePath)).toBe(true);
+		expect(existsSync(livePath)).toBe(false);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-		expect(logs).toContain(
-			`No backup at ${livePath}.backup; left ${livePath} in place.`,
-		);
+		expect(logs).toContain(`No backup at ${livePath}.backup.`);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 });
@@ -310,9 +302,9 @@ describe("runRestoreAll", () => {
 		).toHaveLength(7);
 	});
 
-	test("keeps live CoDev configs for tools without a backup", () => {
+	test("deletes live CoDev configs for tools without a backup", () => {
 		// One tool with a backup, one with only a live CoDev config, two with
-		// neither. The sweep should restore the first, keep the second in place,
+		// neither. The sweep should restore the first, delete-live the second,
 		// noop the rest.
 		const claude = seedBackup(".claude/settings.json", "c");
 		const opencodeLive = join(tempDir, ".config", "opencode", "opencode.json");
@@ -323,8 +315,7 @@ describe("runRestoreAll", () => {
 
 		expect(code).toBe(0);
 		expect(existsSync(claude.backupPath)).toBe(false);
-		// No backup for OpenCode, so its live config is left untouched.
-		expect(existsSync(opencodeLive)).toBe(true);
+		expect(existsSync(opencodeLive)).toBe(false);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
 		expect(logs.filter((l: string) => l.startsWith("Restored "))).toHaveLength(
 			1,
