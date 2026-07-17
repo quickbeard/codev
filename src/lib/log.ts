@@ -9,6 +9,40 @@ import {
 import { join } from "node:path";
 import { VERSION } from "@/lib/const.js";
 import { cliLogsDir } from "@/lib/paths.js";
+import { applySystemCaCertsOnce, isCertError } from "@/lib/tls.js";
+
+// Runs a request, and if it fails because the certificate chain isn't trusted,
+// merges the OS trust store into Node's defaults and tries once more.
+//
+// Node ignores the OS store, so a user behind a TLS-intercepting proxy fails
+// every request while their browser works (see lib/tls.ts). Recovering *here*,
+// on the failure, rather than merging up-front, is what keeps the cost off the
+// happy path: the OS-store read is synchronous and blocks the event loop for
+// ~300ms on Windows, which is enough to stall Ink's render timers.
+//
+// At most one retry per process: applySystemCaCertsOnce returns null once it has
+// run, so a chain that stays untrusted surfaces its error instead of looping.
+// Safe to replay — a TLS handshake fails before any body is sent, and every
+// call site passes a replayable body (string/URLSearchParams/FormData/Buffer),
+// never a stream.
+async function fetchTrustingSystemCa(
+	input: string | URL,
+	init: RequestInit | undefined,
+	endpoint: string,
+): Promise<Response> {
+	try {
+		return await fetch(input, init);
+	} catch (err) {
+		if (!isCertError(err)) throw err;
+		const ca = applySystemCaCertsOnce();
+		if (ca?.status !== "merged") throw err;
+		logInfo("certificate chain untrusted; retrying with the OS CA store", {
+			action: "http.request",
+			extra: { endpoint, ca_system_count: ca.systemCount },
+		});
+		return await fetch(input, init);
+	}
+}
 
 // CoDev's local diagnostic log: one Elastic-Common-Schema NDJSON document per
 // line, written to ~/.codev-hub/logs/codev-YYYYMMDD.ndjson (UTC date). The files
@@ -276,7 +310,7 @@ export async function loggedFetch(
 	});
 	const startedAt = Date.now();
 	try {
-		const res = await fetch(input, init);
+		const res = await fetchTrustingSystemCa(input, init, endpoint);
 		const durationMs = Date.now() - startedAt;
 		if (res.ok) {
 			logDebug(`http ${method} ${endpoint} → ${res.status}`, {
