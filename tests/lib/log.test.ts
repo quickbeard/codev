@@ -27,6 +27,7 @@ import {
 } from "@/lib/log.js";
 import { execAsync } from "@/lib/npm.js";
 import { runAgent, spawner as runSpawner } from "@/lib/run.js";
+import { resetSystemCaCertsCache, tlsApi } from "@/lib/tls.js";
 
 let tempDir: string;
 let logDir: string;
@@ -333,6 +334,88 @@ describe("pruneLogs", () => {
 
 	test("is a no-op on a missing directory", () => {
 		expect(() => pruneLogs(join(tempDir, "absent"))).not.toThrow();
+	});
+});
+
+describe("loggedFetch system-CA recovery", () => {
+	function certFailure(): Error {
+		const err = new TypeError("fetch failed");
+		const cause: NodeJS.ErrnoException = new Error(
+			"self-signed certificate in certificate chain",
+		);
+		cause.code = "SELF_SIGNED_CERT_IN_CHAIN";
+		err.cause = cause;
+		return err;
+	}
+
+	// This file's top-level afterEach doesn't restore mocks, so the fetch/tls
+	// spies below would otherwise leak into the next case's call counts.
+	afterEach(() => {
+		resetSystemCaCertsCache();
+		vi.restoreAllMocks();
+	});
+
+	// The regression that broke Windows CI: reading the OS store is a synchronous
+	// ~300ms stall there, so a request that succeeds must never touch it.
+	test("does not read the OS store on the happy path", async () => {
+		const get = vi.spyOn(tlsApi, "getCACertificates");
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"));
+
+		await loggedFetch("backend.config", "https://x.test/");
+
+		expect(get).not.toHaveBeenCalled();
+	});
+
+	test("merges the OS store and retries once after a cert failure", async () => {
+		vi.spyOn(tlsApi, "getCACertificates").mockImplementation((type) =>
+			type === "system" ? ["sys"] : ["def"],
+		);
+		vi.spyOn(tlsApi, "setDefaultCACertificates").mockImplementation(() => {});
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockRejectedValueOnce(certFailure())
+			.mockResolvedValueOnce(new Response("ok", { status: 200 }));
+
+		const res = await loggedFetch("sso.token", "https://x.test/");
+
+		expect(res.status).toBe(200);
+		expect(fetchSpy).toHaveBeenCalledTimes(2);
+	});
+
+	test("gives up after one retry when the chain stays untrusted", async () => {
+		vi.spyOn(tlsApi, "getCACertificates").mockImplementation((type) =>
+			type === "system" ? ["sys"] : ["def"],
+		);
+		vi.spyOn(tlsApi, "setDefaultCACertificates").mockImplementation(() => {});
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockRejectedValue(certFailure());
+
+		await expect(loggedFetch("sso.token", "https://x.test/")).rejects.toThrow(
+			"fetch failed",
+		);
+		expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+		// A second request must not re-read the store or retry again — the merge
+		// already happened and didn't help.
+		fetchSpy.mockClear();
+		await expect(loggedFetch("sso.token", "https://x.test/")).rejects.toThrow(
+			"fetch failed",
+		);
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+	});
+
+	test("does not retry a non-certificate failure", async () => {
+		const err = new TypeError("fetch failed");
+		const cause: NodeJS.ErrnoException = new Error("getaddrinfo ENOTFOUND");
+		cause.code = "ENOTFOUND";
+		err.cause = cause;
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(err);
+
+		await expect(loggedFetch("sso.token", "https://x.test/")).rejects.toThrow(
+			"fetch failed",
+		);
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
 	});
 });
 

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+	applySystemCaCertsOnce,
 	describeNetworkError,
-	ensureSystemCaCerts,
+	isCertError,
 	resetSystemCaCertsCache,
 	tlsApi,
 } from "@/lib/tls.js";
@@ -21,7 +22,7 @@ function fetchError(code: string, message: string): Error {
 	return err;
 }
 
-describe("ensureSystemCaCerts", () => {
+describe("applySystemCaCertsOnce", () => {
 	test("merges the OS store into the default set, keeping the defaults", () => {
 		const set = vi
 			.spyOn(tlsApi, "setDefaultCACertificates")
@@ -30,25 +31,26 @@ describe("ensureSystemCaCerts", () => {
 			type === "system" ? ["sys-a", "sys-b"] : ["def-a"],
 		);
 
-		const result = ensureSystemCaCerts();
+		const result = applySystemCaCertsOnce();
 
-		expect(result.status).toBe("merged");
-		expect(result.systemCount).toBe(2);
+		expect(result?.status).toBe("merged");
+		expect(result?.systemCount).toBe(2);
 		// "default" already folds in NODE_EXTRA_CA_CERTS — dropping it would break
 		// users who fixed their proxy the documented way.
 		expect(set).toHaveBeenCalledWith(["def-a", "sys-a", "sys-b"]);
 	});
 
-	test("runs once per process and caches the result", () => {
+	// The null is what bounds loggedFetch's retry: a chain that stays untrusted
+	// after the merge must surface its error, not re-request forever.
+	test("runs at most once per process, returning null afterwards", () => {
 		const get = vi
 			.spyOn(tlsApi, "getCACertificates")
 			.mockImplementation((type) => (type === "system" ? ["sys"] : ["def"]));
 		vi.spyOn(tlsApi, "setDefaultCACertificates").mockImplementation(() => {});
 
-		const first = ensureSystemCaCerts();
-		const second = ensureSystemCaCerts();
-
-		expect(second).toBe(first);
+		expect(applySystemCaCertsOnce()?.status).toBe("merged");
+		expect(applySystemCaCertsOnce()).toBeNull();
+		expect(applySystemCaCertsOnce()).toBeNull();
 		// 2 = one "system" + one "default" from the single real run.
 		expect(get).toHaveBeenCalledTimes(2);
 	});
@@ -57,7 +59,7 @@ describe("ensureSystemCaCerts", () => {
 		vi.spyOn(tlsApi, "supported").mockReturnValue(false);
 		const set = vi.spyOn(tlsApi, "setDefaultCACertificates");
 
-		expect(ensureSystemCaCerts().status).toBe("unsupported");
+		expect(applySystemCaCertsOnce()?.status).toBe("unsupported");
 		expect(set).not.toHaveBeenCalled();
 	});
 
@@ -65,7 +67,7 @@ describe("ensureSystemCaCerts", () => {
 		vi.spyOn(tlsApi, "getCACertificates").mockReturnValue([]);
 		const set = vi.spyOn(tlsApi, "setDefaultCACertificates");
 
-		expect(ensureSystemCaCerts().status).toBe("empty");
+		expect(applySystemCaCertsOnce()?.status).toBe("empty");
 		// Merging an empty system store would replace the defaults with themselves
 		// for no reason; skipping keeps Node's behavior byte-identical.
 		expect(set).not.toHaveBeenCalled();
@@ -76,10 +78,31 @@ describe("ensureSystemCaCerts", () => {
 			throw new Error("store unreadable");
 		});
 
-		const result = ensureSystemCaCerts();
+		const result = applySystemCaCertsOnce();
 
-		expect(result.status).toBe("failed");
-		expect(result.error).toBe("store unreadable");
+		expect(result?.status).toBe("failed");
+		expect(result?.error).toBe("store unreadable");
+	});
+});
+
+describe("isCertError", () => {
+	test("recognizes the corporate-proxy chain error", () => {
+		expect(
+			isCertError(
+				fetchError(
+					"SELF_SIGNED_CERT_IN_CHAIN",
+					"self-signed certificate in certificate chain",
+				),
+			),
+		).toBe(true);
+	});
+
+	test("does not fire for DNS/connection failures or bare errors", () => {
+		expect(isCertError(fetchError("ENOTFOUND", "getaddrinfo ENOTFOUND"))).toBe(
+			false,
+		);
+		expect(isCertError(new Error("fetch failed"))).toBe(false);
+		expect(isCertError("nope")).toBe(false);
 	});
 });
 
@@ -96,10 +119,7 @@ describe("describeNetworkError", () => {
 		// The exact error users report. Node itself does NOT hint for this code —
 		// its --use-system-ca suggestion covers only DEPTH_ZERO/UNABLE_TO_VERIFY_
 		// LEAF/UNABLE_TO_GET_ISSUER — so without us it's a dead end.
-		vi.spyOn(tlsApi, "getCACertificates").mockImplementation((type) =>
-			type === "system" ? ["sys"] : ["def"],
-		);
-		vi.spyOn(tlsApi, "setDefaultCACertificates").mockImplementation(() => {});
+		const get = vi.spyOn(tlsApi, "getCACertificates");
 
 		const msg = describeNetworkError(
 			fetchError(
@@ -110,6 +130,9 @@ describe("describeNetworkError", () => {
 
 		expect(msg).toContain("self-signed certificate in certificate chain");
 		expect(msg).toContain("NODE_EXTRA_CA_CERTS");
+		// Rendering an error must not touch the OS store: that read is a ~300ms
+		// event-loop stall on Windows, and it already ran on the retry path.
+		expect(get).not.toHaveBeenCalled();
 	});
 
 	test("tells old-Node users to upgrade instead of pointing at the OS store", () => {

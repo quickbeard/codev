@@ -46,23 +46,28 @@ export interface CaMergeResult {
 	error?: string;
 }
 
-let cached: CaMergeResult | null = null;
+let attempted = false;
 
-// Merges the OS trust store into Node's default CA set, once per process.
+// Merges the OS trust store into Node's default CA set. Runs at most once per
+// process; every later call returns null so a caller can't retry forever.
 //
-// Called from `loggedFetch` rather than at startup: it costs ~25ms (a native
-// read of the OS store), and commands that never open a socket — help, version,
-// logs, restore — shouldn't pay for it. Every network path in the CLI goes
-// through `loggedFetch`, so first-request is both the cheapest and the
-// completest hook.
+// Deliberately called only *after* a certificate failure, never speculatively.
+// The OS-store read is synchronous and costs ~20ms on macOS but ~300ms+ on
+// Windows, where it blocks the event loop — enough to stall Ink's render timers.
+// Since the users who need this are the minority behind an intercepting proxy,
+// and a cert failure is a precise signal that they're one of them, paying on
+// failure keeps the happy path at exactly zero cost.
+//
+// Returns null when a previous call already attempted the merge — the caller
+// must not retry the request again, or a permanently untrusted chain would loop.
 //
 // Best-effort by construction: TLS trust is not this CLI's job to have opinions
 // about, and any failure here must leave Node's default behavior exactly as it
 // was rather than break a user whose certs already work.
-export function ensureSystemCaCerts(): CaMergeResult {
-	if (cached) return cached;
-	cached = mergeSystemCaCerts();
-	return cached;
+export function applySystemCaCertsOnce(): CaMergeResult | null {
+	if (attempted) return null;
+	attempted = true;
+	return mergeSystemCaCerts();
 }
 
 function mergeSystemCaCerts(): CaMergeResult {
@@ -86,9 +91,9 @@ function mergeSystemCaCerts(): CaMergeResult {
 	}
 }
 
-// Test-only: drop the memoized result so each case re-runs the merge.
+// Test-only: forget that the merge ran so each case starts clean.
 export function resetSystemCaCertsCache(): void {
-	cached = null;
+	attempted = false;
 }
 
 // OpenSSL verify failures that mean "I don't trust this chain", as opposed to
@@ -103,9 +108,21 @@ const CERT_ERROR_CODES = new Set([
 	"SELF_SIGNED_CERT_IN_CHAIN_ERR",
 ]);
 
+// True when a thrown fetch error bottoms out in "I don't trust this chain".
+// Node's fetch hides the reason on `err.cause`, so unwrap before matching.
+export function isCertError(err: unknown): boolean {
+	if (!(err instanceof Error)) return false;
+	const cause = err.cause;
+	if (!(cause instanceof Error)) return false;
+	const code = (cause as NodeJS.ErrnoException).code;
+	return code !== undefined && CERT_ERROR_CODES.has(code);
+}
+
+// Pure: reading the OS store here would put a ~300ms Windows stall on the error
+// path just to word a sentence. By the time this runs, loggedFetch has already
+// tried the merge and retried, so "not in your store either" is accurate.
 function certHint(): string {
-	const ca = ensureSystemCaCerts();
-	if (ca.status === "unsupported") {
+	if (!tlsApi.supported()) {
 		return (
 			`This looks like a TLS-intercepting proxy or antivirus. Node ${process.version} ` +
 			"can't read your system certificate store — upgrade to Node 22.15+ and re-run, " +
@@ -141,8 +158,5 @@ export function describeNetworkError(err: unknown): string {
 				? String(cause)
 				: "";
 	const base = causeMsg ? `${err.message} (${causeMsg})` : err.message;
-	const code =
-		cause instanceof Error ? (cause as NodeJS.ErrnoException).code : undefined;
-	if (code && CERT_ERROR_CODES.has(code)) return `${base}\n${certHint()}`;
-	return base;
+	return isCertError(err) ? `${base}\n${certHint()}` : base;
 }
