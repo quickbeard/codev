@@ -1106,21 +1106,42 @@ describe("restoreTool", () => {
 		);
 	});
 
-	test("keeps the live CoDev config when no backup exists", async () => {
+	test("deletes the live CoDev config when no backup exists", async () => {
+		const livePath = join(tempDir, ".claude", "settings.json");
+		const backupPath = `${livePath}.backup`;
+		// Written by the real writer, not a hand-rolled marker: the authorship
+		// gate reads the keys the writer emits, so a fake fixture would let the
+		// two drift apart while this test kept passing.
+		const { configureClaudeCode, restoreTool } = await import(
+			"@/lib/configure.js"
+		);
+		configureClaudeCode({ apiKey: "sk-test", model: "test-model" });
+		expect(existsSync(livePath)).toBe(true);
+
+		const results = restoreTool("claude-code");
+		const settingsResult = results.find((r) => r.sourcePath === livePath);
+
+		expect(settingsResult?.status).toBe("deleted");
+		// No backup means nothing preceded it, so deleting is the pre-CoDev state.
+		expect(existsSync(livePath)).toBe(false);
+		expect(existsSync(backupPath)).toBe(false);
+	});
+
+	test("keeps a live user-written config when no backup exists", async () => {
 		const dir = join(tempDir, ".claude");
 		const livePath = join(dir, "settings.json");
 		const backupPath = `${livePath}.backup`;
 		mkdirSync(dir, { recursive: true });
-		writeFileSync(livePath, '{"marker":"codev-live"}');
+		writeFileSync(livePath, '{"marker":"user-authored"}');
 
 		const { restoreTool } = await import("@/lib/configure.js");
 		const results = restoreTool("claude-code");
 		const settingsResult = results.find((r) => r.sourcePath === livePath);
 
 		expect(settingsResult?.status).toBe("kept-live");
-		// No backup to restore from, so the live file is left untouched.
+		// No CoDev marker, so we can't know what preceded it — left untouched.
 		expect(existsSync(livePath)).toBe(true);
-		expect(readFileSync(livePath, "utf-8")).toBe('{"marker":"codev-live"}');
+		expect(readFileSync(livePath, "utf-8")).toBe('{"marker":"user-authored"}');
 		expect(existsSync(backupPath)).toBe(false);
 	});
 
@@ -1214,18 +1235,21 @@ describe("restoreTool", () => {
 		expect(existsSync(credBackup)).toBe(false);
 	});
 
-	test("Claude bundle: keeps live files that have no backup", async () => {
+	test("Claude bundle: restores from backup, deletes CoDev's backup-less files", async () => {
 		const claudeDir = join(tempDir, ".claude");
 		mkdirSync(claudeDir, { recursive: true });
 
-		// Settings has a backup → restored. Others have only live files → kept.
+		// Settings has a backup → restored.
 		const settingsLive = join(claudeDir, "settings.json");
 		writeFileSync(settingsLive, '{"env":{}}');
 		writeFileSync(`${settingsLive}.backup`, '{"marker":"orig"}');
 
+		// Exactly the stub resetClaudeAuth writes → CoDev's, so deleted.
 		const jsonLive = join(tempDir, ".claude.json");
 		writeFileSync(jsonLive, '{"hasCompletedOnboarding":true}');
 
+		// CoDev never writes .credentials.json, only removes it, so a live one
+		// with no backup is a post-CoDev login → ours to clear.
 		const credLive = join(claudeDir, ".credentials.json");
 		writeFileSync(credLive, '{"session":"post-install"}');
 
@@ -1234,19 +1258,36 @@ describe("restoreTool", () => {
 
 		const byKind = new Map(results.map((r) => [r.sourcePath, r.status]));
 		expect(byKind.get(settingsLive)).toBe("restored");
-		expect(byKind.get(jsonLive)).toBe("kept-live");
-		expect(byKind.get(credLive)).toBe("kept-live");
+		expect(byKind.get(jsonLive)).toBe("deleted");
+		expect(byKind.get(credLive)).toBe("deleted");
 
-		// The two backup-less files are left in place untouched; only the one with
-		// a backup was restored (and its backup consumed).
-		expect(JSON.parse(readFileSync(jsonLive, "utf-8"))).toEqual({
-			hasCompletedOnboarding: true,
-		});
-		expect(JSON.parse(readFileSync(credLive, "utf-8"))).toEqual({
-			session: "post-install",
-		});
+		expect(existsSync(jsonLive)).toBe(false);
+		expect(existsSync(credLive)).toBe(false);
 		expect(JSON.parse(readFileSync(settingsLive, "utf-8"))).toEqual({
 			marker: "orig",
+		});
+	});
+
+	// ~/.claude.json carries real user state (projects, history, mcpServers).
+	// Only the bare onboarding stub is ours; anything richer is the user's.
+	test("Claude bundle: keeps a .claude.json holding real user state", async () => {
+		const jsonLive = join(tempDir, ".claude.json");
+		writeFileSync(
+			jsonLive,
+			JSON.stringify({
+				hasCompletedOnboarding: true,
+				projects: { "/work/app": { history: ["hello"] } },
+			}),
+		);
+
+		const { restoreTool } = await import("@/lib/configure.js");
+		const results = restoreTool("claude-code");
+
+		const byKind = new Map(results.map((r) => [r.sourcePath, r.status]));
+		expect(byKind.get(jsonLive)).toBe("kept-live");
+		expect(existsSync(jsonLive)).toBe(true);
+		expect(JSON.parse(readFileSync(jsonLive, "utf-8")).projects).toEqual({
+			"/work/app": { history: ["hello"] },
 		});
 	});
 });

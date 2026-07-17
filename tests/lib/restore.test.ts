@@ -11,6 +11,12 @@ import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+	configureClaudeCode,
+	configureCodex,
+	configureContinue,
+	configureOpenCode,
+} from "@/lib/configure.js";
+import {
 	RESTORE_AGENTS,
 	runRestore,
 	runRestoreAll,
@@ -44,6 +50,26 @@ function seedBackup(relFilePath: string, marker: string) {
 	mkdirSync(join(livePath, ".."), { recursive: true });
 	writeFileSync(backupPath, JSON.stringify({ marker }));
 	return { livePath, backupPath };
+}
+
+// Write a genuine CoDev config by running the real writer. Deliberately not a
+// hand-rolled marker literal: the authorship gate reads the same keys the
+// writer emits, so a fake fixture would let the two drift apart silently — the
+// gate would stop matching real configs while these tests kept passing.
+// baseUrl is explicit so the writers don't fall back to AI_GATEWAY_URL(), which
+// would need a seeded ~/.codev-hub/auth.json.
+const CODEV_CREDS = {
+	apiKey: "sk-test-key",
+	baseUrl: "https://gw.test/gateway",
+	model: "test-model",
+};
+
+// A config the user wrote themselves — no CoDev markers anywhere.
+function seedUserConfig(relFilePath: string, contents: string) {
+	const livePath = join(tempDir, relFilePath);
+	mkdirSync(join(livePath, ".."), { recursive: true });
+	writeFileSync(livePath, contents);
+	return livePath;
 }
 
 describe("runRestore", () => {
@@ -96,18 +122,40 @@ describe("runRestore", () => {
 		).toBe(true);
 	});
 
-	test("keeps the live CoDev config when no backup exists for Claude", () => {
+	test("deletes the live CoDev config when no backup exists for Claude", () => {
+		configureClaudeCode(CODEV_CREDS);
 		const livePath = join(tempDir, ".claude", "settings.json");
-		mkdirSync(join(livePath, ".."), { recursive: true });
-		writeFileSync(livePath, '{"marker":"codev-live"}');
+		expect(existsSync(livePath)).toBe(true);
 
 		const code = runRestore("claude-code");
 
 		expect(code).toBe(0);
-		expect(existsSync(livePath)).toBe(true);
+		// CoDev wrote it and no backup exists, so nothing preceded it — deleting
+		// it *is* the pre-CoDev state.
+		expect(existsSync(livePath)).toBe(false);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
 		expect(logs).toContain(
-			`No backup at ${livePath}.backup; left ${livePath} in place.`,
+			`Deleted ${livePath}; CoDev wrote it and no backup exists, so nothing preceded it.`,
+		);
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	test("keeps a live user-written config when no backup exists for Claude", () => {
+		const livePath = seedUserConfig(
+			".claude/settings.json",
+			'{"marker":"user-authored"}',
+		);
+
+		const code = runRestore("claude-code");
+
+		expect(code).toBe(0);
+		// No CoDev marker: this could be a config we never touched, or the
+		// original a previous restore already reinstated. Either way, not ours.
+		expect(existsSync(livePath)).toBe(true);
+		expect(readFileSync(livePath, "utf-8")).toBe('{"marker":"user-authored"}');
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(logs).toContain(
+			`No backup at ${livePath}.backup; left ${livePath} in place (not written by CoDev).`,
 		);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
@@ -128,10 +176,27 @@ describe("runRestore", () => {
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
-	test("keeps the live CoDev config when no backup exists for OpenCode", () => {
+	test("deletes the live CoDev config when no backup exists for OpenCode", () => {
+		configureOpenCode(CODEV_CREDS);
 		const livePath = join(tempDir, ".config", "opencode", "opencode.json");
-		mkdirSync(join(livePath, ".."), { recursive: true });
-		writeFileSync(livePath, '{"marker":"codev-live"}');
+		expect(existsSync(livePath)).toBe(true);
+
+		const code = runRestore("opencode");
+
+		expect(code).toBe(0);
+		expect(existsSync(livePath)).toBe(false);
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(logs).toContain(
+			`Deleted ${livePath}; CoDev wrote it and no backup exists, so nothing preceded it.`,
+		);
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	test("keeps a live user-written config when no backup exists for OpenCode", () => {
+		const livePath = seedUserConfig(
+			".config/opencode/opencode.json",
+			'{"marker":"user-authored"}',
+		);
 
 		const code = runRestore("opencode");
 
@@ -139,7 +204,7 @@ describe("runRestore", () => {
 		expect(existsSync(livePath)).toBe(true);
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
 		expect(logs).toContain(
-			`No backup at ${livePath}.backup; left ${livePath} in place.`,
+			`No backup at ${livePath}.backup; left ${livePath} in place (not written by CoDev).`,
 		);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
@@ -190,18 +255,33 @@ describe("runRestore", () => {
 		).toBe(true);
 	});
 
-	test("keeps the live CoDev config when no backup exists for Codex", () => {
+	test("deletes the live CoDev config when no backup exists for Codex", () => {
+		configureCodex(CODEV_CREDS);
 		const livePath = join(tempDir, ".codex", "config.toml");
-		mkdirSync(join(livePath, ".."), { recursive: true });
-		writeFileSync(livePath, 'marker = "codev-live"\n');
+		expect(existsSync(livePath)).toBe(true);
+
+		const code = runRestore("codex");
+
+		expect(code).toBe(0);
+		expect(existsSync(livePath)).toBe(false);
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(logs).toContain(
+			`Deleted ${livePath}; CoDev wrote it and no backup exists, so nothing preceded it.`,
+		);
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	test("keeps a live user-written config when no backup exists for Codex", () => {
+		const livePath = seedUserConfig(".codex/config.toml", 'model = "gpt-5"\n');
 
 		const code = runRestore("codex");
 
 		expect(code).toBe(0);
 		expect(existsSync(livePath)).toBe(true);
+		expect(readFileSync(livePath, "utf-8")).toBe('model = "gpt-5"\n');
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
 		expect(logs).toContain(
-			`No backup at ${livePath}.backup; left ${livePath} in place.`,
+			`No backup at ${livePath}.backup; left ${livePath} in place (not written by CoDev).`,
 		);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
@@ -229,20 +309,124 @@ describe("runRestore", () => {
 		).toBe(true);
 	});
 
-	test("keeps the live CoDev config when no backup exists for VS Code/Continue", () => {
+	test("deletes the live CoDev config when no backup exists for VS Code/Continue", () => {
+		configureContinue(CODEV_CREDS);
 		const livePath = join(tempDir, ".continue", "config.yaml");
-		mkdirSync(join(livePath, ".."), { recursive: true });
-		writeFileSync(livePath, 'name: "codev-live"\n');
+		expect(existsSync(livePath)).toBe(true);
+
+		const code = runRestore("vscode-continue");
+
+		expect(code).toBe(0);
+		expect(existsSync(livePath)).toBe(false);
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(logs).toContain(
+			`Deleted ${livePath}; CoDev wrote it and no backup exists, so nothing preceded it.`,
+		);
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	test("keeps a live user-written config when no backup exists for VS Code/Continue", () => {
+		const livePath = seedUserConfig(
+			".continue/config.yaml",
+			'name: "my own assistant"\n',
+		);
 
 		const code = runRestore("vscode-continue");
 
 		expect(code).toBe(0);
 		expect(existsSync(livePath)).toBe(true);
+		expect(readFileSync(livePath, "utf-8")).toBe('name: "my own assistant"\n');
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
 		expect(logs).toContain(
-			`No backup at ${livePath}.backup; left ${livePath} in place.`,
+			`No backup at ${livePath}.backup; left ${livePath} in place (not written by CoDev).`,
 		);
 		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	test("force deletes a live user-written config that the gate would keep", () => {
+		const livePath = seedUserConfig(".codex/config.toml", 'model = "gpt-5"\n');
+
+		const code = runRestore("codex", true);
+
+		expect(code).toBe(0);
+		expect(existsSync(livePath)).toBe(false);
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		// The default message claims CoDev authorship, which is false here — a
+		// forced delete has to say what actually happened.
+		expect(logs).toContain(
+			`Deleted ${livePath}; no backup exists and CoDev did not write it (forced).`,
+		);
+	});
+
+	test("force still restores from a backup rather than deleting", () => {
+		const { livePath, backupPath } = seedBackup(
+			".codex/config.toml",
+			"my-original",
+		);
+		writeFileSync(livePath, 'model = "codev-wrote-this"\n');
+
+		const code = runRestore("codex", true);
+
+		expect(code).toBe(0);
+		// force skips the authorship gate, not the backup branch: the user's
+		// pre-CoDev original is still reinstated.
+		expect(existsSync(livePath)).toBe(true);
+		expect(JSON.parse(readFileSync(livePath, "utf-8")).marker).toBe(
+			"my-original",
+		);
+		expect(existsSync(backupPath)).toBe(false);
+	});
+
+	test("force reports a CoDev-authored delete as ours, not as forced", () => {
+		configureCodex(CODEV_CREDS);
+		const livePath = join(tempDir, ".codex", "config.toml");
+
+		expect(runRestore("codex", true)).toBe(0);
+
+		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+		expect(logs).toContain(
+			`Deleted ${livePath}; CoDev wrote it and no backup exists, so nothing preceded it.`,
+		);
+	});
+
+	// Regression: restoreTool maps over CLAUDE_RESTORE_KINDS, and a bare
+	// `.map(restoreKind)` would pass the array index into `force` — silently
+	// forcing every kind after the first.
+	test("without force, the Claude bundle keeps all three user files", () => {
+		const settings = seedUserConfig(
+			".claude/settings.json",
+			'{"marker":"user"}',
+		);
+		const claudeJson = seedUserConfig(
+			".claude.json",
+			'{"projects":{"/a":{}},"hasCompletedOnboarding":true}',
+		);
+		const creds = seedUserConfig(".claude/.credentials.json", "{}");
+		// .credentials.json is always treated as CoDev's, so it goes regardless;
+		// the other two must survive.
+		expect(runRestore("claude-code")).toBe(0);
+
+		expect(existsSync(settings)).toBe(true);
+		expect(existsSync(claudeJson)).toBe(true);
+		expect(existsSync(creds)).toBe(false);
+	});
+
+	// The gate's whole reason for existing: restore consumes the backup, so a
+	// second run sees "no backup + live file" — and that live file is the user's
+	// pristine original, which the first run just reinstated. Deleting it here
+	// would destroy the very thing restore exists to bring back.
+	test("running restore twice does not delete the reinstated original", () => {
+		const livePath = join(tempDir, ".codex", "config.toml");
+		mkdirSync(join(livePath, ".."), { recursive: true });
+		writeFileSync(`${livePath}.backup`, 'model = "my-original"\n');
+		configureCodex(CODEV_CREDS);
+
+		expect(runRestore("codex")).toBe(0);
+		expect(readFileSync(livePath, "utf-8")).toBe('model = "my-original"\n');
+
+		expect(runRestore("codex")).toBe(0);
+		expect(existsSync(livePath)).toBe(true);
+		expect(readFileSync(livePath, "utf-8")).toBe('model = "my-original"\n');
 	});
 });
 
@@ -310,29 +494,63 @@ describe("runRestoreAll", () => {
 		).toHaveLength(7);
 	});
 
-	test("keeps live CoDev configs for tools without a backup", () => {
-		// One tool with a backup, one with only a live CoDev config, two with
-		// neither. The sweep should restore the first, keep the second in place,
-		// noop the rest.
+	test("deletes backup-less CoDev configs and keeps backup-less user configs", () => {
+		// One tool with a backup (restored), one with only a live CoDev config
+		// (deleted), one with only a live user config (kept), the rest noop.
 		const claude = seedBackup(".claude/settings.json", "c");
+		configureOpenCode(CODEV_CREDS);
 		const opencodeLive = join(tempDir, ".config", "opencode", "opencode.json");
-		mkdirSync(join(opencodeLive, ".."), { recursive: true });
-		writeFileSync(opencodeLive, '{"marker":"codev-live"}');
+		const codexLive = seedUserConfig(".codex/config.toml", 'model = "gpt-5"\n');
 
 		const code = runRestoreAll();
 
 		expect(code).toBe(0);
 		expect(existsSync(claude.backupPath)).toBe(false);
-		// No backup for OpenCode, so its live config is left untouched.
-		expect(existsSync(opencodeLive)).toBe(true);
+		// CoDev wrote OpenCode's config and nothing preceded it → gone.
+		expect(existsSync(opencodeLive)).toBe(false);
+		// Codex was never configured by CoDev → the user's file survives.
+		expect(existsSync(codexLive)).toBe(true);
+		expect(readFileSync(codexLive, "utf-8")).toBe('model = "gpt-5"\n');
 		const logs = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
 		expect(logs.filter((l: string) => l.startsWith("Restored "))).toHaveLength(
+			1,
+		);
+		expect(logs.filter((l: string) => l.startsWith("Deleted "))).toHaveLength(
 			1,
 		);
 		expect(
 			logs.filter((l: string) => l.startsWith("No backup at")),
 		).toHaveLength(1);
 		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	// A delete reverts the file to its pre-CoDev state just as a restore does,
+	// so it has to count as action — otherwise a sweep that only had CoDev
+	// configs to clean would wrongly exit 1 with "No backups found."
+	test("a delete-only sweep counts as action and exits 0", () => {
+		configureOpenCode(CODEV_CREDS);
+
+		const code = runRestoreAll();
+
+		expect(code).toBe(0);
+		expect(
+			existsSync(join(tempDir, ".config", "opencode", "opencode.json")),
+		).toBe(false);
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	// The mirror image: nothing was CoDev's, so nothing changed on disk. That is
+	// still "nothing to restore", even though live files exist.
+	test("a keep-only sweep changes nothing and exits 1", () => {
+		seedUserConfig(".codex/config.toml", 'model = "gpt-5"\n');
+
+		const code = runRestoreAll();
+
+		expect(code).toBe(1);
+		expect(existsSync(join(tempDir, ".codex", "config.toml"))).toBe(true);
+		expect(errorSpy).toHaveBeenCalledWith(
+			"No backups found. Nothing to restore.",
+		);
 	});
 
 	test("sweeps the Continue backup alongside the other agents", () => {
