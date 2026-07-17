@@ -17,10 +17,10 @@ export interface StepResult {
 	label: string;
 	detail: string;
 	status: StepStatus;
-	// Live config files left in place because they had no backup to restore
-	// from. Surfaced to the user so they can delete them by hand if they want a
-	// fully pre-CoDev state; these files may still point at the removed
-	// ~/.codev-hub.
+	// Live config files left in place because they had no backup *and* don't
+	// look CoDev-written — i.e. the user's own configs, which we deliberately
+	// preserve. Surfaced so the user knows we didn't touch them; a config CoDev
+	// wrote is deleted outright and needs no follow-up.
 	keptPaths?: string[];
 }
 
@@ -186,10 +186,16 @@ function runRestoreOrKeep(tool: Tool): StepResult {
 						detail: `restored from ${result.backupPath}`,
 						status: "ok",
 					};
+				case "deleted":
+					return {
+						label,
+						detail: `no backup; deleted CoDev's ${result.sourcePath}`,
+						status: "ok",
+					};
 				case "kept-live":
 					return {
 						label,
-						detail: `no backup; kept ${result.sourcePath}`,
+						detail: `no backup; kept your ${result.sourcePath}`,
 						status: "ok",
 						keptPaths: [result.sourcePath],
 					};
@@ -198,22 +204,28 @@ function runRestoreOrKeep(tool: Tool): StepResult {
 			}
 		}
 		let restored = 0;
+		let deleted = 0;
 		let noop = 0;
 		const keptPaths: string[] = [];
 		for (const r of results) {
 			if (r.status === "restored") restored++;
+			else if (r.status === "deleted") deleted++;
 			else if (r.status === "kept-live") keptPaths.push(r.sourcePath);
 			else noop++;
 		}
 		const kept = keptPaths.length;
-		if (restored === 0 && kept === 0) {
+		if (restored === 0 && deleted === 0 && kept === 0) {
 			return { label, detail: "nothing to restore", status: "noop" };
 		}
 		const parts: string[] = [];
 		if (restored > 0)
 			parts.push(`restored ${restored} file${restored === 1 ? "" : "s"}`);
+		if (deleted > 0)
+			parts.push(
+				`deleted ${deleted} file${deleted === 1 ? "" : "s"} (no backup)`,
+			);
 		if (kept > 0)
-			parts.push(`kept ${kept} file${kept === 1 ? "" : "s"} (no backup)`);
+			parts.push(`kept ${kept} of your file${kept === 1 ? "" : "s"}`);
 		if (noop > 0) parts.push(`${noop} already clean`);
 		return { label, detail: parts.join("; "), status: "ok", keptPaths };
 	} catch (err) {

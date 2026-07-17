@@ -433,6 +433,29 @@ function isCodevContinueConfig(): boolean {
 	}
 }
 
+// ~/.claude.json has no CoDev-specific marker key — `resetClaudeAuth` writes it
+// as exactly `{hasCompletedOnboarding: true}` to skip the CLI's first-run
+// wizard. That whole-file shape *is* the marker: Claude Code's own
+// ~/.claude.json accumulates real user state (projects, history, mcpServers),
+// so anything beyond the single onboarding key belongs to the user, not us.
+function isCodevClaudeJsonStub(): boolean {
+	const path = sourcePathOf("claude-json");
+	if (!existsSync(path)) return false;
+	try {
+		const config = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		if (!config || typeof config !== "object" || Array.isArray(config)) {
+			return false;
+		}
+		const keys = Object.keys(config);
+		return (
+			keys.length === 1 &&
+			(config as Record<string, unknown>).hasCompletedOnboarding === true
+		);
+	} catch {
+		return false;
+	}
+}
+
 // Tools that share a config file map to the same BackupKind. Continue's two
 // editor variants share ~/.continue/config.yaml; the Claude Code CLI and its
 // two extension variants share ~/.claude/settings.json. Callers that iterate
@@ -601,7 +624,41 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 	return [{ kind: "claude-settings", sourcePath, backupPath, created }];
 }
 
-export type RestoreStatus = "restored" | "kept-live" | "noop";
+// Does the live file at `kind` look like something CoDev wrote? Gates the
+// destructive branch of `restoreKind`, so a `false` must always mean "leave it
+// alone". Each detector re-derives its own path via `sourcePathOf` and answers
+// `false` for a missing or unparseable file, which is the conservative default
+// we want: a config we can't attribute is one we don't delete.
+//
+// The two auth files have no marker key of their own:
+//   - `claude-json` — matched by whole-file shape (see isCodevClaudeJsonStub).
+//   - `claude-credentials` — CoDev never *writes* this file, only removes it.
+//     So a live one with no backup can only be a login that happened after
+//     CoDev configured Claude; it's ours to clear. Worst case the user
+//     re-authenticates — no data is lost.
+//
+// Deliberately no cross-kind inference (e.g. reading settings.json to decide
+// the credentials' fate): `restoreTool` restores claude-settings *first*, which
+// erases that marker, so the answer would depend on iteration order.
+function isCodevAuthored(kind: BackupKind): boolean {
+	switch (kind) {
+		case "claude-settings":
+			return isCodevClaudeConfig();
+		case "claude-json":
+			return isCodevClaudeJsonStub();
+		case "claude-credentials":
+			return true;
+		case "codex-config":
+			return isCodevCodexConfig();
+		case "opencode-config":
+		case "codev-code-config":
+			return isCodevOpenCodeConfig(kind);
+		case "continue-config":
+			return isCodevContinueConfig();
+	}
+}
+
+export type RestoreStatus = "restored" | "deleted" | "kept-live" | "noop";
 
 export interface RestoreResult {
 	status: RestoreStatus;
@@ -609,13 +666,22 @@ export interface RestoreResult {
 	backupPath: string;
 }
 
-// "Make this file look pre-CoDev." Three terminal states:
+// "Make this file look pre-CoDev." Four terminal states:
 //   - backup present → swap it over the live file (the user's pre-CoDev
 //     state is reinstated).
-//   - no backup, but a live file exists → leave the live file untouched. With
-//     no backup we can't know what (if anything) preceded CoDev, so we don't
-//     destroy the current config; the user can remove it by hand if they want.
+//   - no backup, live file is CoDev's → delete it. No backup means nothing
+//     preceded it, so removing it *is* the pre-CoDev state.
+//   - no backup, live file is the user's → leave it untouched. We can't know
+//     what preceded CoDev here, so we don't destroy it.
 //   - neither file exists → noop; already at pre-CoDev state.
+//
+// The authorship gate carries the whole safety argument, because the restore
+// below *consumes* the backup (renameSync), making "no backup + live file"
+// ambiguous. It can mean CoDev wrote the file from scratch — but equally that
+// this is a second restore and the live file is the pristine original the first
+// run just reinstated, or that the user hand-wrote a config for a tool CoDev
+// never configured (both `remove` and the bare `restore` sweep visit every
+// tool). Only the first case is ours to delete.
 function restoreKind(kind: BackupKind): RestoreResult {
 	const sourcePath = sourcePathOf(kind);
 	const backupPath = `${sourcePath}.backup`;
@@ -635,6 +701,10 @@ function restoreKind(kind: BackupKind): RestoreResult {
 	}
 
 	if (existsSync(sourcePath)) {
+		if (isCodevAuthored(kind)) {
+			rmSync(sourcePath, { force: true });
+			return log({ status: "deleted", sourcePath, backupPath });
+		}
 		return log({ status: "kept-live", sourcePath, backupPath });
 	}
 
