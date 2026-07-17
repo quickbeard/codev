@@ -60,22 +60,42 @@ export function detectCodevTools(): ShimAgent[] {
 const SENTINEL_START = "# >>> codev shims (managed) >>>";
 const SENTINEL_END = "# <<< codev shims (managed) <<<";
 
+// The two shim dirs as $HOME-relative literals, for the PowerShell snippets that
+// edit the user-scope Windows PATH (they resolve UserProfile themselves rather
+// than trusting this process's homedir()).
+const WINDOWS_SHIM_PATH_SUFFIX = "\\.codev-hub\\bin";
+const WINDOWS_LEGACY_SHIM_PATH_SUFFIX = "\\.codev\\bin";
+
 export function shimDir(): string {
 	return join(homedir(), ".codev-hub", "bin");
 }
 
-// run.ts uses this to strip our shim dir from the child's PATH so that
+// Where hub versions before the ~/.codev → ~/.codev-hub rename put their shims.
+// Those shim bodies re-exec the bare `codev` command, which as of 0.4.0 is the
+// CoDev Code agent rather than the hub — so reaching one hands the agent an
+// agent name as its positional project dir. See sweepLegacyShims.
+export function legacyShimDir(): string {
+	return join(homedir(), ".codev", "bin");
+}
+
+// run.ts uses this to strip our shim dirs from the child's PATH so that
 // `codevhub claude` -> spawn("claude") resolves the real npm-installed binary
-// instead of recursing through the shim.
+// instead of recursing through the shim. The legacy dir is stripped too: an
+// upgraded user still carries it on PATH, and its shims are actively wrong (see
+// sweepLegacyShims). Windows PATH entries are compared case-insensitively —
+// the registry preserves whatever case the user typed.
 export function stripShimDirFromPath(
 	path: string | undefined,
 	sep = delimiter,
 ): string {
 	if (!path) return "";
-	const dir = shimDir();
+	const dirs = [shimDir(), legacyShimDir()];
+	const fold = (p: string) =>
+		process.platform === "win32" ? p.toLowerCase() : p;
+	const drop = new Set(dirs.map(fold));
 	return path
 		.split(sep)
-		.filter((p) => p !== dir)
+		.filter((p) => !drop.has(fold(p)))
 		.join(sep);
 }
 
@@ -357,6 +377,61 @@ export function repairShims(): boolean {
 	return true;
 }
 
+// Deletes shims left in ~/.codev/bin by hub versions predating the
+// ~/.codev → ~/.codev-hub rename, and drops that dir from the user-scope
+// Windows PATH.
+//
+// Those shims are worse than stale. Their bodies are `codev <agent> "$@"`, from
+// when `codev` was the hub; since 0.4.0 `codev` is the CoDev Code agent, whose
+// default command takes a positional project dir — so a surviving legacy
+// `claude` shim makes `claude` chdir into ./claude and die with "Failed to
+// change directory to <cwd>/claude". repairShims can't see them (it only reads
+// shimDir()), and neither install nor unhook has ever touched the old dir, so
+// upgraded users keep it on PATH indefinitely.
+//
+// cmd.exe is where this actually bites: rc/PowerShell-profile blocks share a
+// sentinel across the rename and get rewritten in place by the next
+// installShims, but the Windows *registry* PATH entry is permanent and cmd.exe
+// resolves from it alone, with no profile or alias to shadow it. Deleting the
+// files is the load-bearing half and fixes every platform on the spot; the PATH
+// edit just stops the empty dir lingering. A POSIX rc block still exporting the
+// old dir is left to installShims — once the shims are gone it points at
+// nothing and is harmless.
+//
+// Called on every hub startup; the common case (no legacy dir) does no writes.
+// Returns true when anything was swept.
+export function sweepLegacyShims(): boolean {
+	const dir = legacyShimDir();
+	if (!existsSync(dir)) return false;
+	let swept = false;
+	// `codev-code` is the pre-0.4 name of the `codev` shim — sweep it too.
+	for (const agent of [...SHIM_AGENTS, "codev-code"]) {
+		const name = process.platform === "win32" ? `${agent}.cmd` : agent;
+		const path = join(dir, name);
+		if (!existsSync(path)) continue;
+		rmSync(path, { force: true });
+		swept = true;
+	}
+	// Nothing of ours in there — a dir the user made, or one an earlier run
+	// already swept. Return before the PowerShell call below: this runs on every
+	// startup, and spawning a shell each time to re-report "unchanged" would tax
+	// every command for a migration that's already done.
+	if (!swept) return false;
+	// Drop the dir (and its now-possibly-empty ~/.codev parent) since we emptied
+	// it. Both throw when non-empty — the user's own files, or pre-rename state
+	// we don't own, stay put.
+	try {
+		rmdirSync(dir);
+		rmdirSync(join(dir, ".."));
+	} catch {
+		// Non-empty — leave it.
+	}
+	if (process.platform === "win32") {
+		removeFromWindowsUserPath(WINDOWS_LEGACY_SHIM_PATH_SUFFIX);
+	}
+	return true;
+}
+
 export interface UninstallResult {
 	shimDir: string;
 	shimsRemoved: string[];
@@ -433,12 +508,14 @@ function unpatchWindowsProfiles(): string[] {
 	return updated;
 }
 
-// Removes our shim dir from the user-scope Windows PATH. Best-effort: returns
-// false if PowerShell is unavailable or the entry wasn't present.
-function removeFromWindowsUserPath(): boolean {
+// Removes a shim dir from the user-scope Windows PATH. `suffix` is the dir as a
+// $HOME-relative literal (e.g. `\.codev-hub\bin`), resolved against UserProfile
+// inside PowerShell to match how updateWindowsUserPath wrote it. Best-effort:
+// returns false if PowerShell is unavailable or the entry wasn't present.
+function removeFromWindowsUserPath(suffix: string): boolean {
 	const script = [
 		"$ErrorActionPreference='Stop'",
-		"$dir = [Environment]::GetFolderPath('UserProfile') + '\\.codev-hub\\bin'",
+		`$dir = [Environment]::GetFolderPath('UserProfile') + '${suffix}'`,
 		"$cur = [Environment]::GetEnvironmentVariable('Path','User')",
 		"if ($null -eq $cur -or $cur.Length -eq 0) { Write-Output 'unchanged'; exit 0 }",
 		"$sep = [IO.Path]::PathSeparator",
@@ -466,7 +543,9 @@ export function uninstallShims(): UninstallResult {
 	let windowsUserPathUpdated = false;
 	if (process.platform === "win32") {
 		rcFilesUpdated.push(...unpatchWindowsProfiles());
-		windowsUserPathUpdated = removeFromWindowsUserPath();
+		windowsUserPathUpdated = removeFromWindowsUserPath(
+			WINDOWS_SHIM_PATH_SUFFIX,
+		);
 	} else {
 		rcFilesUpdated.push(...unpatchUnixRcs());
 	}

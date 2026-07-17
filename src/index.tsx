@@ -28,6 +28,7 @@ import {
 	repairShims,
 	SHIM_AGENTS,
 	type ShimAgent,
+	sweepLegacyShims,
 	uninstallShims,
 } from "@/lib/shims.js";
 import { parsePullArgs, runSkillInstall } from "@/lib/skill-install.js";
@@ -88,12 +89,20 @@ function flagValue(argv: string[], name: string): string | undefined {
 initLogging(command ?? "help", args);
 
 // Rewrite shims left behind by pre-0.4 hub versions (their bodies re-exec the
-// old `codev` hub command, which is now the agent). Best-effort: a filesystem
-// hiccup here must never block the actual command.
+// old `codev` hub command, which is now the agent), and delete the ones the
+// ~/.codev → ~/.codev-hub rename orphaned in the old dir, where repairShims
+// can't reach them. Best-effort: a filesystem hiccup here must never block the
+// actual command.
 try {
 	repairShims();
 } catch {
 	// Ignore — `codevhub install`/`hook` can rebuild shims explicitly.
+}
+try {
+	sweepLegacyShims();
+} catch {
+	// Ignore — a surviving legacy shim is still kept off spawned children's PATH
+	// by stripShimDirFromPath.
 }
 
 switch (command) {

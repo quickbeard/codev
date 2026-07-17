@@ -164,6 +164,143 @@ describe("stripShimDirFromPath", () => {
 			["/usr/local/bin", "/usr/bin"].join(delimiter),
 		);
 	});
+
+	// The child's PATH is the last line of defence for an upgraded user whose
+	// pre-rename ~/.codev/bin is still on PATH: reaching a legacy `claude` shim
+	// there sends `codev claude` to the agent, which reads `claude` as a project
+	// dir and dies with "Failed to change directory to <cwd>/claude".
+	test.skipIf(process.platform === "win32")(
+		"removes the legacy ~/.codev/bin entry alongside the current shim dir",
+		async () => {
+			const { legacyShimDir, shimDir, stripShimDirFromPath } = await import(
+				"@/lib/shims.js"
+			);
+			const path = [
+				"/usr/local/bin",
+				legacyShimDir(),
+				shimDir(),
+				"/usr/bin",
+			].join(":");
+			expect(stripShimDirFromPath(path, ":")).toBe("/usr/local/bin:/usr/bin");
+		},
+	);
+});
+
+describe("sweepLegacyShims", () => {
+	test("is a no-op when no legacy shim dir exists", async () => {
+		const { sweepLegacyShims } = await import("@/lib/shims.js");
+		expect(sweepLegacyShims()).toBe(false);
+	});
+
+	// A legacy dir holding none of our shims reports "nothing swept" and leaves
+	// the user's files be. The early false also keeps the sweep off the
+	// PowerShell path — it runs on every hub startup, so a spawn per command to
+	// re-report an already-done migration would tax every command.
+	test("reports nothing swept when the legacy dir holds no shims of ours", async () => {
+		const { legacyShimDir, sweepLegacyShims } = await import("@/lib/shims.js");
+		const dir = legacyShimDir();
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "my-script"), "#!/bin/sh\necho mine\n");
+
+		expect(sweepLegacyShims()).toBe(false);
+		expect(existsSync(join(dir, "my-script"))).toBe(true);
+	});
+
+	test.skipIf(process.platform === "win32")(
+		"deletes pre-rename shims that exec the old `codev` hub command",
+		async () => {
+			const { legacyShimDir, sweepLegacyShims } = await import(
+				"@/lib/shims.js"
+			);
+			const dir = legacyShimDir();
+			mkdirSync(dir, { recursive: true });
+			// Verbatim body written by hub versions before #194/#195.
+			writeFileSync(join(dir, "claude"), '#!/bin/sh\nexec codev claude "$@"\n');
+			writeFileSync(join(dir, "codex"), '#!/bin/sh\nexec codev codex "$@"\n');
+
+			expect(sweepLegacyShims()).toBe(true);
+			expect(existsSync(join(dir, "claude"))).toBe(false);
+			expect(existsSync(join(dir, "codex"))).toBe(false);
+			// Dir emptied → removed, along with the now-empty ~/.codev parent.
+			expect(existsSync(dir)).toBe(false);
+		},
+	);
+
+	test.skipIf(process.platform === "win32")(
+		"sweeps the pre-0.4 codev-code shim too",
+		async () => {
+			const { legacyShimDir, sweepLegacyShims } = await import(
+				"@/lib/shims.js"
+			);
+			const dir = legacyShimDir();
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(
+				join(dir, "codev-code"),
+				'#!/bin/sh\nexec codev codev-code "$@"\n',
+			);
+
+			expect(sweepLegacyShims()).toBe(true);
+			expect(existsSync(join(dir, "codev-code"))).toBe(false);
+		},
+	);
+
+	test.skipIf(process.platform === "win32")(
+		"leaves the legacy dir and unrelated files alone when it holds user files",
+		async () => {
+			const { legacyShimDir, sweepLegacyShims } = await import(
+				"@/lib/shims.js"
+			);
+			const dir = legacyShimDir();
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(join(dir, "claude"), '#!/bin/sh\nexec codev claude "$@"\n');
+			writeFileSync(join(dir, "my-script"), "#!/bin/sh\necho mine\n");
+
+			expect(sweepLegacyShims()).toBe(true);
+			expect(existsSync(join(dir, "claude"))).toBe(false);
+			expect(existsSync(join(dir, "my-script"))).toBe(true);
+			expect(existsSync(dir)).toBe(true);
+		},
+	);
+
+	// ~/.codev may still hold pre-rename state (auth.json et al) that the rename
+	// never migrated. Emptying bin/ must not take it with us.
+	test.skipIf(process.platform === "win32")(
+		"keeps the ~/.codev parent when it holds other pre-rename state",
+		async () => {
+			const { legacyShimDir, sweepLegacyShims } = await import(
+				"@/lib/shims.js"
+			);
+			const dir = legacyShimDir();
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(join(dir, "claude"), '#!/bin/sh\nexec codev claude "$@"\n');
+			const legacyAuth = join(dir, "..", "auth.json");
+			writeFileSync(legacyAuth, "{}");
+
+			expect(sweepLegacyShims()).toBe(true);
+			expect(existsSync(dir)).toBe(false);
+			expect(existsSync(legacyAuth)).toBe(true);
+		},
+	);
+
+	test.skipIf(process.platform === "win32")(
+		"does not touch the current ~/.codev-hub/bin shims",
+		async () => {
+			const { installShims, shimDir, sweepLegacyShims, legacyShimDir } =
+				await import("@/lib/shims.js");
+			installShims(["claude"]);
+			mkdirSync(legacyShimDir(), { recursive: true });
+			writeFileSync(
+				join(legacyShimDir(), "claude"),
+				'#!/bin/sh\nexec codev claude "$@"\n',
+			);
+
+			sweepLegacyShims();
+
+			const current = join(shimDir(), "claude");
+			expect(existsSync(current)).toBe(true);
+			expect(readFileSync(current, "utf-8")).toContain("codevhub claude");
+		},
+	);
 });
 
 describe.skipIf(process.platform === "win32")("installShims (Unix)", () => {

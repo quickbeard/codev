@@ -124,6 +124,26 @@ When testing the gate, build CoDev-authored fixtures by calling the real writers
 
 `restoreTool` is invoked via `codevhub restore <agent>` (one tool) or bare `codevhub restore` (sweep all tools). The dispatcher accepts **launch names** — `claude`/`codex`/`opencode`/`codev`/`continue` — and `toolForRestoreAgent` in `src/lib/restore.ts` maps them to the internal `Tool` type. Behavior splits on path: `runRestore` (single) returns 0 for every non-throwing outcome, reporting each file's state; `runRestoreAll` (sweep) errors only when *nothing* changed across every tool. Note `reportRestoreResult`'s switch returns `void`, so a missing `RestoreStatus` case would silently print nothing — the `never` default is what makes the next status addition a compile error.
 
+## PATH shims and the two renames
+
+`src/lib/shims.ts` writes small `claude`/`codex`/`opencode`/`codev` scripts into `~/.codev-hub/bin` and puts that dir on PATH, so typing `claude` routes through `codevhub claude` and picks up CoDev's config. Two 0.4.0 renames make this area a minefield, and both hazards are live on any upgraded machine:
+
+- **`codev` changed owners** (#194): it was the hub's bin name; it's now the CoDev Code agent. So a shim body of `codev claude "$@"` no longer re-enters the hub — it hands `claude` to an OpenCode fork, whose default command is `$0 [project]`. The agent resolves that positional against cwd and `chdir`s into it, dying with `Failed to change directory to <cwd>/claude`. That string is OpenCode's, never Claude Code's; seeing it means a pre-0.4 shim got reached.
+- **The shim dir moved** (#195): `~/.codev` → `~/.codev-hub`, with no migration.
+
+Two functions cover the fallout, and they are **not** interchangeable — each only sees its own dir:
+
+- `repairShims()` rewrites stale shims **inside the current dir** (detecting them by a body that lacks `codevhub`).
+- `sweepLegacyShims()` deletes them from **`~/.codev/bin`**, which `repairShims` cannot see and which neither `installShims` nor `unhook` has ever touched.
+
+Both run best-effort at the top of `index.tsx`, before dispatch.
+
+Deleting the legacy *files* is the load-bearing half and fixes every platform on the spot; the Windows user-PATH edit only stops the emptied dir lingering. The sweep returns early when it finds none of our shims, which also keeps it off the PowerShell path — it runs on every startup, and a spawn per command to re-report an already-done migration would tax every command. A POSIX rc block still exporting the old dir is left alone: the sentinel is unchanged across the rename, so the next `installShims` rewrites it in place, and once the shims are gone it points at nothing.
+
+**cmd.exe is the exposure.** rc files and PowerShell profiles get their sentinel block rewritten, and the PowerShell profile's `function claude {...}` shadows PATH outright — so those users never notice. cmd.exe has no profile and no aliases; it resolves purely from the registry PATH, where the old installer wrote `%USERPROFILE%\.codev\bin` permanently. Any fix that only touches rc files leaves cmd.exe broken.
+
+`stripShimDirFromPath` (used by `run.ts` to keep spawned agents from recursing back through a shim) strips **both** dirs, case-insensitively on Windows. That's the second layer: it's what saves the invocation when a legacy shim survives deletion (read-only dir, permissions) and when the current process's own PATH still carries the entry the sweep just removed from the registry. Narrowing it back to one dir silently restores the bug.
+
 ## Config refresh and upload self-healing
 
 Supabase coordinates (`supabase_url`, `supabase_anon_key`) and the public gateway base URL (`gateway_url`) are not baked into the source — they're fetched together from the backend's `POST /config` endpoint and cached in `~/.codev-hub/auth.json`. `gateway_url` is read back via `AI_GATEWAY_URL()` / `AI_GATEWAY_OPENAI_URL()` in `src/lib/const.ts` (the latter derives the `<base>/v1` endpoint), which `configure.ts` and `backend.ts` fall back to whenever a flow has no explicit `baseUrl` (the SSO-key path). Like the Supabase accessors they hard-fail with a "run `codevhub install`" message if the cache was never populated. Two invariants keep that cache fresh:
