@@ -601,7 +601,7 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 	return [{ kind: "claude-settings", sourcePath, backupPath, created }];
 }
 
-export type RestoreStatus = "restored" | "kept-live" | "noop";
+export type RestoreStatus = "restored" | "deleted-live" | "noop";
 
 export interface RestoreResult {
 	status: RestoreStatus;
@@ -612,9 +612,14 @@ export interface RestoreResult {
 // "Make this file look pre-CoDev." Three terminal states:
 //   - backup present → swap it over the live file (the user's pre-CoDev
 //     state is reinstated).
-//   - no backup, but a live file exists → leave the live file untouched. With
-//     no backup we can't know what (if anything) preceded CoDev, so we don't
-//     destroy the current config; the user can remove it by hand if they want.
+//   - no backup, but a live file exists → delete the live file. Both callers
+//     (`codevhub remove` and `codevhub restore`) mean "I want this machine
+//     without CoDev", and "no file" is a valid pre-CoDev state — CoDev only
+//     skips the backup step when there was nothing to back up. Note this is
+//     unconditional: a config the user hand-wrote *after* install has no
+//     backup either and is deleted too. That is the deliberate trade-off —
+//     both commands are destructive by construction, and `remove` confirms
+//     before running.
 //   - neither file exists → noop; already at pre-CoDev state.
 function restoreKind(kind: BackupKind): RestoreResult {
 	const sourcePath = sourcePathOf(kind);
@@ -635,7 +640,8 @@ function restoreKind(kind: BackupKind): RestoreResult {
 	}
 
 	if (existsSync(sourcePath)) {
-		return log({ status: "kept-live", sourcePath, backupPath });
+		rmSync(sourcePath, { force: true });
+		return log({ status: "deleted-live", sourcePath, backupPath });
 	}
 
 	return log({ status: "noop", sourcePath, backupPath });

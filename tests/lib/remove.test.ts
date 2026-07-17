@@ -106,23 +106,44 @@ describe("runRemove", () => {
 		}
 	});
 
-	test("no backup but live config exists: keeps live config", async () => {
+	test("no backup but live config exists: deletes live config", async () => {
 		stubFetchOk();
 		seedFile(".claude/settings.json", '{"codev":"wrote-this"}');
 
 		const result = await runRemove();
 
 		expect(result.anyFailed).toBe(false);
-		// No backup to restore from, so the live config is left in place.
-		expect(existsSync(join(tempDir, ".claude/settings.json"))).toBe(true);
+		// No backup to restore from, so "no file" is the pre-CoDev state.
+		expect(existsSync(join(tempDir, ".claude/settings.json"))).toBe(false);
 		const claudeStep = result.steps.find((s) => s.label.startsWith("Claude"));
 		expect(claudeStep?.status).toBe("ok");
-		// Claude restore aggregates three files: settings.json is kept-live
+		// Claude restore aggregates three files: settings.json is deleted-live
 		// (no backup), the other two are noop (neither live nor backup).
-		expect(claudeStep?.detail).toMatch(/kept 1 file \(no backup\)/);
+		expect(claudeStep?.detail).toMatch(/deleted 1 file \(no backup\)/);
 		expect(claudeStep?.detail).toMatch(/2 already clean/);
-		// The kept file is surfaced for the user-facing hint.
-		expect(result.keptPaths).toContain(join(tempDir, ".claude/settings.json"));
+	});
+
+	test("deletes ~/.claude.json and .credentials.json when they have no backup", async () => {
+		stubFetchOk();
+		// Both are Claude-owned files that restoreTool sweeps alongside
+		// settings.json. `remove` means "leave no CoDev environment behind", so a
+		// backup-less one goes even though it may hold a post-install login or
+		// Claude's own project history.
+		seedFile(".claude.json", '{"hasCompletedOnboarding":true,"projects":{}}');
+		seedFile(
+			".claude/.credentials.json",
+			'{"claudeAiOauth":{"accessToken":"t"}}',
+		);
+		seedFile(".claude/settings.json", '{"codev":"wrote-this"}');
+
+		const result = await runRemove();
+
+		expect(result.anyFailed).toBe(false);
+		expect(existsSync(join(tempDir, ".claude.json"))).toBe(false);
+		expect(existsSync(join(tempDir, ".claude/.credentials.json"))).toBe(false);
+		expect(existsSync(join(tempDir, ".claude/settings.json"))).toBe(false);
+		const claudeStep = result.steps.find((s) => s.label.startsWith("Claude"));
+		expect(claudeStep?.detail).toMatch(/deleted 3 files \(no backup\)/);
 	});
 
 	test("no backup and no live config: reports nothing-to-restore as noop", async () => {
@@ -161,22 +182,20 @@ describe("runRemove", () => {
 		expect(step?.detail).toContain("restored from");
 	});
 
-	test("CoDev Code config: keeps the live config when no backup exists", async () => {
+	test("CoDev Code config: deletes the live config when no backup exists", async () => {
 		stubFetchOk();
 		// A fresh install writes this with no prior user config, so there's no
-		// backup — with nothing to restore from, remove leaves the live file be.
+		// backup — deleting it lands the user back at "no file", the pre-CoDev
+		// state.
 		seedFile(".config/codev/codev.json", '{"codev":"wrote-this"}');
 
 		const result = await runRemove();
 
 		expect(result.anyFailed).toBe(false);
-		expect(existsSync(join(tempDir, ".config/codev/codev.json"))).toBe(true);
+		expect(existsSync(join(tempDir, ".config/codev/codev.json"))).toBe(false);
 		const step = result.steps.find((s) => s.label === "CoDev Code config");
 		expect(step?.status).toBe("ok");
-		expect(step?.detail).toContain("no backup; kept");
-		expect(result.keptPaths).toContain(
-			join(tempDir, ".config/codev/codev.json"),
-		);
+		expect(step?.detail).toContain("no backup; deleted");
 	});
 
 	test("not signed in: SSO step reported as noop, not failed", async () => {

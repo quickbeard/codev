@@ -110,9 +110,20 @@ The settings.json backup itself is independent and still happens at configure ti
 
 The install flow's "Skip configuration" auth choice routes Configure through `backupOnly(tool)` instead of the per-agent `configure*` functions: it runs the same `ensureBackup` logic for the agent's main config file (so any existing live config is snapshotted to `*.backup` exactly once) and then exits without writing CoDev's own config. `Configure` accepts `creds: Credentials | null`; `null` is the signal to take this backup-only path, and the finalize Phase reads the same `creds === null` signal to pick `backupClaudeAuth` over `resetClaudeAuth`.
 
-`restoreTool` returns `RestoreResult[]` — a length-1 array for single-file tools, length-3 for any Claude tool (settings.json + .claude.json + .credentials.json, in that order). Each file ends in one of three states: `restored` (a `*.backup` existed → swapped over the live file), `kept-live` (no backup, but a live file exists → **left untouched**; with no backup we can't know what preceded CoDev, so we don't destroy the current config), or `noop` (neither file exists). Callers iterate. `runRestoreOrKeep` (in `src/lib/remove.ts`) rolls Claude's three results into one aggregated step (`restored 2 files; kept 1 file (no backup)` style); `runRestore` / `runRestoreAll` (in `src/lib/restore.ts`) print one line per file. In the sweep, only a genuine `restored` counts as action — an all-`kept-live`/`noop` run exits 1 with "No backups found."
+`restoreTool` returns `RestoreResult[]` — a length-1 array for single-file tools, length-3 for any Claude tool (settings.json + .claude.json + .credentials.json, in that order). Each file ends in one of three states:
 
-`restoreTool` is invoked via `codevhub restore <agent>` (one tool) or bare `codevhub restore` (sweep all tools with a backup). The dispatcher accepts **launch names** — `claude`/`codex`/`opencode`/`codev` — and `toolForRestoreAgent` in `src/lib/restore.ts` maps them to the internal `Tool` type. Behavior splits on path: `runRestore` (single) treats a missing backup as an error and exits 1; `runRestoreAll` (sweep) skips tools without backups silently, only erroring when *every* tool was skipped. Keep that asymmetry — it's right for both contexts.
+- `restored` — a `*.backup` existed → swapped over the live file. Checked first, so a backup always wins.
+- `deleted-live` — no backup, but a live file exists → **the live file is deleted**. `ensureBackup` only skips the backup step when there was nothing to back up, so "no file" is a legitimate pre-CoDev state.
+- `noop` — neither file exists; already pre-CoDev.
+
+**The delete is unconditional, and that is the design.** Both entry points (`codevhub remove` and `codevhub restore`) mean "I want this machine without CoDev", so they are destructive by construction and no ownership check gates the deletion. Two consequences to keep in mind rather than "fix":
+
+- A config the user hand-wrote **after** install has no backup either, and is deleted too — including for a tool CoDev never configured, since `remove` and the bare `restore` sweep all five tools unconditionally.
+- Claude's `~/.claude.json` and `~/.claude/.credentials.json` ride along in the same length-3 bundle, so a backup-less one goes even though it may hold Claude's own project history or a login made after install. This is intended: `remove` prompts for confirmation first, and a leftover login is exactly the CoDev-era state the command exists to erase.
+
+Callers iterate. `runRestoreOrDelete` (in `src/lib/remove.ts`) rolls Claude's three results into one aggregated step (`restored 2 files; deleted 1 file (no backup)` style); `runRestore` / `runRestoreAll` (in `src/lib/restore.ts`) print one line per file. In the sweep, a `deleted-live` **counts as action just like a `restored`** — only an all-`noop` run exits 1 with "No backups found." Deleting seven configs and then reporting "nothing to restore" would be a lie, so keep `deleted-live` out of the noop bucket.
+
+`restoreTool` is invoked via `codevhub restore <agent>` (one tool) or bare `codevhub restore` (sweep all tools). The dispatcher accepts **launch names** — `claude`/`codex`/`opencode`/`codev` — and `toolForRestoreAgent` in `src/lib/restore.ts` maps them to the internal `Tool` type. `runRestore` (single) always returns 0 — a missing backup is not an error, it just reports what it deleted; `runRestoreAll` (sweep) returns 1 only when every result was a noop, or when a tool threw.
 
 ## Config refresh and upload self-healing
 
