@@ -9,6 +9,10 @@ import {
 import { join } from "node:path";
 import { VERSION } from "@/lib/const.js";
 import { cliLogsDir } from "@/lib/paths.js";
+import { ensureSystemCaCerts } from "@/lib/tls.js";
+
+// The CA merge is logged once per process, on the first request that triggers it.
+let caMergeLogged = false;
 
 // CoDev's local diagnostic log: one Elastic-Common-Schema NDJSON document per
 // line, written to ~/.codev-hub/logs/codev-YYYYMMDD.ndjson (UTC date). The files
@@ -267,6 +271,21 @@ export async function loggedFetch(
 ): Promise<Response> {
 	const url = String(input);
 	const method = init?.method ?? "GET";
+	// Trust the OS certificate store before the first socket opens, so users
+	// behind a TLS-intercepting proxy don't hit `self-signed certificate in
+	// certificate chain`. Memoized, so only the first request pays for it.
+	const ca = ensureSystemCaCerts();
+	if (!caMergeLogged) {
+		caMergeLogged = true;
+		logDebug(`system CA store: ${ca.status}`, {
+			action: "http.request",
+			extra: {
+				ca_status: ca.status,
+				ca_system_count: ca.systemCount,
+				ca_error: ca.error ?? null,
+			},
+		});
+	}
 	logDebug(`http ${method} ${endpoint}`, {
 		action: "http.request",
 		eventType: "start",
