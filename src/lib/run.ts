@@ -5,6 +5,7 @@ import { delimiter, join } from "node:path";
 import { logError, logInfo, logWarn } from "@/lib/log.js";
 import { claudeNativeBinaryMissing } from "@/lib/npm.js";
 import { stripShimDirFromPath } from "@/lib/shims.js";
+import { childCaEnv } from "@/lib/tls.js";
 
 const AGENT_LABEL: Record<string, string> = {
 	claude: "Claude Code",
@@ -60,6 +61,13 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 		const env: NodeJS.ProcessEnv = {
 			...process.env,
 			PATH: stripShimDirFromPath(process.env.PATH),
+			// OpenCode and CoDev Code are Bun binaries, which ignore the OS trust
+			// store — behind an intercepting proxy they fail like we did until
+			// handed our bundle. Claude Code and Codex read the OS store natively
+			// and don't need this; it's harmless to them because
+			// NODE_EXTRA_CA_CERTS appends rather than replaces. Only set once
+			// something has detected interception, so this is one existsSync.
+			...childCaEnv(),
 		};
 		// CoDev Code (the codev-code package) has its own self-updater, but the
 		// hub owns updates (`codevhub update`) — disable the agent's updater at

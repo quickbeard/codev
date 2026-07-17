@@ -3,6 +3,11 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Tool } from "@/lib/configure.js";
 import { logDebug, logWarn } from "@/lib/log.js";
+import {
+	childCaEnv,
+	ensureSystemCaBundle,
+	outputHasCertError,
+} from "@/lib/tls.js";
 
 // Tools installed via npm-global. Extension/plugin variants (Claude Code +
 // Continue) are not npm packages — VS Code installs them via
@@ -61,7 +66,34 @@ export interface ExecResult {
 	error: NodeJS.ErrnoException | null;
 }
 
-export function execAsync(file: string, args: string[]): Promise<ExecResult> {
+// Runs a child, and if it failed because *it* didn't trust the certificate
+// chain, writes the CA bundle and runs it once more with NODE_EXTRA_CA_CERTS.
+//
+// The bundle usually already exists by now — `codevhub install` logs in before
+// it installs, so loggedFetch's own recovery has run. This covers the gap where
+// nothing fetched first (a cached session, or `codevhub update`), leaving npm to
+// be the first thing on the machine to meet the proxy.
+//
+// Only retries when the bundle is newly written: if the child still fails with
+// the bundle in hand, its CA isn't in the OS store either and a second attempt
+// would just be slower.
+export async function execAsync(
+	file: string,
+	args: string[],
+): Promise<ExecResult> {
+	const first = await execOnce(file, args);
+	if (!first.error || !outputHasCertError(first.stderr)) return first;
+	if (childCaEnv().NODE_EXTRA_CA_CERTS) return first;
+	const bundlePath = ensureSystemCaBundle();
+	if (!bundlePath) return first;
+	logDebug(`retrying ${file} with the OS CA bundle`, {
+		action: "process.spawn",
+		extra: { command: file, ca_bundle: bundlePath },
+	});
+	return execOnce(file, args);
+}
+
+function execOnce(file: string, args: string[]): Promise<ExecResult> {
 	// Every child process codev shells out to funnels through here (npm, the
 	// agent --version probes, `code --install-extension`, JetBrains CLIs,
 	// codegraph), so this one seam gives the diagnostic log full child-process
@@ -72,6 +104,9 @@ export function execAsync(file: string, args: string[]): Promise<ExecResult> {
 		eventType: "start",
 		extra: { command: file, args },
 	});
+	// npm and the Bun-based agents ignore the OS trust store, so hand them our
+	// bundle when one exists. Costs a single existsSync on the happy path.
+	const env: NodeJS.ProcessEnv = { ...process.env, ...childCaEnv() };
 	const startedAt = Date.now();
 	return new Promise((resolve) => {
 		const done = (
@@ -119,12 +154,12 @@ export function execAsync(file: string, args: string[]): Promise<ExecResult> {
 		if (USE_SHELL) {
 			execFile(
 				`${file} ${args.join(" ")}`,
-				{ shell: true, encoding: "utf-8" },
+				{ shell: true, encoding: "utf-8", env },
 				(err, stdout, stderr) =>
 					done(err as NodeJS.ErrnoException | null, stdout, stderr),
 			);
 		} else {
-			execFile(file, args, { encoding: "utf-8" }, (err, stdout, stderr) =>
+			execFile(file, args, { encoding: "utf-8", env }, (err, stdout, stderr) =>
 				done(err as NodeJS.ErrnoException | null, stdout, stderr),
 			);
 		}

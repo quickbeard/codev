@@ -7,6 +7,12 @@ import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { claudeNativeBinaryMissing } from "@/lib/npm.js";
 import { agentOnPath, runAgent, spawner } from "@/lib/run.js";
+import {
+	ensureSystemCaBundle,
+	resetSystemCaCertsCache,
+	systemCaBundlePath,
+	tlsApi,
+} from "@/lib/tls.js";
 
 // Stub the native-binary probe so the runtime repair hint can be exercised
 // without a real npm-global Claude Code install. Defaults to "present" so
@@ -254,6 +260,46 @@ describe("runAgent", () => {
 		} finally {
 			vi.unstubAllEnvs();
 		}
+	});
+
+	// OpenCode and CoDev Code are Bun binaries and ignore the OS trust store, so
+	// behind an intercepting proxy they need our bundle handed to them.
+	describe("system CA bundle", () => {
+		beforeEach(() => {
+			vi.stubEnv("HOME", tempDir);
+			vi.stubEnv("USERPROFILE", tempDir);
+			vi.stubEnv("NODE_EXTRA_CA_CERTS", undefined);
+		});
+
+		afterEach(() => {
+			resetSystemCaCertsCache();
+			vi.unstubAllEnvs();
+			// This file's top-level afterEach only restores the console spy, so the
+			// tlsApi spy would otherwise carry its call history into the next case.
+			vi.restoreAllMocks();
+		});
+
+		test("passes NODE_EXTRA_CA_CERTS once the bundle exists", async () => {
+			vi.spyOn(tlsApi, "getCACertificates").mockReturnValue([
+				"-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n",
+			]);
+			ensureSystemCaBundle();
+
+			const env = await runCapturingEnv("codev");
+
+			expect(env?.NODE_EXTRA_CA_CERTS).toBe(systemCaBundlePath());
+		});
+
+		// Nothing detected interception for this user, so the agent must launch
+		// exactly as it did before — no bundle, no env var, no OS-store read.
+		test("passes nothing when no bundle has been written", async () => {
+			const get = vi.spyOn(tlsApi, "getCACertificates");
+
+			const env = await runCapturingEnv("codev");
+
+			expect(env?.NODE_EXTRA_CA_CERTS).toBeUndefined();
+			expect(get).not.toHaveBeenCalled();
+		});
 	});
 });
 

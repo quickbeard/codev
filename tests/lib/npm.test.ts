@@ -1,7 +1,9 @@
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	claudeNativeBinaryMissing,
 	detectInstalledViaNpm,
@@ -11,6 +13,12 @@ import {
 	npmGlobalRoot,
 	verifyInstall,
 } from "@/lib/npm.js";
+import {
+	ensureSystemCaBundle,
+	resetSystemCaCertsCache,
+	systemCaBundlePath,
+	tlsApi,
+} from "@/lib/tls.js";
 
 // ESM module namespaces are frozen — vi.spyOn can't redefine `execFile` /
 // `existsSync` directly. We replace them up-front with vi.fn() via vi.mock()
@@ -85,6 +93,117 @@ afterEach(() => {
 	vi.mocked(child_process.execFile).mockReset();
 	vi.mocked(fs.existsSync).mockReset();
 	vi.mocked(fs.statSync).mockReset();
+});
+
+// `npm install -g` is a separate process with its own trust store: Node ignores
+// the OS store, so behind an intercepting proxy npm fails exactly like our own
+// fetch did. These pin the recovery.
+describe("execAsync CA recovery", () => {
+	const PEM_A = "-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n";
+	const PEM_B = "-----BEGIN CERTIFICATE-----\nBBB\n-----END CERTIFICATE-----\n";
+	let tempDir: string;
+
+	// Captures the env each child was spawned with, which the shared stub drops.
+	function stubExecFileCapturingEnv(
+		handler: (n: number) => {
+			error?: Error | null;
+			stdout?: string;
+			stderr?: string;
+		},
+	): NodeJS.ProcessEnv[] {
+		const envs: NodeJS.ProcessEnv[] = [];
+		vi.mocked(child_process.execFile).mockImplementation(((
+			...callArgs: unknown[]
+		) => {
+			const cb = callArgs[callArgs.length - 1] as ExecCb;
+			const opts = callArgs.find(
+				(a): a is { env?: NodeJS.ProcessEnv } =>
+					typeof a === "object" && a !== null && !Array.isArray(a),
+			);
+			envs.push(opts?.env ?? {});
+			const r = handler(envs.length);
+			setImmediate(() => cb(r.error ?? null, r.stdout ?? "", r.stderr ?? ""));
+			return {} as unknown as child_process.ChildProcess;
+		}) as unknown as typeof child_process.execFile);
+		return envs;
+	}
+
+	beforeEach(async () => {
+		tempDir = mkdtempSync(join(tmpdir(), "codev-npm-ca-"));
+		vi.stubEnv("HOME", tempDir);
+		vi.stubEnv("USERPROFILE", tempDir);
+		vi.stubEnv("NODE_EXTRA_CA_CERTS", undefined);
+		// node:fs is module-mocked here, and the shared afterEach resets the impl.
+		// childCaEnv must see real disk: a stub that claims the bundle exists
+		// before it's written makes execAsync think the child was already helped
+		// and skip the retry.
+		const actualFs = await vi.importActual<typeof import("node:fs")>("node:fs");
+		vi.mocked(fs.existsSync).mockImplementation(actualFs.existsSync);
+		vi.spyOn(tlsApi, "getCACertificates").mockImplementation((type) =>
+			type === "system" ? [PEM_B] : [PEM_A],
+		);
+	});
+
+	afterEach(() => {
+		resetSystemCaCertsCache();
+		vi.unstubAllEnvs();
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	test("retries a cert-failed install with the CA bundle", async () => {
+		const envs = stubExecFileCapturingEnv((n) =>
+			n === 1
+				? {
+						error: new Error("Command failed"),
+						stderr: "npm error code SELF_SIGNED_CERT_IN_CHAIN",
+					}
+				: { stdout: "ok" },
+		);
+
+		const err = await installPackage("some-pkg");
+
+		expect(err).toBeNull();
+		expect(envs.length).toBe(2);
+		// First attempt is unaided — nothing had detected interception yet.
+		expect(envs[0]?.NODE_EXTRA_CA_CERTS).toBeUndefined();
+		expect(envs[1]?.NODE_EXTRA_CA_CERTS).toBe(systemCaBundlePath());
+	});
+
+	test("hands the bundle to the first attempt once it exists", async () => {
+		ensureSystemCaBundle();
+		const envs = stubExecFileCapturingEnv(() => ({ stdout: "ok" }));
+
+		await installPackage("some-pkg");
+
+		expect(envs.length).toBe(1);
+		expect(envs[0]?.NODE_EXTRA_CA_CERTS).toBe(systemCaBundlePath());
+	});
+
+	test("does not retry an ordinary npm failure", async () => {
+		const envs = stubExecFileCapturingEnv(() => ({
+			error: new Error("Command failed"),
+			stderr: "npm error 404 Not Found - GET https://registry/some-pkg",
+		}));
+
+		const err = await installPackage("some-pkg");
+
+		expect(err).toContain("404");
+		expect(envs.length).toBe(1);
+	});
+
+	// Retrying with the same env would just be slower — the CA isn't in the OS
+	// store either, so nothing changed between attempts.
+	test("gives up when there is no bundle to write", async () => {
+		vi.spyOn(tlsApi, "getCACertificates").mockReturnValue([]);
+		const envs = stubExecFileCapturingEnv(() => ({
+			error: new Error("Command failed"),
+			stderr: "npm error code SELF_SIGNED_CERT_IN_CHAIN",
+		}));
+
+		await installPackage("some-pkg");
+
+		expect(envs.length).toBe(1);
+	});
 });
 
 describe("npm.ts", () => {

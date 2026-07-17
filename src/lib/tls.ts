@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import tls from "node:tls";
 
 // Node verifies TLS against its own bundled Mozilla CA snapshot and never
@@ -94,6 +97,89 @@ function mergeSystemCaCerts(): CaMergeResult {
 // Test-only: forget that the merge ran so each case starts clean.
 export function resetSystemCaCertsCache(): void {
 	attempted = false;
+	bundle = undefined;
+}
+
+// A PEM bundle of every CA we trust, for handing to child processes.
+//
+// applySystemCaCertsOnce only fixes *this* process. `npm install -g` and the
+// agents are separate processes behind the same proxy, and each has its own
+// trust store:
+//   - npm (Node) ignores the OS store, so it fails exactly like we did. It
+//     honors NODE_EXTRA_CA_CERTS, which *appends* to the defaults. (Its own
+//     `cafile`/`ca` config REPLACES the root set, so pointing that at a
+//     corporate root would break every other registry — don't.)
+//   - opencode / codev-code (Bun) also ignore the OS store by default, and
+//     honor NODE_EXTRA_CA_CERTS since Bun 1.1.22.
+//   - Claude Code reads the OS store itself (its docs name Zscaler), and Codex
+//     reads it via rustls-native-certs. Neither needs us; NODE_EXTRA_CA_CERTS
+//     is merely harmless to them because it appends.
+// Deliberately NOT SSL_CERT_FILE (Codex's knob): it *replaces* the trust store
+// rather than appending, so aiming it at this bundle could narrow trust for a
+// tool that already works. Leave the natively-fine tools alone.
+export function systemCaBundlePath(): string {
+	return join(homedir(), ".codev-hub", "system-ca.pem");
+}
+
+let bundle: string | null | undefined;
+
+// Writes the bundle, once per process. Returns its path, or null when there's
+// nothing useful to write.
+//
+// Only ever called once we've *seen* a certificate failure, for the same reason
+// the merge is: reading the OS store is a synchronous ~300ms stall on Windows.
+// Unaffected users never reach this.
+export function ensureSystemCaBundle(): string | null {
+	if (bundle !== undefined) return bundle;
+	bundle = writeSystemCaBundle();
+	return bundle;
+}
+
+function writeSystemCaBundle(): string | null {
+	if (!tlsApi.supported()) return null;
+	try {
+		const system = tlsApi.getCACertificates("system");
+		if (system.length === 0) return null;
+		// Write the *complete* set, not just the corporate root: "default" carries
+		// the bundled Mozilla roots plus any NODE_EXTRA_CA_CERTS the user already
+		// configured, so a child pointed at this file trusts everything it used to
+		// plus the proxy.
+		const certs = [
+			...new Set([...tlsApi.getCACertificates("default"), ...system]),
+		];
+		// Terminate every cert ourselves. Node's bundled certs come back WITHOUT a
+		// trailing newline while the OS store's carry one, so a plain join glues
+		// `-----END CERTIFICATE----------BEGIN CERTIFICATE-----` together and
+		// OpenSSL rejects the whole file ("bad end line"). Node then only warns and
+		// ignores the file, so getting this wrong silently does nothing.
+		const pem = certs
+			.map((cert) => (cert.endsWith("\n") ? cert : `${cert}\n`))
+			.join("");
+		const path = systemCaBundlePath();
+		mkdirSync(join(path, ".."), { recursive: true });
+		writeFileSync(path, pem);
+		return path;
+	} catch {
+		// Best-effort: a child that can't be helped fails with its own error,
+		// which is no worse than before.
+		return null;
+	}
+}
+
+// Env additions that make a spawned child trust what we trust.
+//
+// Cheap by design — one existsSync, no OS-store read — because every spawn pays
+// it. The bundle only exists once something has detected interception, so
+// unaffected users get an empty object forever.
+export function childCaEnv(env: NodeJS.ProcessEnv = process.env): {
+	NODE_EXTRA_CA_CERTS?: string;
+} {
+	// A user who set this themselves has made a deliberate choice; ours would
+	// silently replace it (the var takes a single path, not a list).
+	if (env.NODE_EXTRA_CA_CERTS) return {};
+	const path = systemCaBundlePath();
+	if (!existsSync(path)) return {};
+	return { NODE_EXTRA_CA_CERTS: path };
 }
 
 // OpenSSL verify failures that mean "I don't trust this chain", as opposed to
@@ -116,6 +202,27 @@ export function isCertError(err: unknown): boolean {
 	if (!(cause instanceof Error)) return false;
 	const code = (cause as NodeJS.ErrnoException).code;
 	return code !== undefined && CERT_ERROR_CODES.has(code);
+}
+
+// True when a child process's output blames the certificate chain.
+//
+// A child's failure reaches us as text, not a typed error, so this is the
+// stderr equivalent of isCertError. Matches the OpenSSL codes (npm prints
+// `code SELF_SIGNED_CERT_IN_CHAIN`) and the message text other runtimes use —
+// both spellings, since OpenSSL 3.2 hyphenated "self-signed".
+const CERT_ERROR_TEXT = [
+	...CERT_ERROR_CODES,
+	"self-signed certificate",
+	"self signed certificate",
+	"unable to get local issuer certificate",
+	"unable to verify the first certificate",
+];
+
+export function outputHasCertError(text: string): boolean {
+	const haystack = text.toLowerCase();
+	return CERT_ERROR_TEXT.some((needle) =>
+		haystack.includes(needle.toLowerCase()),
+	);
 }
 
 // Pure: reading the OS store here would put a ~300ms Windows stall on the error

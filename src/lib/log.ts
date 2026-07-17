@@ -9,7 +9,11 @@ import {
 import { join } from "node:path";
 import { VERSION } from "@/lib/const.js";
 import { cliLogsDir } from "@/lib/paths.js";
-import { applySystemCaCertsOnce, isCertError } from "@/lib/tls.js";
+import {
+	applySystemCaCertsOnce,
+	ensureSystemCaBundle,
+	isCertError,
+} from "@/lib/tls.js";
 
 // Runs a request, and if it fails because the certificate chain isn't trusted,
 // merges the OS trust store into Node's defaults and tries once more.
@@ -36,9 +40,17 @@ async function fetchTrustingSystemCa(
 		if (!isCertError(err)) throw err;
 		const ca = applySystemCaCertsOnce();
 		if (ca?.status !== "merged") throw err;
+		// We now know this machine is behind an intercepting proxy. Persist the
+		// bundle so the children we spawn later — `npm install -g`, the agents —
+		// inherit the same trust instead of each rediscovering this the hard way.
+		const bundlePath = ensureSystemCaBundle();
 		logInfo("certificate chain untrusted; retrying with the OS CA store", {
 			action: "http.request",
-			extra: { endpoint, ca_system_count: ca.systemCount },
+			extra: {
+				endpoint,
+				ca_system_count: ca.systemCount,
+				ca_bundle: bundlePath,
+			},
 		});
 		return await fetch(input, init);
 	}

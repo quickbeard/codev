@@ -148,7 +148,24 @@ Node verifies TLS against its **own bundled Mozilla CA snapshot and never consul
 
 `describeNetworkError` unwraps Node's bare `fetch failed` (the real reason hides on `err.cause`) and appends a remedy for cert codes. It exists because **Node's own `--use-system-ca` hint pointedly excludes `SELF_SIGNED_CERT_IN_CHAIN`** — `crypto_common.cc` gates it on `DEPTH_ZERO_SELF_SIGNED_CERT` / `UNABLE_TO_VERIFY_LEAF_SIGNATURE` / `UNABLE_TO_GET_ISSUER_CERT` only, so the corporate-proxy case, the one the hint most exists for, is the one that prints nothing. If a cert error survives the merge, the root isn't in the OS store either, so the hint names `NODE_EXTRA_CA_CERTS` rather than `--use-system-ca`, which would be a dead end. Keep `certHint` **pure** — reading the OS store to word a sentence would put that same Windows stall on the error path, and the retry has already read it.
 
-Note the blast radius: this only covers **our own** process. `npm i -g` during install and the agents themselves are separate processes behind the same proxy and need `NODE_EXTRA_CA_CERTS` / npm's `cafile` of their own.
+### Child processes
+
+Merging CAs fixes *this* process only. `npm i -g` and the agents are separate processes behind the same proxy, each with its own trust store, so `ensureSystemCaBundle` writes every CA we trust to `~/.codev-hub/system-ca.pem` and `childCaEnv` points children at it via `NODE_EXTRA_CA_CERTS`. Both `execAsync` (npm, `code`, JetBrains CLIs, codegraph) and `runAgent` (the agents) inject it.
+
+Which children actually need it, and why the env var is the one we chose:
+
+| child | runtime | needs it? |
+|---|---|---|
+| npm | Node | **yes** — ignores the OS store, fails exactly like we did |
+| opencode / codev-code | Bun | **yes** — ignores the OS store; honors `NODE_EXTRA_CA_CERTS` since Bun 1.1.22 |
+| Claude Code | bun-native | no — reads the OS store itself ([its docs name Zscaler](https://code.claude.com/docs/en/network-config)) |
+| Codex | Rust/rustls | no — reads the OS store via rustls-native-certs |
+
+- **`NODE_EXTRA_CA_CERTS` appends**, which is what makes it safe to set for all four: the two that don't need it are unharmed. Deliberately **not** npm's `cafile`/`ca` or Codex's `SSL_CERT_FILE` — those **replace** the root set, so pointing them at a corporate root breaks every other endpoint, and aiming them at our bundle could narrow trust for a tool that already works.
+- **The bundle is the complete set** (`default` ∪ `system`), never just the corporate root — `default` carries the Mozilla roots plus any `NODE_EXTRA_CA_CERTS` the user set, so a child gains the proxy without losing anything.
+- **Terminate every cert when concatenating.** Node returns the bundled certs *without* a trailing newline and the OS store's *with* one; a plain `join("")` produces `-----END CERTIFICATE----------BEGIN CERTIFICATE-----`, OpenSSL rejects the file ("bad end line"), and **Node only warns and ignores it** — so the whole feature silently does nothing. `tests/lib/tls.test.ts` fixtures deliberately preserve that newline skew; making them uniform is what let this ship once already.
+- **A user's own `NODE_EXTRA_CA_CERTS` wins** — the var holds a single path, so ours would silently replace theirs.
+- `execAsync` retries a child once when its *stderr* blames the chain (`outputHasCertError` — the text-level twin of `isCertError`, since a child's failure reaches us as output, not a typed error). Usually the bundle already exists, because `codevhub install` logs in before it installs; this covers the gap where nothing fetched first (a cached session, or `codevhub update`) and npm is the first thing on the machine to meet the proxy.
 
 ## Diagnostic logging
 
