@@ -19,6 +19,7 @@ import {
 	saveSkillhubCookie,
 } from "@/lib/auth.js";
 import { type SkillhubUser, skillhubSignIn } from "@/lib/skillhub.js";
+import { describeNetworkError } from "@/lib/tls.js";
 
 type Phase = "preparing" | "login" | "refreshing-config" | "done";
 
@@ -98,7 +99,7 @@ function AdminLoginApp({
 				saveSkillhubCookie(cookie);
 				handleDone(u);
 			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
+				const msg = describeNetworkError(err);
 				setError(msg);
 				// Reject waitUntilExit so the dispatcher exits non-zero; hold the
 				// error frame briefly so it's readable first.

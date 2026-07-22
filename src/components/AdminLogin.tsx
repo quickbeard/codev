@@ -3,6 +3,7 @@ import Spinner from "ink-spinner";
 import { useCallback, useRef, useState } from "react";
 import { saveSkillhubCookie } from "@/lib/auth.js";
 import { type SkillhubUser, skillhubSignIn } from "@/lib/skillhub.js";
+import { describeNetworkError } from "@/lib/tls.js";
 
 interface AdminLoginProps {
 	onDone: (user: SkillhubUser) => void;
@@ -56,7 +57,7 @@ export function AdminLogin({
 				saveSkillhubCookie(cookie);
 				onDone(user);
 			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
+				const msg = describeNetworkError(err);
 				const used = attemptsRef.current + 1;
 				attemptsRef.current = used;
 				setAttempts(used);
