@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PasteBackPrompt, usePasteBack } from "@/components/PasteBack.js";
 import { type AuthData, login } from "@/lib/auth.js";
 import { clipboard } from "@/lib/clipboard.js";
+import { describeNetworkError } from "@/lib/tls.js";
 
 interface LoginProps {
 	onDone: (auth: AuthData) => void;
@@ -71,18 +72,9 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 				onDone(auth);
 			})
 			.catch((err: Error) => {
-				// Node's built-in fetch throws `TypeError: fetch failed` for any
-				// network-layer failure and stashes the real reason (DNS, TLS,
-				// proxy interception, etc.) on `err.cause`. Surface it so users
-				// can self-diagnose instead of staring at a bare "fetch failed".
-				const cause = err.cause;
-				const causeMsg =
-					cause instanceof Error
-						? cause.message
-						: cause !== undefined
-							? String(cause)
-							: "";
-				setError(causeMsg ? `${err.message} (${causeMsg})` : err.message);
+				// Unwraps Node's bare `fetch failed` to the real reason (DNS, TLS,
+				// proxy interception) and appends a remedy for certificate failures.
+				setError(describeNetworkError(err));
 			});
 	}, [addLog, onDone, attempt]);
 

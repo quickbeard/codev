@@ -202,7 +202,12 @@ switch (command) {
 	}
 	case "remove": {
 		const skipConfirm = args.includes("--yes") || args.includes("-y");
-		const { waitUntilExit } = render(<RemoveApp skipConfirm={skipConfirm} />);
+		// Undocumented (see `restore` below). Long form only — no `-f` alias, so a
+		// reflex `-f` borrowed from `upload` can't unconditionally delete configs.
+		const force = args.includes("--force");
+		const { waitUntilExit } = render(
+			<RemoveApp skipConfirm={skipConfirm} force={force} />,
+		);
 		try {
 			await waitUntilExit();
 			process.exit(0);
@@ -267,10 +272,17 @@ switch (command) {
 		}
 		break;
 	}
+	// `--force` is a deliberate escape hatch and is deliberately absent from
+	// `help.ts`: it deletes a backup-less live config whoever wrote it, skipping
+	// the authorship check that normally preserves the user's own files. It never
+	// overrides a `*.backup`, which is still restored. Long form only — no `-f`
+	// alias, so the reflex `-f` from `upload`/`login` can't trigger it by
+	// accident. Nothing invokes it on the user's behalf; it only fires when typed.
 	case "restore": {
-		const agent = args[0];
+		const force = args.includes("--force");
+		const agent = args.find((a) => !a.startsWith("-"));
 		if (agent === undefined) {
-			process.exit(runRestoreAll());
+			process.exit(runRestoreAll(force));
 		}
 		if (!(RESTORE_AGENTS as readonly string[]).includes(agent)) {
 			console.error(
@@ -278,7 +290,7 @@ switch (command) {
 			);
 			process.exit(1);
 		}
-		process.exit(runRestore(toolForRestoreAgent(agent as RestoreAgent)));
+		process.exit(runRestore(toolForRestoreAgent(agent as RestoreAgent), force));
 		break;
 	}
 	// `codevhub init` initializes the current project for CoDev. Hint that the

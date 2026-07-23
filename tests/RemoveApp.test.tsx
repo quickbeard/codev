@@ -157,20 +157,17 @@ describe("RemoveApp", () => {
 		expect(out).toContain("Removed successfully.");
 	});
 
-	test("hints about backup-less config files that were left in place", async () => {
+	test("reports the user's own config files that were preserved", async () => {
 		stubRunRemove({
 			...SUCCESS_RESULT,
-			keptPaths: [
-				"/x/.config/codev-code/opencode.json",
-				"/x/.claude/settings.json",
-			],
+			keptPaths: ["/x/.config/codev/codev.json", "/x/.claude/settings.json"],
 		});
 		const { frames } = render(<RemoveApp skipConfirm />);
 		await waitForFrame(frames, "Removed successfully.");
 		const out = flat(history(frames));
-		expect(out).toContain("Left 2 config files in place (no backup");
-		expect(out).toContain("Delete manually for a clean state:");
-		expect(out).toContain("- /x/.config/codev-code/opencode.json");
+		expect(out).toContain("Kept 2 config files CoDev didn't write");
+		expect(out).toContain("your own settings were left untouched:");
+		expect(out).toContain("- /x/.config/codev/codev.json");
 		expect(out).toContain("- /x/.claude/settings.json");
 		// The success message still shows alongside the hint.
 		expect(out).toContain("Removed successfully.");

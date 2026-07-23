@@ -11,6 +11,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import TOML from "@iarna/toml";
+import { type ParseError, parse } from "jsonc-parser";
 import {
 	AI_GATEWAY_OPENAI_URL,
 	AI_GATEWAY_URL,
@@ -221,15 +222,26 @@ function readCodexConfig(): AgentConfigResult {
 	}
 }
 
-// Shared by opencode and codev-code — the fork reads the same opencode.json
-// shape, just from ~/.config/codev-code instead of ~/.config/opencode.
+// Both agents accept .json and .jsonc, and either config may legitimately be a
+// .jsonc (see openCodeConfigPath). Parse the superset so a comment or a trailing
+// comma can't throw — matching how the agents themselves read it. Still throws
+// on genuinely malformed input, per the contract above.
+function parseJsonc(text: string): unknown {
+	const errors: ParseError[] = [];
+	const value: unknown = parse(text, errors, { allowTrailingComma: true });
+	if (errors.length > 0) throw new Error("invalid JSON/JSONC");
+	return value;
+}
+
+// Shared by opencode and codev-code — the fork reads the same config shape, just
+// from ~/.config/codev/codev.json(c) instead of ~/.config/opencode/opencode.json.
 function readOpenCodeConfig(
 	kind: "opencode-config" | "codev-code-config",
 ): AgentConfigResult {
 	const path = sourcePathOf(kind);
 	if (!existsSync(path)) return {};
 	try {
-		const raw = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		const raw = parseJsonc(readFileSync(path, "utf-8"));
 		// Guard: skip non-CoDev configs (no aigateway provider).
 		if (!hasNestedKey(raw, OPENCODE_K.provider, OPENCODE_K.providerKey))
 			return {};
@@ -270,6 +282,39 @@ const CONTINUE_K = {
 	configVersion: atob("MC4wLjE="),
 };
 
+// OpenCode and the codev-code fork share one config loader, so they share this
+// hazard: each reads *both* `<base>.json` and `<base>.jsonc` from its config
+// dir and deep-merges them, json first, jsonc second — so a jsonc silently wins
+// leaf-by-leaf over anything we write to the json.
+//
+// Their own writers go through the loader's `globalConfigFile()`, which prefers
+// .jsonc and *creates* one when no config exists — upstream seeds a `$schema`
+// stub on any default run, and `codev configure` patches into whatever it picks.
+// A user who launches the agent before `codevhub install` therefore already has
+// a jsonc waiting to shadow us. Target the same file the agent would, so exactly
+// one gateway block exists.
+//
+// The order matters, and each rule earns its place:
+//  1. A `*.backup` pins the file we already configured. Without this, a jsonc
+//     appearing after configure would send restore to the wrong candidate and
+//     strand the backup forever.
+//  2. An existing jsonc is the agent's write target, and would shadow us.
+//  3. Otherwise `<base>.json` — which also keeps the agent from auto-seeding a
+//     jsonc later, since `globalConfigFile()` finds `<base>.json` first and
+//     leaves well enough alone.
+//
+// Upstream lists a third candidate, `config.json`, that we deliberately never
+// target: it is merged *first*, i.e. lowest priority, so writing there would
+// leave us shadowed by both of the others.
+function openCodeConfigPath(dir: string, base: string): string {
+	const jsonc = join(dir, `${base}.jsonc`);
+	const json = join(dir, `${base}.json`);
+	for (const candidate of [jsonc, json]) {
+		if (existsSync(`${candidate}.backup`)) return candidate;
+	}
+	return existsSync(jsonc) ? jsonc : json;
+}
+
 function sourcePathOf(kind: BackupKind): string {
 	switch (kind) {
 		case "claude-settings":
@@ -281,11 +326,15 @@ function sourcePathOf(kind: BackupKind): string {
 		case "codex-config":
 			return join(homedir(), ".codex", "config.toml");
 		case "opencode-config":
-			return join(homedir(), ".config", "opencode", "opencode.json");
-		// The codev-code fork keeps upstream's config filename but relocates the
-		// XDG app dir (its `Global.Path` constant is "codev-code").
+			return openCodeConfigPath(
+				join(homedir(), ".config", "opencode"),
+				"opencode",
+			);
+		// The fork renamed both halves of upstream's path: the XDG app dir (its
+		// `Global.Path` constant is "codev") and the config basename. Neither old
+		// name is read anymore — the fork dropped the fallback.
 		case "codev-code-config":
-			return join(homedir(), ".config", "codev-code", "opencode.json");
+			return openCodeConfigPath(join(homedir(), ".config", "codev"), "codev");
 		case "continue-config":
 			return join(homedir(), ".continue", "config.yaml");
 	}
@@ -363,7 +412,7 @@ function isCodevOpenCodeConfig(
 	const path = sourcePathOf(kind);
 	if (!existsSync(path)) return false;
 	try {
-		const config = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		const config = parseJsonc(readFileSync(path, "utf-8"));
 		return hasNestedKey(config, OPENCODE_K.provider, OPENCODE_K.providerKey);
 	} catch {
 		return false;
@@ -379,6 +428,29 @@ function isCodevContinueConfig(): boolean {
 	try {
 		const raw = readFileSync(path, "utf-8");
 		return raw.includes(CONTINUE_K.configName);
+	} catch {
+		return false;
+	}
+}
+
+// ~/.claude.json has no CoDev-specific marker key — `resetClaudeAuth` writes it
+// as exactly `{hasCompletedOnboarding: true}` to skip the CLI's first-run
+// wizard. That whole-file shape *is* the marker: Claude Code's own
+// ~/.claude.json accumulates real user state (projects, history, mcpServers),
+// so anything beyond the single onboarding key belongs to the user, not us.
+function isCodevClaudeJsonStub(): boolean {
+	const path = sourcePathOf("claude-json");
+	if (!existsSync(path)) return false;
+	try {
+		const config = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		if (!config || typeof config !== "object" || Array.isArray(config)) {
+			return false;
+		}
+		const keys = Object.keys(config);
+		return (
+			keys.length === 1 &&
+			(config as Record<string, unknown>).hasCompletedOnboarding === true
+		);
 	} catch {
 		return false;
 	}
@@ -552,29 +624,85 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 	return [{ kind: "claude-settings", sourcePath, backupPath, created }];
 }
 
-export type RestoreStatus = "restored" | "kept-live" | "noop";
+// Does the live file at `kind` look like something CoDev wrote? Gates the
+// destructive branch of `restoreKind`, so a `false` must always mean "leave it
+// alone". Each detector re-derives its own path via `sourcePathOf` and answers
+// `false` for a missing or unparseable file, which is the conservative default
+// we want: a config we can't attribute is one we don't delete.
+//
+// The two auth files have no marker key of their own:
+//   - `claude-json` — matched by whole-file shape (see isCodevClaudeJsonStub).
+//   - `claude-credentials` — CoDev never *writes* this file, only removes it.
+//     So a live one with no backup can only be a login that happened after
+//     CoDev configured Claude; it's ours to clear. Worst case the user
+//     re-authenticates — no data is lost.
+//
+// Deliberately no cross-kind inference (e.g. reading settings.json to decide
+// the credentials' fate): `restoreTool` restores claude-settings *first*, which
+// erases that marker, so the answer would depend on iteration order.
+function isCodevAuthored(kind: BackupKind): boolean {
+	switch (kind) {
+		case "claude-settings":
+			return isCodevClaudeConfig();
+		case "claude-json":
+			return isCodevClaudeJsonStub();
+		case "claude-credentials":
+			return true;
+		case "codex-config":
+			return isCodevCodexConfig();
+		case "opencode-config":
+		case "codev-code-config":
+			return isCodevOpenCodeConfig(kind);
+		case "continue-config":
+			return isCodevContinueConfig();
+	}
+}
+
+export type RestoreStatus = "restored" | "deleted" | "kept-live" | "noop";
 
 export interface RestoreResult {
 	status: RestoreStatus;
 	sourcePath: string;
 	backupPath: string;
+	// Set on `deleted` only, and only when the file was removed *despite* not
+	// looking CoDev-authored — i.e. `force` overrode the gate. Lets callers say
+	// what actually happened instead of claiming CoDev wrote the file.
+	forced?: boolean;
 }
 
-// "Make this file look pre-CoDev." Three terminal states:
+// "Make this file look pre-CoDev." Four terminal states:
 //   - backup present → swap it over the live file (the user's pre-CoDev
 //     state is reinstated).
-//   - no backup, but a live file exists → leave the live file untouched. With
-//     no backup we can't know what (if anything) preceded CoDev, so we don't
-//     destroy the current config; the user can remove it by hand if they want.
+//   - no backup, live file is CoDev's → delete it. No backup means nothing
+//     preceded it, so removing it *is* the pre-CoDev state.
+//   - no backup, live file is the user's → leave it untouched. We can't know
+//     what preceded CoDev here, so we don't destroy it.
 //   - neither file exists → noop; already at pre-CoDev state.
-function restoreKind(kind: BackupKind): RestoreResult {
+//
+// The authorship gate carries the whole safety argument, because the restore
+// below *consumes* the backup (renameSync), making "no backup + live file"
+// ambiguous. It can mean CoDev wrote the file from scratch — but equally that
+// this is a second restore and the live file is the pristine original the first
+// run just reinstated, or that the user hand-wrote a config for a tool CoDev
+// never configured (both `remove` and the bare `restore` sweep visit every
+// tool). Only the first case is ours to delete.
+// `force` bypasses the authorship gate, so a backup-less live file is deleted
+// whoever wrote it and `kept-live` never happens. It deliberately does NOT touch
+// the backup branch: a `*.backup` still wins and is still restored, because that
+// file is the user's pre-CoDev original and reinstating it is the whole point.
+function restoreKind(kind: BackupKind, force = false): RestoreResult {
 	const sourcePath = sourcePathOf(kind);
 	const backupPath = `${sourcePath}.backup`;
 
 	const log = (result: RestoreResult): RestoreResult => {
 		logInfo(`restore ${kind}: ${result.status}`, {
 			action: "restore.kind",
-			extra: { kind, status: result.status, source_path: result.sourcePath },
+			extra: {
+				kind,
+				status: result.status,
+				source_path: result.sourcePath,
+				forced: result.forced === true,
+			},
 		});
 		return result;
 	};
@@ -586,6 +714,18 @@ function restoreKind(kind: BackupKind): RestoreResult {
 	}
 
 	if (existsSync(sourcePath)) {
+		// Evaluated even under force, so the result can tell "this was ours" apart
+		// from "force took a file that wasn't" instead of misreporting the latter.
+		const authored = isCodevAuthored(kind);
+		if (authored || force) {
+			rmSync(sourcePath, { force: true });
+			return log({
+				status: "deleted",
+				sourcePath,
+				backupPath,
+				forced: !authored,
+			});
+		}
 		return log({ status: "kept-live", sourcePath, backupPath });
 	}
 
@@ -601,15 +741,17 @@ const CLAUDE_RESTORE_KINDS: BackupKind[] = [
 	"claude-credentials",
 ];
 
-export function restoreTool(tool: Tool): RestoreResult[] {
+export function restoreTool(tool: Tool, force = false): RestoreResult[] {
 	if (
 		tool === "claude-code" ||
 		tool === "vscode-claude-code" ||
 		tool === "jetbrains-claude-code"
 	) {
-		return CLAUDE_RESTORE_KINDS.map(restoreKind);
+		// Not a bare `.map(restoreKind)`: map's second arg is the index, which
+		// would land in `force` and silently force every kind after the first.
+		return CLAUDE_RESTORE_KINDS.map((kind) => restoreKind(kind, force));
 	}
-	return [restoreKind(kindForTool(tool))];
+	return [restoreKind(kindForTool(tool), force)];
 }
 
 export function configureCodex(creds: Credentials): ConfigureResult[] {
@@ -680,8 +822,8 @@ export function configureOpenCode(creds: Credentials): ConfigureResult[] {
 	return configureOpenCodeKind("opencode-config", creds);
 }
 
-// The codev-code fork consumes the exact same opencode.json shape; only the
-// config directory differs (see sourcePathOf).
+// The codev-code fork consumes the exact same config shape; only the directory
+// and filename differ (see sourcePathOf).
 export function configureCodevCode(creds: Credentials): ConfigureResult[] {
 	return configureOpenCodeKind("codev-code-config", creds);
 }

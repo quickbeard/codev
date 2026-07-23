@@ -31,14 +31,26 @@ export function toolForRestoreAgent(agent: RestoreAgent): Tool {
 	return TOOL_FOR_AGENT[agent];
 }
 
+// This returns void, so an unhandled RestoreStatus would print nothing rather
+// than fail to compile. The `never` default is what turns the next status
+// addition into a type error instead of a silently missing line.
 function reportRestoreResult(result: RestoreResult): void {
 	switch (result.status) {
 		case "restored":
 			console.log(`Restored ${result.sourcePath} from ${result.backupPath}.`);
 			return;
+		case "deleted":
+			// The normal message asserts CoDev authorship, which is exactly what a
+			// forced delete can't claim — say what actually happened instead.
+			console.log(
+				result.forced
+					? `Deleted ${result.sourcePath}; no backup exists and CoDev did not write it (forced).`
+					: `Deleted ${result.sourcePath}; CoDev wrote it and no backup exists, so nothing preceded it.`,
+			);
+			return;
 		case "kept-live":
 			console.log(
-				`No backup at ${result.backupPath}; left ${result.sourcePath} in place.`,
+				`No backup at ${result.backupPath}; left ${result.sourcePath} in place (not written by CoDev).`,
 			);
 			return;
 		case "noop":
@@ -46,11 +58,17 @@ function reportRestoreResult(result: RestoreResult): void {
 				`Nothing to restore for ${result.sourcePath}; already at pre-CoDev state.`,
 			);
 			return;
+		default: {
+			// Unreachable: the assignment is what fails to compile if a
+			// RestoreStatus ever goes unhandled above.
+			const unhandled: never = result.status;
+			throw new Error(`Unhandled restore status: ${String(unhandled)}`);
+		}
 	}
 }
 
-export function runRestore(tool: Tool): number {
-	const results = restoreTool(tool);
+export function runRestore(tool: Tool, force = false): number {
+	const results = restoreTool(tool, force);
 	for (const result of results) {
 		reportRestoreResult(result);
 	}
@@ -70,25 +88,28 @@ const SWEEP_TOOLS: Tool[] = [
 	"vscode-continue",
 ];
 
-// Bare `codevhub restore` — process every tool. Each result ends in one of
-// three states (restored / kept-live / noop); only `restored` actually reverts
-// a file. Counters aggregate across all results from all sweep tools
-// (claude-code contributes three results, the others one). Exit 1 if nothing
-// was restored (every result was kept-live or noop) or any tool threw;
+// Bare `codevhub restore` — process every tool. Each result ends in one of four
+// states (restored / deleted / kept-live / noop); only `restored` and `deleted`
+// actually change a file. Counters aggregate across all results from all sweep
+// tools (claude-code contributes three results, the others one). Exit 1 if
+// nothing changed (every result was kept-live or noop) or any tool threw;
 // otherwise 0.
-export function runRestoreAll(): number {
+export function runRestoreAll(force = false): number {
 	let acted = 0;
 	let failed = 0;
 	let noop = 0;
 
 	for (const tool of SWEEP_TOOLS) {
 		try {
-			const results = restoreTool(tool);
+			const results = restoreTool(tool, force);
 			for (const result of results) {
 				reportRestoreResult(result);
-				// Only a genuine restore counts as action; kept-live left the file
-				// untouched, so it falls in with noop for the "nothing restored" check.
-				if (result.status === "restored") acted++;
+				// Restoring a backup and deleting a CoDev-written config both revert
+				// the file to its pre-CoDev state, so both count as action. kept-live
+				// left the file untouched, so it falls in with noop for the "nothing
+				// restored" check.
+				if (result.status === "restored" || result.status === "deleted")
+					acted++;
 				else noop++;
 			}
 		} catch (err) {

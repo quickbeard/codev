@@ -10,7 +10,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as codegraph from "@/lib/codegraph.js";
+import { configureClaudeCode, configureCodevCode } from "@/lib/configure.js";
 import { runRemove } from "@/lib/remove.js";
+
+// Seeds a genuine CoDev config via the real writer, so the authorship gate is
+// tested against the keys the writer actually emits rather than a hand-rolled
+// marker that could silently drift. baseUrl is explicit to avoid the
+// AI_GATEWAY_URL() fallback, which would need gateway_url in auth.json.
+const CODEV_CREDS = {
+	apiKey: "sk-test-key",
+	baseUrl: "https://gw.test/gateway",
+	model: "test-model",
+};
 
 let tempDir: string;
 
@@ -106,23 +117,76 @@ describe("runRemove", () => {
 		}
 	});
 
-	test("no backup but live config exists: keeps live config", async () => {
+	test("no backup but live CoDev config exists: deletes it", async () => {
 		stubFetchOk();
-		seedFile(".claude/settings.json", '{"codev":"wrote-this"}');
+		configureClaudeCode(CODEV_CREDS);
 
 		const result = await runRemove();
 
 		expect(result.anyFailed).toBe(false);
-		// No backup to restore from, so the live config is left in place.
+		// CoDev wrote it and no backup exists, so nothing preceded it.
+		expect(existsSync(join(tempDir, ".claude/settings.json"))).toBe(false);
+		const claudeStep = result.steps.find((s) => s.label.startsWith("Claude"));
+		expect(claudeStep?.status).toBe("ok");
+		// Claude restore aggregates three files: settings.json is deleted, the
+		// other two are noop (neither live nor backup).
+		expect(claudeStep?.detail).toMatch(/deleted 1 file \(no backup\)/);
+		expect(claudeStep?.detail).toMatch(/2 already clean/);
+		// Nothing left for the user to clean up by hand.
+		expect(result.keptPaths).toEqual([]);
+	});
+
+	test("no backup but live user config exists: keeps it", async () => {
+		stubFetchOk();
+		seedFile(".claude/settings.json", '{"marker":"user-authored"}');
+
+		const result = await runRemove();
+
+		expect(result.anyFailed).toBe(false);
+		// No CoDev marker, so it isn't ours to delete.
 		expect(existsSync(join(tempDir, ".claude/settings.json"))).toBe(true);
 		const claudeStep = result.steps.find((s) => s.label.startsWith("Claude"));
 		expect(claudeStep?.status).toBe("ok");
-		// Claude restore aggregates three files: settings.json is kept-live
-		// (no backup), the other two are noop (neither live nor backup).
-		expect(claudeStep?.detail).toMatch(/kept 1 file \(no backup\)/);
+		expect(claudeStep?.detail).toMatch(/kept 1 of your file/);
 		expect(claudeStep?.detail).toMatch(/2 already clean/);
 		// The kept file is surfaced for the user-facing hint.
 		expect(result.keptPaths).toContain(join(tempDir, ".claude/settings.json"));
+	});
+
+	test("force: deletes a live user config the gate would otherwise keep", async () => {
+		stubFetchOk();
+		seedFile(".claude/settings.json", '{"marker":"user-authored"}');
+
+		const result = await runRemove(true);
+
+		expect(result.anyFailed).toBe(false);
+		expect(existsSync(join(tempDir, ".claude/settings.json"))).toBe(false);
+		const claudeStep = result.steps.find((s) => s.label.startsWith("Claude"));
+		expect(claudeStep?.status).toBe("ok");
+		// Reported as forced, so the count doesn't imply the file was CoDev's.
+		expect(claudeStep?.detail).toMatch(
+			/deleted 1 file \(no backup, 1 forced\)/,
+		);
+		// Nothing was preserved, so there's nothing to list as kept.
+		expect(result.keptPaths).toEqual([]);
+	});
+
+	test("force: still restores from a backup instead of deleting", async () => {
+		stubFetchOk();
+		seedFile(".config/codev/codev.json", '{"live":true}');
+		seedFile(".config/codev/codev.json.backup", '{"original":"codev-code"}');
+
+		const result = await runRemove(true);
+
+		expect(result.anyFailed).toBe(false);
+		// force skips the authorship gate, never the backup branch.
+		expect(
+			JSON.parse(
+				readFileSync(join(tempDir, ".config/codev/codev.json"), "utf-8"),
+			),
+		).toEqual({ original: "codev-code" });
+		const step = result.steps.find((s) => s.label === "CoDev Code config");
+		expect(step?.detail).toContain("restored from");
 	});
 
 	test("no backup and no live config: reports nothing-to-restore as noop", async () => {
@@ -138,13 +202,10 @@ describe("runRemove", () => {
 
 	test("CoDev Code config: restores from backup when one exists", async () => {
 		stubFetchOk();
-		// The fork's gateway config lives at ~/.config/codev-code/opencode.json
+		// The fork's gateway config lives at ~/.config/codev/codev.json
 		// (distinct from OpenCode's ~/.config/opencode/opencode.json).
-		seedFile(".config/codev-code/opencode.json", '{"live":true}');
-		seedFile(
-			".config/codev-code/opencode.json.backup",
-			'{"original":"codev-code"}',
-		);
+		seedFile(".config/codev/codev.json", '{"live":true}');
+		seedFile(".config/codev/codev.json.backup", '{"original":"codev-code"}');
 
 		const result = await runRemove();
 
@@ -152,38 +213,50 @@ describe("runRemove", () => {
 		// Backup renamed over the live config — the user's pre-CoDev state.
 		expect(
 			JSON.parse(
-				readFileSync(
-					join(tempDir, ".config/codev-code/opencode.json"),
-					"utf-8",
-				),
+				readFileSync(join(tempDir, ".config/codev/codev.json"), "utf-8"),
 			),
 		).toEqual({ original: "codev-code" });
 		// The rename consumes the backup, so it no longer sits alongside.
-		expect(
-			existsSync(join(tempDir, ".config/codev-code/opencode.json.backup")),
-		).toBe(false);
+		expect(existsSync(join(tempDir, ".config/codev/codev.json.backup"))).toBe(
+			false,
+		);
 		const step = result.steps.find((s) => s.label === "CoDev Code config");
 		expect(step?.status).toBe("ok");
 		expect(step?.detail).toContain("restored from");
 	});
 
-	test("CoDev Code config: keeps the live config when no backup exists", async () => {
+	test("CoDev Code config: deletes the live CoDev config when no backup exists", async () => {
 		stubFetchOk();
 		// A fresh install writes this with no prior user config, so there's no
-		// backup — with nothing to restore from, remove leaves the live file be.
-		seedFile(".config/codev-code/opencode.json", '{"codev":"wrote-this"}');
+		// backup — nothing preceded it, so remove takes it back out.
+		configureCodevCode(CODEV_CREDS);
+		expect(existsSync(join(tempDir, ".config/codev/codev.json"))).toBe(true);
 
 		const result = await runRemove();
 
 		expect(result.anyFailed).toBe(false);
-		expect(existsSync(join(tempDir, ".config/codev-code/opencode.json"))).toBe(
-			true,
-		);
+		expect(existsSync(join(tempDir, ".config/codev/codev.json"))).toBe(false);
 		const step = result.steps.find((s) => s.label === "CoDev Code config");
 		expect(step?.status).toBe("ok");
-		expect(step?.detail).toContain("no backup; kept");
+		expect(step?.detail).toContain("no backup; deleted CoDev's");
+		expect(result.keptPaths).toEqual([]);
+	});
+
+	test("CoDev Code config: keeps a live user config when no backup exists", async () => {
+		stubFetchOk();
+		// The user hand-wrote this and never ran it through CoDev, so remove has
+		// no business deleting it.
+		seedFile(".config/codev/codev.json", '{"marker":"user-authored"}');
+
+		const result = await runRemove();
+
+		expect(result.anyFailed).toBe(false);
+		expect(existsSync(join(tempDir, ".config/codev/codev.json"))).toBe(true);
+		const step = result.steps.find((s) => s.label === "CoDev Code config");
+		expect(step?.status).toBe("ok");
+		expect(step?.detail).toContain("no backup; kept your");
 		expect(result.keptPaths).toContain(
-			join(tempDir, ".config/codev-code/opencode.json"),
+			join(tempDir, ".config/codev/codev.json"),
 		);
 	});
 

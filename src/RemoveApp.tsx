@@ -8,9 +8,16 @@ type Phase = "confirm" | "running" | "done" | "aborted";
 
 interface RemoveAppProps {
 	skipConfirm?: boolean;
+	// Undocumented escape hatch (`--force`): deletes backup-less configs whoever
+	// wrote them, instead of preserving the ones that aren't CoDev's. Not in
+	// help.ts and intentionally unadvertised, so the only way here is to type it.
+	force?: boolean;
 }
 
-export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
+export function RemoveApp({
+	skipConfirm = false,
+	force = false,
+}: RemoveAppProps) {
 	const { exit } = useApp();
 	const [phase, setPhase] = useState<Phase>(
 		skipConfirm ? "running" : "confirm",
@@ -21,7 +28,7 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 	const start = useCallback(() => {
 		if (hasRun.current) return;
 		hasRun.current = true;
-		runRemove()
+		runRemove(force)
 			.then((r) => {
 				setResult(r);
 				setPhase("done");
@@ -40,7 +47,7 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 				});
 				setPhase("done");
 			});
-	}, []);
+	}, [force]);
 
 	useEffect(() => {
 		if (phase === "running") start();
@@ -99,16 +106,16 @@ export function RemoveApp({ skipConfirm = false }: RemoveAppProps) {
 		</Text>
 	));
 
-	// Config files that had no backup were left in place rather than deleted.
-	// Point them out so the user can remove them by hand if they want a fully
-	// pre-CoDev state — they may still reference the removed ~/.codev-hub.
+	// Configs CoDev wrote are deleted outright, so they need no follow-up. These
+	// are the ones we identified as the user's own and deliberately preserved —
+	// report them so the removal's scope is clear, not as a chore list.
 	const keptHint =
 		result.keptPaths.length > 0 ? (
 			<Box flexDirection="column" marginTop={1}>
 				<Text color="yellow">
-					Left {result.keptPaths.length} config file
-					{result.keptPaths.length === 1 ? "" : "s"} in place (no backup to
-					restore from). Delete manually for a clean state:
+					Kept {result.keptPaths.length} config file
+					{result.keptPaths.length === 1 ? "" : "s"} CoDev didn't write — your
+					own settings were left untouched:
 				</Text>
 				{result.keptPaths.map((p) => (
 					<Text key={p} dimColor>
