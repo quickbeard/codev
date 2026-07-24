@@ -6,7 +6,7 @@ import AdmZip from "adm-zip";
 // over 100 MB anyway; enforcing here fails fast (no pointless upload) and guards
 // against OOM when a user points `skill push` at a huge or mistargeted directory.
 const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
-const MAX_ARCHIVE_ENTRIES = 10_000;
+const MAX_ARCHIVE_ENTRIES = 15_000;
 
 // Directories never bundled into a skill archive: VCS metadata, dependency
 // trees, and local test/log output. Excluded wholesale (their contents are not
