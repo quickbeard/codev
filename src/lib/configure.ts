@@ -125,11 +125,15 @@ const CODEX_K = {
 	bearerToken: atob("ZXhwZXJpbWVudGFsX2JlYXJlcl90b2tlbg=="),
 };
 
-const OPENCODE_SCHEMA_URL = atob(
+// Exported for lib/codegraph.ts: the fork keeps upstream's schema URL (its
+// DIVERGENCES list marks it NOT renamed), and the CoDev Code MCP shim seeds
+// the same $schema stub the agent itself writes on first run.
+export const OPENCODE_SCHEMA_URL = atob(
 	"aHR0cHM6Ly9vcGVuY29kZS5haS9jb25maWcuanNvbg==",
 );
 const OPENCODE_K = {
 	schema: atob("JHNjaGVtYQ=="),
+	mcp: atob("bWNw"),
 	model: atob("bW9kZWw="),
 	provider: atob("cHJvdmlkZXI="),
 	providerKey: atob("YWlnYXRld2F5"),
@@ -338,6 +342,14 @@ function sourcePathOf(kind: BackupKind): string {
 		case "continue-config":
 			return join(homedir(), ".continue", "config.yaml");
 	}
+}
+
+// The one config file CoDev Code reads that CoDev also writes. Exported for
+// lib/codegraph.ts's MCP shim and lib/remove.ts's unwire, so all three writers
+// resolve the same `.jsonc`-vs-`.json` candidate (see openCodeConfigPath) and
+// never shadow each other.
+export function codevCodeConfigPath(): string {
+	return sourcePathOf("codev-code-config");
 }
 
 function statusFor(kind: BackupKind): BackupStatus {
@@ -828,6 +840,23 @@ export function configureCodevCode(creds: Credentials): ConfigureResult[] {
 	return configureOpenCodeKind("codev-code-config", creds);
 }
 
+// Read the top-level `mcp` map from an existing OpenCode-family config, or
+// undefined when the file is absent, unparseable, or has no object-valued
+// `mcp`. Best-effort by design: this writer has always recovered from corrupt
+// configs by replacing them, and preservation must never change that.
+function readPreservedMcp(path: string): Record<string, unknown> | undefined {
+	if (!existsSync(path)) return undefined;
+	try {
+		const raw = parseJsonc(readFileSync(path, "utf-8"));
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+		const mcp = (raw as Record<string, unknown>)[OPENCODE_K.mcp];
+		if (!mcp || typeof mcp !== "object" || Array.isArray(mcp)) return undefined;
+		return mcp as Record<string, unknown>;
+	} catch {
+		return undefined;
+	}
+}
+
 function configureOpenCodeKind(
 	kind: "opencode-config" | "codev-code-config",
 	creds: Credentials,
@@ -835,6 +864,13 @@ function configureOpenCodeKind(
 	const { path: backupPath, created } = ensureBackup(kind);
 	const sourcePath = sourcePathOf(kind);
 	mkdirSync(dirname(sourcePath), { recursive: true });
+
+	// Carry the `mcp` map across the rewrite. This writer doesn't just run at
+	// install time: every gateway-key auto-refresh (refresh.ts) and model
+	// switch rewrites the whole file, and dropping `mcp` there would silently
+	// unwire MCP servers — CodeGraph's entry, or servers the user added — that
+	// were wired after configure last ran.
+	const mcp = readPreservedMcp(sourcePath);
 
 	const baseUrl = creds.baseUrl
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
@@ -865,6 +901,7 @@ function configureOpenCodeKind(
 
 	writeJson(sourcePath, {
 		[OPENCODE_K.schema]: OPENCODE_SCHEMA_URL,
+		...(mcp !== undefined ? { [OPENCODE_K.mcp]: mcp } : {}),
 		// Top-level `model` pins the initial active model OpenCode uses on
 		// launch. Format is `<provider>/<modelId>` per OpenCode's schema.
 		[OPENCODE_K.model]: `${OPENCODE_K.providerKey}/${defaultModel}`,

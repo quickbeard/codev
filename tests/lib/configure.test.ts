@@ -490,6 +490,54 @@ describe("configureOpenCode", () => {
 		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
 	});
 
+	test("carries the `mcp` map across a rewrite (CodeGraph wiring survives reconfigure)", async () => {
+		const dir = join(tempDir, ".config", "opencode");
+		const filePath = join(dir, "opencode.json");
+		mkdirSync(dir, { recursive: true });
+		// A config CoDev wrote earlier, since wired with MCP servers (CodeGraph's
+		// entry plus one of the user's own) — the state every gateway-key
+		// auto-refresh and model switch rewrites.
+		writeFileSync(
+			filePath,
+			JSON.stringify({
+				provider: { aigateway: { options: { apiKey: "sk-old" } } },
+				mcp: {
+					codegraph: {
+						type: "local",
+						command: ["codegraph", "serve", "--mcp"],
+						enabled: true,
+					},
+					mine: { type: "local", command: ["mine"], enabled: true },
+				},
+			}),
+		);
+
+		const { configureOpenCode } = await import("@/lib/configure.js");
+		configureOpenCode({ apiKey: "sk-new", model: "m" });
+
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		expect(config.mcp.codegraph.command).toEqual([
+			"codegraph",
+			"serve",
+			"--mcp",
+		]);
+		expect(config.mcp.mine.command).toEqual(["mine"]);
+		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
+	});
+
+	test("does not carry a non-object `mcp` value across a rewrite", async () => {
+		const dir = join(tempDir, ".config", "opencode");
+		const filePath = join(dir, "opencode.json");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(filePath, JSON.stringify({ mcp: "not a server map" }));
+
+		const { configureOpenCode } = await import("@/lib/configure.js");
+		configureOpenCode({ apiKey: "sk-new", model: "m" });
+
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		expect(config.mcp).toBeUndefined();
+	});
+
 	test("preserves a pre-existing opencode.json backup across repeated runs", async () => {
 		const dir = join(tempDir, ".config", "opencode");
 		const filePath = join(dir, "opencode.json");
@@ -578,6 +626,36 @@ describe("configureCodevCode", () => {
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
 		expect(config.someSetting).toBeUndefined();
 		expect(config.provider.other).toBeUndefined();
+		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
+	});
+
+	test("carries the `mcp` map across a rewrite (CodeGraph wiring survives reconfigure)", async () => {
+		const dir = join(tempDir, ".config", "codev");
+		const filePath = join(dir, "codev.json");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			filePath,
+			JSON.stringify({
+				provider: { aigateway: { options: { apiKey: "sk-old" } } },
+				mcp: {
+					codegraph: {
+						type: "local",
+						command: ["codegraph", "serve", "--mcp"],
+						enabled: true,
+					},
+				},
+			}),
+		);
+
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-new", model: "m" });
+
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		expect(config.mcp.codegraph.command).toEqual([
+			"codegraph",
+			"serve",
+			"--mcp",
+		]);
 		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
 	});
 

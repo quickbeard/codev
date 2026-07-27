@@ -44,6 +44,7 @@ import { smokeTestModel, validateApiKey } from "@/lib/backend.js";
 import {
 	CODEGRAPH_TASK_KEY,
 	type CodegraphSetupResult,
+	codegraphEligible,
 	codegraphTargets,
 	formatCodegraphTargets,
 	setupCodegraph,
@@ -320,11 +321,12 @@ export function SetupApp({ mode }: SetupAppProps) {
 			}
 			// Config mode skips the *agent* install (they're treated as already
 			// installed, so the survivor set equals `tools`), but still installs
-			// CodeGraph. When any selected agent maps to a CodeGraph target, show
-			// the CodeGraph-only Install step right after login; otherwise run the
-			// post-login side-effects directly. authData is passed explicitly
-			// because the setAuth above hasn't flushed to state yet this tick.
-			if (codegraphTargets(tools).length > 0) {
+			// CodeGraph. When any selected agent is CodeGraph-eligible (built-in
+			// target or CoDev Code), show the CodeGraph-only Install step right
+			// after login; otherwise run the post-login side-effects directly.
+			// authData is passed explicitly because the setAuth above hasn't
+			// flushed to state yet this tick.
+			if (codegraphEligible(tools)) {
 				setStep("installing");
 			} else {
 				runPostInstallSideEffects(tools, authData);
@@ -615,7 +617,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 						</Step>
 					)}
 				{(mode === "install" ||
-					(mode === "config" && codegraphTargets(tools).length > 0)) &&
+					(mode === "config" && codegraphEligible(tools))) &&
 					POST_LOGIN.includes(step) && (
 						<Step
 							active={step === "installing"}
@@ -779,7 +781,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 						</Step>
 					))}
 				{(step === "finalizing" || step === "done") &&
-					codegraphTargets(installedTools).length > 0 &&
+					codegraphEligible(installedTools) &&
 					codegraphResult?.status !== "skipped" && (
 						<Step
 							active={step === "finalizing"}
