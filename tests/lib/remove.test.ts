@@ -348,4 +348,40 @@ describe("runRemove", () => {
 		// Non-fatal: the overall remove still succeeds.
 		expect(result.anyFailed).toBe(false);
 	});
+
+	test("codegraph: sweeps the CoDev Code mcp entry from a user-owned config it keeps", async () => {
+		stubFetchOk();
+		// A codev.json the user wrote themselves (no CoDev marker, no backup),
+		// wired with the CodeGraph entry plus a server of their own. Remove must
+		// strip exactly the CodeGraph entry — matching `codegraph uninstall`
+		// semantics on every other agent's config — while the authorship gate
+		// keeps the file itself.
+		const filePath = seedFile(
+			".config/codev/codev.json",
+			JSON.stringify(
+				{
+					theme: "dark",
+					mcp: {
+						codegraph: {
+							type: "local",
+							command: ["codegraph", "serve", "--mcp"],
+							enabled: true,
+						},
+						mine: { type: "local", command: ["mine"], enabled: true },
+					},
+				},
+				null,
+				2,
+			),
+		);
+		const result = await runRemove();
+		const cg = result.steps.find((s) => s.label === "CodeGraph");
+		expect(cg?.status).toBe("ok");
+		// The file survives (kept-live) minus the CodeGraph entry.
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		expect(config.theme).toBe("dark");
+		expect(config.mcp.codegraph).toBeUndefined();
+		expect(config.mcp.mine.command).toEqual(["mine"]);
+		expect(result.keptPaths).toContain(filePath);
+	});
 });

@@ -2,7 +2,7 @@ import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { logout } from "@/lib/auth.js";
-import { runCodegraphUninstall } from "@/lib/codegraph.js";
+import { runCodegraphUninstall, unwireCodevCodeMcp } from "@/lib/codegraph.js";
 import { restoreTool, type Tool } from "@/lib/configure.js";
 import { logError, logInfo, logWarn } from "@/lib/log.js";
 import { uninstallShims } from "@/lib/shims.js";
@@ -105,15 +105,28 @@ function recordStep(step: StepResult): StepResult {
 
 // Best-effort: revert CodeGraph's MCP wiring across all agents. If the
 // codegraph package was already removed, the command errors (e.g. ENOENT) — we
-// surface a ▲ warning and continue rather than fail the remove.
+// surface a ▲ warning and continue rather than fail the remove. CoDev Code's
+// entry gets a direct sweep on top of the CLI uninstall: an older codegraph
+// doesn't know the custom target, and the entry may have been written by the
+// config shim (see lib/codegraph.ts) — either way `codegraph uninstall` would
+// leave it behind. The sweep is a no-op when the entry is already gone,
+// including when a custom-target-aware uninstall just removed it.
 async function runCodegraphRemoval(): Promise<StepResult> {
 	try {
 		const err = await runCodegraphUninstall();
-		if (!err) {
+		const codevErr = unwireCodevCodeMcp();
+		if (!err && !codevErr) {
 			return {
 				label: "CodeGraph",
 				detail: "removed from agents",
 				status: "ok",
+			};
+		}
+		if (!err) {
+			return {
+				label: "CodeGraph",
+				detail: `removed from agents; CoDev Code entry left in place: ${codevErr}`,
+				status: "warning",
 			};
 		}
 		return {

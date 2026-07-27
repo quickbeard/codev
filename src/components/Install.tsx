@@ -2,7 +2,7 @@ import { type TaskItem, TaskList } from "@/components/TaskList.js";
 import {
 	CODEGRAPH_PKG,
 	CODEGRAPH_TASK_KEY,
-	codegraphTargets,
+	codegraphEligible,
 	ensureCodegraphInstalled,
 } from "@/lib/codegraph.js";
 import type { Tool } from "@/lib/configure.js";
@@ -102,12 +102,14 @@ export function Install({ tools, onDone, includeAgents = true }: InstallProps) {
 		};
 	});
 
-	// When any selected agent maps to a CodeGraph target, install CodeGraph
-	// alongside the agents (it runs in parallel with them). Best-effort: a
-	// failure is a soft ▲ warning, never a hard ✗ — CodeGraph is an enhancement
-	// and must never drop an agent or trip the all-failed gate. SetupApp splits
-	// CODEGRAPH_TASK_KEY out of the survivor set (it isn't a Tool).
-	if (codegraphTargets(tools).length > 0) {
+	// When any selected agent is CodeGraph-eligible (maps to a built-in target,
+	// or is CoDev Code, wired via custom target / config shim), install
+	// CodeGraph alongside the agents (it runs in parallel with them).
+	// Best-effort: a failure is a soft ▲ warning, never a hard ✗ — CodeGraph is
+	// an enhancement and must never drop an agent or trip the all-failed gate.
+	// SetupApp splits CODEGRAPH_TASK_KEY out of the survivor set (it isn't a
+	// Tool).
+	if (codegraphEligible(tools)) {
 		tasks.push({
 			key: CODEGRAPH_TASK_KEY,
 			label: CODEGRAPH_PKG,
