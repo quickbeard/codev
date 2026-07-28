@@ -666,6 +666,10 @@ describe("backend reachability probe", () => {
 });
 
 describe("llm checks", () => {
+	// doctor never writes ~/.codev-hub/auth.json, so every LLM check has to be
+	// handed the gateway URL the config check fetched.
+	const GATEWAY = "https://gateway.example.com";
+
 	async function runLlm(key: string, ctx: object): Promise<CheckOutcome> {
 		const check = LLM_CHECKS.find((c) => c.key === key);
 		if (!check) throw new Error(`no such check: ${key}`);
@@ -679,9 +683,55 @@ describe("llm checks", () => {
 		expect(o.status).toBe("skip");
 	});
 
+	// Regression: these called backend.ts without a base URL, so it fell back to
+	// AI_GATEWAY_URL(), which reads ~/.codev-hub/auth.json and throws when it is
+	// absent. On a machine that has never run `codevhub install` — the audience
+	// this command exists for — all three failed with "Run `codevhub install`":
+	// circular advice, and wrong, since the config check had just fetched the
+	// URL. `doctor` never writes that cache, so it must be threaded through.
+	describe("the gateway URL is threaded, not read from the install cache", () => {
+		test.each([
+			["gateway-key", () => vi.spyOn(backend, "validateApiKey")],
+			["gateway-models", () => vi.spyOn(backend, "fetchModels")],
+			["llm-completion", () => vi.spyOn(backend, "smokeTestModel")],
+		])("%s passes ctx.gatewayUrl through", async (key, spyFor) => {
+			const spy = spyFor();
+			// biome-ignore lint/suspicious/noExplicitAny: one spy shape per callee
+			(spy as any).mockResolvedValue(
+				key === "gateway-models"
+					? ["m-alpha"]
+					: key === "gateway-key"
+						? true
+						: null,
+			);
+			await runLlm(key, {
+				apiKey: "k",
+				gatewayUrl: "https://gateway.example.com",
+				models: ["m-alpha"],
+			});
+			// The URL must reach backend.ts as an argument — the last one for the
+			// completion (apiKey, model, baseUrl), the second otherwise.
+			expect(spy.mock.calls[0]).toContain("https://gateway.example.com");
+		});
+
+		test.each([
+			"gateway-key",
+			"gateway-models",
+			"llm-completion",
+		])("%s skips rather than blaming the install cache when the URL is missing", async (key) => {
+			const o = await runLlm(key, { apiKey: "k" });
+			expect(o.status).toBe("skip");
+			expect(o.detail).not.toContain("auth.json");
+			expect(o.detail).not.toContain("codevhub install");
+		});
+	});
+
 	test("a rejected key fails with a re-auth instruction", async () => {
 		vi.spyOn(backend, "validateApiKey").mockResolvedValue(false);
-		const o = await runLlm("gateway-key", { apiKey: "k" });
+		const o = await runLlm("gateway-key", {
+			apiKey: "k",
+			gatewayUrl: GATEWAY,
+		});
 		expect(o.status).toBe("fail");
 		expect(o.fix).toContain("codevhub login --force");
 	});
@@ -694,6 +744,7 @@ describe("llm checks", () => {
 		);
 		const o = await runLlm("llm-completion", {
 			apiKey: "k",
+			gatewayUrl: GATEWAY,
 			models: ["m-alpha"],
 		});
 		expect(o.status).toBe("fail");
@@ -701,10 +752,31 @@ describe("llm checks", () => {
 		expect(o.diagnosis?.cause).toMatch(/only proves the key exists/i);
 	});
 
+	// smokeTestModel stringifies its own errors, so an unreachable gateway
+	// arrives as "Couldn't reach the gateway to test X: fetch failed" — the
+	// exact bare message this command exists to eliminate.
+	test("an unreachable gateway is diagnosed, not echoed as `fetch failed`", async () => {
+		vi.spyOn(backend, "smokeTestModel").mockResolvedValue(
+			"Couldn't reach the gateway to test m-alpha: fetch failed",
+		);
+		const o = await runLlm("llm-completion", {
+			apiKey: "k",
+			gatewayUrl: GATEWAY,
+			models: ["m-alpha"],
+		});
+		expect(o.status).toBe("fail");
+		expect(o.detail).toContain("gateway.example.com");
+		expect(o.detail).not.toContain("fetch failed");
+		expect(o.diagnosis?.cause).toMatch(/connectivity problem/i);
+		// The raw string is still preserved for support.
+		expect(o.diagnosis?.raw.join("\n")).toContain("fetch failed");
+	});
+
 	test("a successful completion passes and names the model", async () => {
 		vi.spyOn(backend, "smokeTestModel").mockResolvedValue(null);
 		const o = await runLlm("llm-completion", {
 			apiKey: "k",
+			gatewayUrl: GATEWAY,
 			models: ["m-alpha"],
 		});
 		expect(o.status).toBe("pass");

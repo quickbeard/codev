@@ -1219,6 +1219,13 @@ export const ACCOUNT_CHECKS: Check[] = [
 // Group 4 — LLM
 // ---------------------------------------------------------------------------
 
+// Every call below passes ctx.gatewayUrl explicitly. Omitting it makes
+// backend.ts fall back to AI_GATEWAY_URL(), which reads `gateway_url` out of
+// ~/.codev-hub/auth.json and throws when it is absent — so on a machine that
+// has never run `codevhub install`, exactly the audience this command exists
+// for, all three checks failed with "Run `codevhub install`". Circular advice
+// from a pre-flight tool, and wrong: the config check fetched the URL one step
+// earlier. `doctor` never writes that cache, so the value has to be threaded.
 const gatewayKeyCheck: Check = {
 	key: "gateway-key",
 	label: "Validate the gateway key",
@@ -1227,9 +1234,15 @@ const gatewayKeyCheck: Check = {
 		if (!ctx.apiKey) {
 			return { status: "skip", detail: "Skipped — no API key to validate." };
 		}
-		const attempt = { url: `${ctx.gatewayUrl ?? ""}/key/info`, method: "GET" };
+		if (!ctx.gatewayUrl) {
+			return {
+				status: "skip",
+				detail: "Skipped — the gateway URL could not be fetched.",
+			};
+		}
+		const attempt = { url: `${ctx.gatewayUrl}/key/info`, method: "GET" };
 		return guard(attempt, async () => {
-			const ok = await validateApiKey(ctx.apiKey as string);
+			const ok = await validateApiKey(ctx.apiKey as string, ctx.gatewayUrl);
 			return ok
 				? { status: "pass", detail: "Key accepted by the gateway." }
 				: {
@@ -1249,9 +1262,15 @@ const modelsCheck: Check = {
 		if (!ctx.apiKey) {
 			return { status: "skip", detail: "Skipped — no API key." };
 		}
-		const attempt = { url: `${ctx.gatewayUrl ?? ""}/v1/models`, method: "GET" };
+		if (!ctx.gatewayUrl) {
+			return {
+				status: "skip",
+				detail: "Skipped — the gateway URL could not be fetched.",
+			};
+		}
+		const attempt = { url: `${ctx.gatewayUrl}/v1/models`, method: "GET" };
 		return guard(attempt, async () => {
-			const models = await fetchModels(ctx.apiKey as string);
+			const models = await fetchModels(ctx.apiKey as string, ctx.gatewayUrl);
 			ctx.models = models;
 			const preview = models.slice(0, 3).join(", ");
 			return {
@@ -1274,11 +1293,42 @@ const completionCheck: Check = {
 		if (!ctx.apiKey) {
 			return { status: "skip", detail: "Skipped — no API key." };
 		}
+		if (!ctx.gatewayUrl) {
+			return {
+				status: "skip",
+				detail: "Skipped — the gateway URL could not be fetched.",
+			};
+		}
 		const model = ctx.models?.[0] ?? FALLBACK_MODEL;
 		// smokeTestModel never throws — it returns a reason string.
-		const reason = await smokeTestModel(ctx.apiKey, model);
+		const reason = await smokeTestModel(ctx.apiKey, model, ctx.gatewayUrl);
 		if (!reason) {
 			return { status: "pass", detail: `${model} answered a test prompt.` };
+		}
+		// It stringifies its own errors, so a transport failure arrives as
+		// "Couldn't reach the gateway to test X: fetch failed" — the exact bare
+		// message this command exists to eliminate. Diagnose that case properly
+		// rather than echoing it; the underlying error object is gone by now, but
+		// the model-list check immediately above hit the same host and carries the
+		// full chain.
+		if (/^Couldn't reach the gateway/.test(reason)) {
+			const host = hostOf(ctx.gatewayUrl) ?? "the gateway";
+			return {
+				status: "fail",
+				detail: `Could not reach the gateway at ${host} to run a test completion.`,
+				fix: "Fix gateway connectivity first — see the model list check above for the underlying network error.",
+				diagnosis: {
+					what: `Could not reach the gateway at ${host} to run a test completion.`,
+					cause:
+						"The request never got a response, so this is a connectivity problem rather than a model-permissions one.",
+					fix: "The model list check above hit the same host and reports the underlying network error — fix that first, then re-run.",
+					context: connectionContext({
+						url: `${ctx.gatewayUrl}/v1/chat/completions`,
+						method: "POST",
+					}),
+					raw: [redactSecrets(reason)],
+				},
+			};
 		}
 		return {
 			status: "fail",
