@@ -451,6 +451,30 @@ export function diagnoseError(err: unknown, attempt: Attempt = {}): Diagnosis {
 		);
 	}
 
+	// Nothing in the chain names a network failure and there is no `cause`, so
+	// this is our own code reporting what the server said — a thrown
+	// `Backend /auth/exchange failed (401): …`, not a connectivity problem.
+	// Running it through the proxy reasoning below would tell a user whose
+	// network is fine that they are missing a proxy, which is worse than
+	// saying nothing. `base()` is deliberately not used here: its whole job is
+	// to fold in proxy speculation.
+	if (root?.code === undefined && !isTransportError(err)) {
+		const message = root?.message ?? String(err);
+		const status = /\((\d{3})\)/.exec(message)?.[1];
+		const isAuth = status === "401" || status === "403";
+		return {
+			what: redactSecrets(message),
+			cause: isAuth
+				? `${host} answered and rejected the credentials — an authorization result, not a connectivity problem.`
+				: `${host} answered; it rejected the request rather than the network failing.`,
+			fix: isAuth
+				? "Run `codevhub login --force` to re-authenticate, then re-run."
+				: "See the raw output below — the server's own message is the best guide here.",
+			context,
+			raw,
+		};
+	}
+
 	// Unknown code — still never a bare "fetch failed". Name the deepest message
 	// we found and hand over the raw chain.
 	return base(
@@ -697,15 +721,28 @@ async function guard(
 }
 
 /**
- * Transport-only reachability probe. ANY HTTP response — including 401/403/404
- * — proves the network path works, which is all this is asking. Only DNS/TCP/
- * TLS failures fail it.
+ * Transport-only reachability probe. ANY HTTP response — including 3xx and
+ * 401/403/404 — proves the network path works, which is all this is asking.
+ * Only DNS/TCP/TLS failures fail it.
+ *
+ * `redirect: "manual"` is load-bearing, not tidiness. `fetch` follows redirects
+ * by default, and the gateway 301s bare directory-ish paths to its *internal*
+ * origin (`GET /codev-backend` → `http://netmind.viettel.vn:9096/codev-backend/`,
+ * note the port and the downgrade to http). Following that from outside the
+ * corporate network times out, so the probe reported the backend unreachable
+ * on machines where every real API call worked. A redirect response is already
+ * proof the transport works; chasing it measures a different host and port.
  */
-async function reach(url: string, label: string): Promise<CheckResult> {
-	const attempt = { url, method: "GET", timeoutMs: REACH_TIMEOUT_MS };
+async function reach(
+	url: string,
+	label: string,
+	method = "GET",
+): Promise<CheckResult> {
+	const attempt = { url, method, timeoutMs: REACH_TIMEOUT_MS };
 	return guard(attempt, async () => {
 		const res = await loggedFetch("doctor.reach", url, {
-			method: "GET",
+			method,
+			redirect: "manual",
 			signal: AbortSignal.timeout(REACH_TIMEOUT_MS),
 		});
 		// 407 is the one status that means the transport is NOT usable.
@@ -724,9 +761,15 @@ async function reach(url: string, label: string): Promise<CheckResult> {
 				diagnosis,
 			};
 		}
+		// An unauthenticated probe is *supposed* to be rejected; saying so keeps
+		// a 401 from reading like a failure in a report full of real ones.
+		const note =
+			res.status === 401 || res.status === 403
+				? " — expected without credentials"
+				: "";
 		return {
 			status: "pass",
-			detail: `${label} reachable (HTTP ${res.status}).`,
+			detail: `${label} reachable (HTTP ${res.status}${note}).`,
 		};
 	});
 }
@@ -1030,11 +1073,16 @@ export const ENVIRONMENT_CHECKS: Check[] = [
 // Group 2 — network (transport only, no auth)
 // ---------------------------------------------------------------------------
 
+// Probe a route the CLI actually calls, not the API base path. `/codev-backend`
+// on its own is not an endpoint — the gateway 301s it to an internal-only
+// origin, so it measured something no CoDev command ever does. `POST /config`
+// answers 401 without a token, which proves DNS, TCP, TLS and the real API
+// route in one round trip.
 const backendReachCheck: Check = {
 	key: "backend-reach",
 	label: "Reach the CoDev backend",
 	group: "network",
-	run: () => reach(BACKEND_URL, backendHost()),
+	run: () => reach(`${BACKEND_URL}/config`, backendHost(), "POST"),
 };
 
 const npmReachCheck: Check = {
@@ -1502,13 +1550,22 @@ export function buildNextSteps(
 		}
 	}
 
+	// Only append the proxy setup block when something actually points at the
+	// network. Keying off the group alone treated a plain expired-token 401 as
+	// a proxy problem and buried the real instruction ("log in again") under a
+	// wall of export lines. A transport failure anywhere still qualifies —
+	// diagnoseError puts the proxy variables in its `fix`, so that is the
+	// signal rather than the group.
+	// Match the environment variable names, not the word "proxy" — the npm
+	// mirror's own URL ends in `/npm-proxy`, so a loose /proxy/i match pulled
+	// the whole block in on a run whose only issue was the registry setting.
+	const NAMES_PROXY_ENV = /\b(?:HTTPS?_PROXY|NODE_USE_ENV_PROXY)\b/;
 	const proxyRelated = outcomes.some(
 		(o) =>
 			o.status !== "pass" &&
 			(o.key === "proxy-env" ||
 				o.group === "network" ||
-				o.group === "account" ||
-				o.group === "llm"),
+				NAMES_PROXY_ENV.test(o.fix ?? "")),
 	);
 	if (proxyRelated) {
 		lines.push("");

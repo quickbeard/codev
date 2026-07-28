@@ -12,12 +12,14 @@ import {
 	INTERNAL_NPM_REGISTRY,
 	isTransportError,
 	LLM_CHECKS,
+	NETWORK_CHECKS,
 	normalizeProxyInput,
 	PREFLIGHT_CHECKS,
 	persistProxyInstructions,
 	renderDiagnosisCompact,
 	runChecks,
 } from "@/lib/doctor.js";
+import * as log from "@/lib/log.js";
 import * as npm from "@/lib/npm.js";
 import * as proxy from "@/lib/proxy.js";
 import { PROXY_APPLIED_ENV } from "@/lib/proxy.js";
@@ -226,6 +228,51 @@ describe("diagnoseError", () => {
 		const d = diagnoseError(outer);
 		expect(d.what).toMatch(/could not resolve/i);
 		expect(d.what).toContain("sso.example.com");
+	});
+
+	// Regression: an HTTP error our own code threw has no `.cause` and no
+	// errno, so it fell through to the generic branch and was reported as
+	// "No proxy is configured. If this network requires one, that is the most
+	// likely cause." — telling a user whose network is demonstrably fine (the
+	// server just answered them) to configure a proxy.
+	describe("application-level errors are not blamed on the network", () => {
+		test("a backend 401 is reported as an auth result, not a proxy problem", () => {
+			const d = diagnoseError(
+				new Error(
+					"Backend /auth/exchange failed (401): Invalid or expired SSO token",
+				),
+				{ url: "https://api.example.com/auth/exchange", method: "POST" },
+			);
+			expect(d.what).toContain("Invalid or expired SSO token");
+			expect(d.cause).toMatch(/rejected the credentials/i);
+			expect(d.fix).toContain("codevhub login --force");
+			// The proxy must not appear anywhere in the explanation.
+			expect(d.cause).not.toMatch(/proxy/i);
+			expect(d.fix).not.toMatch(/proxy/i);
+		});
+
+		test("a non-auth backend error points at the server's own message", () => {
+			const d = diagnoseError(
+				new Error("Backend /config returned incomplete payload: {}"),
+			);
+			expect(d.cause).toMatch(/answered/i);
+			expect(d.fix).not.toMatch(/HTTP_PROXY/);
+		});
+
+		// A proxy IS the likely cause when nothing answered, so that reasoning
+		// must survive for errors that really did come from the transport.
+		test("a transport error keeps its proxy reasoning", () => {
+			const d = diagnoseError(
+				fetchError("ENOTFOUND", "getaddrinfo ENOTFOUND api.example.com"),
+			);
+			expect(d.fix).toContain("HTTP_PROXY");
+		});
+
+		// An errno in the message with no `cause` is still a network failure.
+		test("a causeless error naming an errno is still diagnosed as network", () => {
+			const d = diagnoseError(new Error("connect ECONNREFUSED 10.0.0.1:8080"));
+			expect(d.what).toMatch(/connection refused/i);
+		});
 	});
 
 	test("an unknown code still explains itself rather than echoing the error", () => {
@@ -547,6 +594,77 @@ describe("environment checks", () => {
 	});
 });
 
+// Regression: the probe used to GET the API base path and let `fetch` follow
+// redirects. The gateway 301s that path to its internal origin
+// (`http://netmind.viettel.vn:9096/codev-backend/`), which is unreachable from
+// outside the corporate network — so `doctor` reported the backend down on
+// machines where `codevhub install` worked perfectly.
+describe("backend reachability probe", () => {
+	async function runReach(): Promise<CheckOutcome> {
+		const check = NETWORK_CHECKS.find((c) => c.key === "backend-reach");
+		if (!check) throw new Error("no backend-reach check");
+		const [outcome] = await runChecks([check], {});
+		if (!outcome) throw new Error("no outcome");
+		return outcome;
+	}
+
+	test("never follows redirects, and hits a real route rather than the base path", async () => {
+		const fetchSpy = vi
+			.spyOn(log, "loggedFetch")
+			.mockResolvedValue(new Response("", { status: 401 }));
+
+		await runReach();
+
+		const [, url, init] = fetchSpy.mock.calls[0] ?? [];
+		expect(init?.redirect).toBe("manual");
+		expect(init?.method).toBe("POST");
+		// The bare base path is exactly what 301s to the internal origin.
+		expect(String(url)).not.toMatch(/\/codev-backend\/?$/);
+		expect(String(url)).toContain("/codev-backend/config");
+	});
+
+	test("a redirect counts as reachable — the response itself proves transport", async () => {
+		vi.spyOn(log, "loggedFetch").mockResolvedValue(
+			new Response("", {
+				status: 301,
+				headers: { location: "http://netmind.viettel.vn:9096/codev-backend/" },
+			}),
+		);
+		expect((await runReach()).status).toBe("pass");
+	});
+
+	test("401 is a pass, and says so rather than reading like a failure", async () => {
+		vi.spyOn(log, "loggedFetch").mockResolvedValue(
+			new Response("", { status: 401 }),
+		);
+		const o = await runReach();
+		expect(o.status).toBe("pass");
+		expect(o.detail).toContain("expected without credentials");
+	});
+
+	test("407 still fails — a proxy challenge means the transport is unusable", async () => {
+		vi.spyOn(log, "loggedFetch").mockResolvedValue(
+			new Response("", { status: 407 }),
+		);
+		const o = await runReach();
+		expect(o.status).toBe("fail");
+		expect(o.fix).toContain("user:password@host:port");
+	});
+
+	test("a connect timeout still fails, with the full diagnosis", async () => {
+		vi.spyOn(log, "loggedFetch").mockRejectedValue(
+			Object.assign(new TypeError("fetch failed"), {
+				cause: Object.assign(new Error("Connect Timeout Error"), {
+					code: "UND_ERR_CONNECT_TIMEOUT",
+				}),
+			}),
+		);
+		const o = await runReach();
+		expect(o.status).toBe("fail");
+		expect(o.diagnosis?.what).toMatch(/timed out/i);
+	});
+});
+
 describe("llm checks", () => {
 	async function runLlm(key: string, ctx: object): Promise<CheckOutcome> {
 		const check = LLM_CHECKS.find((c) => c.key === key);
@@ -675,6 +793,60 @@ describe("remediation output", () => {
 		}).join("\n");
 		expect(lines).toContain("NODE_USE_ENV_PROXY");
 		expect(lines).toContain("10.0.0.1:8080");
+		expect(lines).toContain("npm config set proxy");
+	});
+
+	// A wall of export lines under an expired-token 401 buries the one
+	// instruction that actually helps.
+	test("omits proxy setup when the only failures are authentication", () => {
+		const lines = buildNextSteps([
+			{
+				key: "api-key",
+				label: "Fetch a gateway API key",
+				group: "account",
+				status: "fail",
+				detail: "Backend /auth/exchange failed (401)",
+				fix: "Run `codevhub login --force` to re-authenticate, then re-run.",
+			},
+		]).join("\n");
+		expect(lines).toContain("codevhub login --force");
+		expect(lines).not.toContain("export HTTPS_PROXY");
+		expect(lines).not.toContain("SetEnvironmentVariable");
+	});
+
+	// The internal mirror's URL ends in `/npm-proxy`, which a loose /proxy/i
+	// test matched — dragging the whole export block into a run whose only
+	// issue was the registry setting.
+	test("the npm mirror URL does not count as a proxy problem", () => {
+		const lines = buildNextSteps([
+			{
+				key: "npm-registry",
+				label: "npm registry configuration",
+				group: "environment",
+				status: "warn",
+				detail: "registry: https://registry.npmjs.org/",
+				fix: `Set the mirror: npm config set registry ${INTERNAL_NPM_REGISTRY}`,
+			},
+		]).join("\n");
+		expect(lines).toContain(INTERNAL_NPM_REGISTRY);
+		expect(lines).not.toContain("export HTTPS_PROXY");
+		expect(lines).not.toContain("SetEnvironmentVariable");
+	});
+
+	// But a transport failure in the same group still warrants them — the
+	// signal is the diagnosis naming the proxy vars, not the group.
+	test("includes proxy setup when an account failure is a transport failure", () => {
+		const lines = buildNextSteps([
+			{
+				key: "api-key",
+				label: "Fetch a gateway API key",
+				group: "account",
+				status: "fail",
+				detail: "Could not resolve api.example.com",
+				fix: "Set HTTP_PROXY, HTTPS_PROXY and NODE_USE_ENV_PROXY=1, then re-run.",
+			},
+		]).join("\n");
+		expect(lines).toContain("NODE_USE_ENV_PROXY=1");
 		expect(lines).toContain("npm config set proxy");
 	});
 
