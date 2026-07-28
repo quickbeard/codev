@@ -82,10 +82,41 @@ describe("ensureFreshGatewayKey", () => {
 			apiKey: "sk-new",
 			baseUrl: undefined,
 			model: "MiniMax/MiniMax-M2.7",
+			providerId: undefined,
+			providerName: undefined,
 		};
 		expect(save).toHaveBeenCalledWith(expected);
 		expect(cfg).toHaveBeenCalledWith(expected);
 		expect(stderrText()).toContain("Refreshed your expired gateway API key");
+	});
+
+	test("keeps a manually-named provider across the refresh", async () => {
+		// The reconfigure rewrites the whole agent config, so dropping the
+		// provider here would silently re-label the user's provider as the
+		// netGate default on the next agent launch.
+		vi.spyOn(auth, "loadApiKey").mockReturnValue({
+			...CREDS,
+			baseUrl: "https://acme.example.com/v1",
+			providerId: "acme-ai",
+			providerName: "Acme AI",
+		});
+		vi.spyOn(backend, "validateApiKey").mockResolvedValue(false);
+		vi.spyOn(auth, "silentSso").mockResolvedValue(fakeSession());
+		vi.spyOn(backend, "fetchApiKey").mockResolvedValue("sk-new");
+		const save = vi.spyOn(auth, "saveApiKey").mockImplementation(() => {});
+		const cfg = vi.spyOn(configure, "configureClaudeCode").mockReturnValue([]);
+
+		await ensureFreshGatewayKey("claude-code");
+
+		const expected = {
+			apiKey: "sk-new",
+			baseUrl: "https://acme.example.com/v1",
+			model: "MiniMax/MiniMax-M2.7",
+			providerId: "acme-ai",
+			providerName: "Acme AI",
+		};
+		expect(save).toHaveBeenCalledWith(expected);
+		expect(cfg).toHaveBeenCalledWith(expected);
 	});
 
 	test("routes the reconfigure to the launched tool (codex, not claude)", async () => {

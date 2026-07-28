@@ -381,7 +381,7 @@ describe("configureClaudeCode", () => {
 });
 
 describe("configureOpenCode", () => {
-	test("creates ~/.config/opencode/opencode.json with aigateway provider when file does not exist", async () => {
+	test("creates ~/.config/opencode/opencode.json with netgate provider when file does not exist", async () => {
 		const { configureOpenCode } = await import("@/lib/configure.js");
 		configureOpenCode({ apiKey: "sk-xyz", model: "chosen-model" });
 
@@ -390,20 +390,20 @@ describe("configureOpenCode", () => {
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
 		expect(config.$schema).toBe("https://opencode.ai/config.json");
-		expect(config.provider.aigateway.npm).toBe("@ai-sdk/openai-compatible");
-		expect(config.provider.aigateway.options.baseURL).toBe(
+		expect(config.provider.netgate.npm).toBe("@ai-sdk/openai-compatible");
+		expect(config.provider.netgate.options.baseURL).toBe(
 			AI_GATEWAY_OPENAI_URL(),
 		);
-		expect(config.provider.aigateway.options.apiKey).toBe("sk-xyz");
-		expect(config.provider.aigateway.models["chosen-model"].name).toBe(
+		expect(config.provider.netgate.options.apiKey).toBe("sk-xyz");
+		expect(config.provider.netgate.models["chosen-model"].name).toBe(
 			"chosen-model",
 		);
 		// Top-level `model` pins the active default in <provider>/<modelId> form.
-		expect(config.model).toBe("aigateway/chosen-model");
+		expect(config.model).toBe("netgate/chosen-model");
 		// Declares the gateway window so OpenCode sizes context correctly and its
 		// auto-compaction fires (a model with no `limit` defaults to context 0,
 		// which disables compaction). `output` is required alongside `context`.
-		expect(config.provider.aigateway.models["chosen-model"].limit).toEqual({
+		expect(config.provider.netgate.models["chosen-model"].limit).toEqual({
 			context: 196608,
 			output: 65536,
 		});
@@ -422,14 +422,14 @@ describe("configureOpenCode", () => {
 
 		const filePath = join(tempDir, ".config", "opencode", "opencode.json");
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
-		const map = config.provider.aigateway.models;
+		const map = config.provider.netgate.models;
 		expect(Object.keys(map).sort()).toEqual(["model-a", "model-b", "model-c"]);
 		for (const id of ["model-a", "model-b", "model-c"]) {
 			expect(map[id].name).toBe(id);
 			expect(map[id].limit).toEqual({ context: 196608, output: 65536 });
 		}
 		// Top-level default still points at the chosen one.
-		expect(config.model).toBe("aigateway/model-a");
+		expect(config.model).toBe("netgate/model-a");
 	});
 
 	test("falls back to [model] when `models` is absent (older call sites)", async () => {
@@ -438,7 +438,7 @@ describe("configureOpenCode", () => {
 
 		const filePath = join(tempDir, ".config", "opencode", "opencode.json");
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
-		const map = config.provider.aigateway.models;
+		const map = config.provider.netgate.models;
 		expect(Object.keys(map)).toEqual(["solo-model"]);
 	});
 
@@ -452,7 +452,7 @@ describe("configureOpenCode", () => {
 
 		const filePath = join(tempDir, ".config", "opencode", "opencode.json");
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
-		const map = config.provider.aigateway.models;
+		const map = config.provider.netgate.models;
 		expect(Object.keys(map)).toEqual(["solo-model"]);
 	});
 
@@ -487,7 +487,7 @@ describe("configureOpenCode", () => {
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
 		expect(config.someSetting).toBeUndefined();
 		expect(config.provider.other).toBeUndefined();
-		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
+		expect(config.provider.netgate.options.apiKey).toBe("sk-new");
 	});
 
 	test("carries the `mcp` map across a rewrite (CodeGraph wiring survives reconfigure)", async () => {
@@ -500,7 +500,7 @@ describe("configureOpenCode", () => {
 		writeFileSync(
 			filePath,
 			JSON.stringify({
-				provider: { aigateway: { options: { apiKey: "sk-old" } } },
+				provider: { netgate: { options: { apiKey: "sk-old" } } },
 				mcp: {
 					codegraph: {
 						type: "local",
@@ -522,7 +522,7 @@ describe("configureOpenCode", () => {
 			"--mcp",
 		]);
 		expect(config.mcp.mine.command).toEqual(["mine"]);
-		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
+		expect(config.provider.netgate.options.apiKey).toBe("sk-new");
 	});
 
 	test("does not carry a non-object `mcp` value across a rewrite", async () => {
@@ -547,7 +547,7 @@ describe("configureOpenCode", () => {
 		writeFileSync(
 			filePath,
 			JSON.stringify({
-				provider: { aigateway: { options: { apiKey: "prev-codev-run" } } },
+				provider: { netgate: { options: { apiKey: "prev-codev-run" } } },
 			}),
 		);
 
@@ -559,12 +559,12 @@ describe("configureOpenCode", () => {
 		expect(results[0]?.backupPath).toBe(backupPath);
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
-		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
+		expect(config.provider.netgate.options.apiKey).toBe("sk-new");
 	});
 });
 
 describe("configureCodevCode", () => {
-	test("creates ~/.config/codev/codev.json with aigateway provider when file does not exist", async () => {
+	test("creates ~/.config/codev/codev.json with netgate provider when file does not exist", async () => {
 		const { configureCodevCode } = await import("@/lib/configure.js");
 		configureCodevCode({ apiKey: "sk-xyz", model: "chosen-model" });
 
@@ -573,19 +573,19 @@ describe("configureCodevCode", () => {
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
 		expect(config.$schema).toBe("https://opencode.ai/config.json");
-		expect(config.provider.aigateway.npm).toBe("@ai-sdk/openai-compatible");
-		expect(config.provider.aigateway.options.baseURL).toBe(
+		expect(config.provider.netgate.npm).toBe("@ai-sdk/openai-compatible");
+		expect(config.provider.netgate.options.baseURL).toBe(
 			AI_GATEWAY_OPENAI_URL(),
 		);
-		expect(config.provider.aigateway.options.apiKey).toBe("sk-xyz");
-		expect(config.provider.aigateway.models["chosen-model"].name).toBe(
+		expect(config.provider.netgate.options.apiKey).toBe("sk-xyz");
+		expect(config.provider.netgate.models["chosen-model"].name).toBe(
 			"chosen-model",
 		);
 		// Top-level `model` pins the active default in <provider>/<modelId> form.
-		expect(config.model).toBe("aigateway/chosen-model");
+		expect(config.model).toBe("netgate/chosen-model");
 		// The fork shares OpenCode's window/compaction handling, so the same
 		// limit + compaction blocks must land in its config.
-		expect(config.provider.aigateway.models["chosen-model"].limit).toEqual({
+		expect(config.provider.netgate.models["chosen-model"].limit).toEqual({
 			context: 196608,
 			output: 65536,
 		});
@@ -626,7 +626,7 @@ describe("configureCodevCode", () => {
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
 		expect(config.someSetting).toBeUndefined();
 		expect(config.provider.other).toBeUndefined();
-		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
+		expect(config.provider.netgate.options.apiKey).toBe("sk-new");
 	});
 
 	test("carries the `mcp` map across a rewrite (CodeGraph wiring survives reconfigure)", async () => {
@@ -636,7 +636,7 @@ describe("configureCodevCode", () => {
 		writeFileSync(
 			filePath,
 			JSON.stringify({
-				provider: { aigateway: { options: { apiKey: "sk-old" } } },
+				provider: { netgate: { options: { apiKey: "sk-old" } } },
 				mcp: {
 					codegraph: {
 						type: "local",
@@ -656,7 +656,7 @@ describe("configureCodevCode", () => {
 			"serve",
 			"--mcp",
 		]);
-		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
+		expect(config.provider.netgate.options.apiKey).toBe("sk-new");
 	});
 
 	test("preserves a pre-existing codev.json backup across repeated runs", async () => {
@@ -668,7 +668,7 @@ describe("configureCodevCode", () => {
 		writeFileSync(
 			filePath,
 			JSON.stringify({
-				provider: { aigateway: { options: { apiKey: "prev-codev-run" } } },
+				provider: { netgate: { options: { apiKey: "prev-codev-run" } } },
 			}),
 		);
 
@@ -680,7 +680,7 @@ describe("configureCodevCode", () => {
 		expect(results[0]?.backupPath).toBe(backupPath);
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
-		expect(config.provider.aigateway.options.apiKey).toBe("sk-new");
+		expect(config.provider.netgate.options.apiKey).toBe("sk-new");
 	});
 });
 
@@ -705,7 +705,7 @@ describe("configureCodex", () => {
 		};
 	}
 
-	test("creates ~/.codex/config.toml with aigateway provider when file does not exist", async () => {
+	test("creates ~/.codex/config.toml with netgate provider when file does not exist", async () => {
 		const { configureCodex } = await import("@/lib/configure.js");
 		configureCodex({ apiKey: "sk-codex", model: "chosen-model" });
 
@@ -714,14 +714,14 @@ describe("configureCodex", () => {
 
 		const config = readCodexToml();
 		expect(config.model).toBe("chosen-model");
-		expect(config.model_provider).toBe("aigateway");
-		expect(config.model_providers.aigateway).toBeDefined();
-		expect(config.model_providers.aigateway?.name).toBe("AI Gateway");
-		expect(config.model_providers.aigateway?.base_url).toBe(
+		expect(config.model_provider).toBe("netgate");
+		expect(config.model_providers.netgate).toBeDefined();
+		expect(config.model_providers.netgate?.name).toBe("netGate");
+		expect(config.model_providers.netgate?.base_url).toBe(
 			AI_GATEWAY_OPENAI_URL(),
 		);
-		expect(config.model_providers.aigateway?.wire_api).toBe("responses");
-		expect(config.model_providers.aigateway?.experimental_bearer_token).toBe(
+		expect(config.model_providers.netgate?.wire_api).toBe("responses");
+		expect(config.model_providers.netgate?.experimental_bearer_token).toBe(
 			"sk-codex",
 		);
 	});
@@ -760,7 +760,7 @@ describe("configureCodex", () => {
 		expect(backup).toContain('other = "keep"');
 
 		const config = readCodexToml();
-		expect(config.model_providers.aigateway?.experimental_bearer_token).toBe(
+		expect(config.model_providers.netgate?.experimental_bearer_token).toBe(
 			"sk-new",
 		);
 	});
@@ -805,7 +805,7 @@ describe("configureCodex", () => {
 		});
 
 		const config = readCodexToml();
-		expect(config.model_providers.aigateway?.base_url).toBe(
+		expect(config.model_providers.netgate?.base_url).toBe(
 			"https://example.com/v1",
 		);
 		expect(config.model).toBe("m");
@@ -820,7 +820,7 @@ describe("configureCodex", () => {
 		});
 
 		const config = readCodexToml();
-		expect(config.model_providers.aigateway?.base_url).toBe(
+		expect(config.model_providers.netgate?.base_url).toBe(
 			"https://example.com/v1",
 		);
 	});
@@ -834,7 +834,7 @@ describe("configureCodex", () => {
 		});
 
 		const config = readCodexToml();
-		expect(config.model_providers.aigateway?.base_url).toBe(
+		expect(config.model_providers.netgate?.base_url).toBe(
 			"https://example.com/v1",
 		);
 	});
@@ -852,7 +852,7 @@ describe("configureContinue", () => {
 		const filePath = join(tempDir, ".continue", "config.yaml");
 		expect(existsSync(filePath)).toBe(true);
 		const raw = readContinueYaml();
-		expect(raw).toContain("CoDev (AI Gateway)");
+		expect(raw).toContain("CoDev (netGate)");
 		// OpenAI-compatible provider entry pinned to the gateway's /v1 endpoint.
 		expect(raw).toContain(`provider: "openai"`);
 		expect(raw).toContain(`apiBase: "${AI_GATEWAY_OPENAI_URL()}"`);
@@ -931,7 +931,7 @@ describe("configureContinue", () => {
 		expect(readFileSync(backupPath, "utf-8")).toBe(original);
 
 		const raw = readContinueYaml();
-		expect(raw).toContain("CoDev (AI Gateway)");
+		expect(raw).toContain("CoDev (netGate)");
 		expect(raw).not.toContain("User Config");
 	});
 
@@ -1036,7 +1036,7 @@ describe.each([
 			marker: "original",
 		});
 		const written = JSON.parse(readFileSync(at(".jsonc"), "utf-8"));
-		expect(written.provider.aigateway.options.apiKey).toBe("k");
+		expect(written.provider.netgate.options.apiKey).toBe("k");
 	});
 
 	test("reads a jsonc containing comments and trailing commas", async () => {
@@ -1046,7 +1046,7 @@ describe.each([
 			".jsonc",
 			`{
 				// the gateway CoDev configured
-				"provider": { "aigateway": { "options": { "baseURL": "https://gw.test/v1" } } },
+				"provider": { "netgate": { "options": { "baseURL": "https://gw.test/v1" } } },
 			}`,
 		);
 		const { readAgentConfig } = await import("@/lib/configure.js");
@@ -1534,11 +1534,11 @@ describe("configureOpenCode with manual credentials", () => {
 				"utf-8",
 			),
 		);
-		expect(config.provider.aigateway.options.baseURL).toBe(
+		expect(config.provider.netgate.options.baseURL).toBe(
 			"https://example.com/v1",
 		);
-		expect(config.provider.aigateway.options.apiKey).toBe("sk-user");
-		expect(config.provider.aigateway.models["my-model"].name).toBe("my-model");
+		expect(config.provider.netgate.options.apiKey).toBe("sk-user");
+		expect(config.provider.netgate.models["my-model"].name).toBe("my-model");
 	});
 
 	test("preserves trailing v1/", async () => {
@@ -1555,7 +1555,7 @@ describe("configureOpenCode with manual credentials", () => {
 				"utf-8",
 			),
 		);
-		expect(config.provider.aigateway.options.baseURL).toBe(
+		expect(config.provider.netgate.options.baseURL).toBe(
 			"https://example.com/v1/",
 		);
 	});
@@ -1574,7 +1574,7 @@ describe("configureOpenCode with manual credentials", () => {
 				"utf-8",
 			),
 		);
-		expect(config.provider.aigateway.options.baseURL).toBe(
+		expect(config.provider.netgate.options.baseURL).toBe(
 			"https://example.com/v1",
 		);
 	});
@@ -1593,9 +1593,161 @@ describe("configureOpenCode with manual credentials", () => {
 				"utf-8",
 			),
 		);
-		expect(config.provider.aigateway.options.baseURL).toBe(
+		expect(config.provider.netgate.options.baseURL).toBe(
 			"https://example.com/v1",
 		);
+	});
+});
+
+// Credentials carrying a provider come from the manual path, where the user
+// names their own provider; everything else gets the netGate default asserted
+// throughout the tests above.
+describe("custom provider identity", () => {
+	const custom = {
+		apiKey: "sk-user",
+		baseUrl: "https://example.com/v1",
+		model: "m",
+		providerId: "acme-ai",
+		providerName: "Acme AI",
+	};
+
+	test("codex writes the custom id as both the key and model_provider", async () => {
+		const { configureCodex } = await import("@/lib/configure.js");
+		configureCodex(custom);
+
+		const config = TOML.parse(
+			readFileSync(join(tempDir, ".codex", "config.toml"), "utf-8"),
+		) as {
+			model_provider: string;
+			model_providers: Record<string, { name: string; base_url: string }>;
+		};
+		expect(config.model_provider).toBe("acme-ai");
+		expect(config.model_providers["acme-ai"]?.name).toBe("Acme AI");
+		expect(config.model_providers["acme-ai"]?.base_url).toBe(
+			"https://example.com/v1",
+		);
+		expect(config.model_providers.netgate).toBeUndefined();
+	});
+
+	test("opencode writes the custom id in both the provider map and `model`", async () => {
+		const { configureOpenCode } = await import("@/lib/configure.js");
+		configureOpenCode(custom);
+
+		const config = JSON.parse(
+			readFileSync(
+				join(tempDir, ".config", "opencode", "opencode.json"),
+				"utf-8",
+			),
+		);
+		expect(config.model).toBe("acme-ai/m");
+		expect(config.provider["acme-ai"].name).toBe("Acme AI");
+		expect(config.provider["acme-ai"].options.apiKey).toBe("sk-user");
+		expect(config.provider.netgate).toBeUndefined();
+	});
+
+	test("codev-code writes the custom id too", async () => {
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode(custom);
+
+		const config = JSON.parse(
+			readFileSync(join(tempDir, ".config", "codev", "codev.json"), "utf-8"),
+		);
+		expect(config.model).toBe("acme-ai/m");
+		expect(config.provider["acme-ai"].name).toBe("Acme AI");
+	});
+
+	test("continue titles its config with the custom provider name", async () => {
+		const { configureContinue } = await import("@/lib/configure.js");
+		configureContinue(custom);
+
+		const raw = readFileSync(
+			join(tempDir, ".continue", "config.yaml"),
+			"utf-8",
+		);
+		expect(raw).toContain('name: "CoDev (Acme AI)"');
+		// The per-model provider stays Continue's built-in `openai` type.
+		expect(raw).toContain('provider: "openai"');
+	});
+
+	test("a custom-provider config is detected and read back once its id is saved", async () => {
+		const { configureCodex, detectConfiguredTools, readAgentConfig } =
+			await import("@/lib/configure.js");
+		configureCodex(custom);
+		// codevProviderIds() sources the custom id from auth.json — the same file
+		// the install flow saves it to.
+		writeFileSync(
+			join(tempDir, ".codev-hub", "auth.json"),
+			JSON.stringify({
+				gateway_url: "https://gw.test/gateway",
+				api_key: "sk-user",
+				provider_id: "acme-ai",
+				provider_name: "Acme AI",
+			}),
+		);
+
+		expect(detectConfiguredTools()).toEqual(["codex"]);
+		expect(readAgentConfig("codex")).toEqual({
+			baseUrl: "https://example.com/v1",
+		});
+	});
+});
+
+// Installs predating the netGate rename wrote `aigateway`. Nothing writes it
+// any more, but detection and the base_url readback must keep recognizing it or
+// `codevhub model` would stop seeing those tools and `restore` would stop
+// attributing their configs.
+describe("legacy aigateway configs", () => {
+	test("detectConfiguredTools recognizes codex, opencode and codev-code", async () => {
+		mkdirSync(join(tempDir, ".codex"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".codex", "config.toml"),
+			'model = "m"\nmodel_provider = "aigateway"\n[model_providers.aigateway]\nname = "AI Gateway"\n',
+		);
+		const legacyOpenCode = JSON.stringify({
+			model: "aigateway/m",
+			provider: { aigateway: { npm: "@ai-sdk/openai-compatible" } },
+		});
+		mkdirSync(join(tempDir, ".config", "opencode"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".config", "opencode", "opencode.json"),
+			legacyOpenCode,
+		);
+		mkdirSync(join(tempDir, ".config", "codev"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".config", "codev", "codev.json"),
+			legacyOpenCode,
+		);
+
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools().sort()).toEqual([
+			"codev-code",
+			"codex",
+			"opencode",
+		]);
+	});
+
+	test("readAgentConfig still returns the legacy base_url", async () => {
+		mkdirSync(join(tempDir, ".codex"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".codex", "config.toml"),
+			'model = "m"\nmodel_provider = "aigateway"\n[model_providers.aigateway]\nbase_url = "https://legacy.test/v1"\n',
+		);
+
+		const { readAgentConfig } = await import("@/lib/configure.js");
+		expect(readAgentConfig("codex")).toEqual({
+			baseUrl: "https://legacy.test/v1",
+		});
+	});
+
+	test("a legacy Continue config keeps its CoDev marker", async () => {
+		mkdirSync(join(tempDir, ".continue"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".continue", "config.yaml"),
+			'name: "CoDev (AI Gateway)"\nversion: "0.0.1"\nschema: "v1"\nmodels:\n  - name: "m"\n',
+		);
+
+		const { detectConfiguredTools } = await import("@/lib/configure.js");
+		expect(detectConfiguredTools()).toEqual(["vscode-continue"]);
 	});
 });
 
@@ -1623,7 +1775,7 @@ describe("detectConfiguredTools", () => {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			join(dir, "config.toml"),
-			'model = "m"\nmodel_provider = "aigateway"\n[model_providers.aigateway]\nname = "AI Gateway"\n',
+			'model = "m"\nmodel_provider = "netgate"\n[model_providers.netgate]\nname = "netGate"\n',
 		);
 	}
 
@@ -1634,9 +1786,9 @@ describe("detectConfiguredTools", () => {
 			join(dir, "opencode.json"),
 			JSON.stringify({
 				$schema: "https://opencode.ai/config.json",
-				model: "aigateway/m",
+				model: "netgate/m",
 				provider: {
-					aigateway: { npm: "@ai-sdk/openai-compatible" },
+					netgate: { npm: "@ai-sdk/openai-compatible" },
 				},
 			}),
 		);
@@ -1649,9 +1801,9 @@ describe("detectConfiguredTools", () => {
 			join(dir, "codev.json"),
 			JSON.stringify({
 				$schema: "https://opencode.ai/config.json",
-				model: "aigateway/m",
+				model: "netgate/m",
 				provider: {
-					aigateway: { npm: "@ai-sdk/openai-compatible" },
+					netgate: { npm: "@ai-sdk/openai-compatible" },
 				},
 			}),
 		);
@@ -1662,7 +1814,7 @@ describe("detectConfiguredTools", () => {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			join(dir, "config.yaml"),
-			'name: "CoDev (AI Gateway)"\nversion: "0.0.1"\nschema: "v1"\nmodels:\n  - name: "m"\n',
+			'name: "CoDev (netGate)"\nversion: "0.0.1"\nschema: "v1"\nmodels:\n  - name: "m"\n',
 		);
 	}
 
@@ -1714,13 +1866,13 @@ describe("detectConfiguredTools", () => {
 			join(tempDir, ".claude", "settings.json"),
 			JSON.stringify({ env: { OTHER_KEY: "x" } }),
 		);
-		// Codex config without the aigateway provider.
+		// Codex config without the netgate provider.
 		mkdirSync(join(tempDir, ".codex"), { recursive: true });
 		writeFileSync(
 			join(tempDir, ".codex", "config.toml"),
 			'model = "claude-sonnet"\n[model_providers.openai]\nname = "OpenAI"\n',
 		);
-		// OpenCode config without the aigateway provider.
+		// OpenCode config without the netgate provider.
 		mkdirSync(join(tempDir, ".config", "opencode"), { recursive: true });
 		writeFileSync(
 			join(tempDir, ".config", "opencode", "opencode.json"),
@@ -1733,7 +1885,7 @@ describe("detectConfiguredTools", () => {
 
 	test("returns only the subset that has CoDev markers", async () => {
 		seedClaudeWithCodevMarkers();
-		// Codex is user-authored (no aigateway).
+		// Codex is user-authored (no gateway provider).
 		mkdirSync(join(tempDir, ".codex"), { recursive: true });
 		writeFileSync(
 			join(tempDir, ".codex", "config.toml"),

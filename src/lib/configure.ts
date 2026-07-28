@@ -22,6 +22,7 @@ import {
 	GATEWAY_MAX_OUTPUT_TOKENS,
 } from "@/lib/const.js";
 import { logInfo } from "@/lib/log.js";
+import { codevProviderIds, resolveProvider } from "@/lib/provider.js";
 import type { Agent } from "@/providers/types.js";
 
 export type Tool =
@@ -71,6 +72,10 @@ export interface Credentials {
 	// model field (Claude Code, Codex) ignore this and use only `model`.
 	// Absent ⇒ treat as [model], so older call sites stay valid.
 	models?: string[];
+	// The provider the user named on the manual path. Absent ⇒ SSO-issued key,
+	// which gets the built-in netGate identity (lib/provider.ts).
+	providerId?: string;
+	providerName?: string;
 }
 
 // Claude Code's ANTHROPIC_BASE_URL is a server root, not an OpenAI-style /v1
@@ -116,9 +121,7 @@ const CODEX_K = {
 	modelContextWindow: atob("bW9kZWxfY29udGV4dF93aW5kb3c="),
 	autoCompactTokenLimit: atob("bW9kZWxfYXV0b19jb21wYWN0X3Rva2VuX2xpbWl0"),
 	modelProviders: atob("bW9kZWxfcHJvdmlkZXJz"),
-	providerId: atob("YWlnYXRld2F5"),
 	name: atob("bmFtZQ=="),
-	displayName: atob("QUkgR2F0ZXdheQ=="),
 	baseUrl: atob("YmFzZV91cmw="),
 	wireApi: atob("d2lyZV9hcGk="),
 	wireApiValue: atob("cmVzcG9uc2Vz"),
@@ -136,11 +139,9 @@ const OPENCODE_K = {
 	mcp: atob("bWNw"),
 	model: atob("bW9kZWw="),
 	provider: atob("cHJvdmlkZXI="),
-	providerKey: atob("YWlnYXRld2F5"),
 	npm: atob("bnBt"),
 	npmPkg: atob("QGFpLXNkay9vcGVuYWktY29tcGF0aWJsZQ=="),
 	name: atob("bmFtZQ=="),
-	displayName: atob("QUkgR2F0ZXdheQ=="),
 	options: atob("b3B0aW9ucw=="),
 	baseURL: atob("YmFzZVVSTA=="),
 	apiKey: atob("YXBpS2V5"),
@@ -159,8 +160,12 @@ const OPENCODE_K = {
 //
 // Three patterns, one per tool:
 //   Claude Code → settings.json → env.ANTHROPIC_BASE_URL
-//   Codex       → config.toml   → model_providers.aigateway.base_url
-//   OpenCode    → opencode.json → provider.aigateway.options.baseURL
+//   Codex       → config.toml   → model_providers.<provider>.base_url
+//   OpenCode    → opencode.json → provider.<provider>.options.baseURL
+//
+// <provider> is the netGate default for SSO-issued keys, or the id derived from
+// the name the user typed on the manual path — so it's resolved at read time
+// against codevProviderIds() rather than a fixed key.
 //
 // Returns undefined when the file is absent, not CoDev-managed, or unreadable.
 
@@ -209,17 +214,19 @@ function readCodexConfig(): AgentConfigResult {
 	if (!existsSync(path)) return {};
 	try {
 		const raw = TOML.parse(readFileSync(path, "utf-8")) as unknown;
-		// Guard: skip non-CoDev configs (no aigateway provider).
-		if (!hasNestedKey(raw, CODEX_K.modelProviders, CODEX_K.providerId))
-			return {};
+		// Guard: skip non-CoDev configs (no provider we recognize).
+		const providerId = firstNestedKey(
+			raw,
+			CODEX_K.modelProviders,
+			codevProviderIds(),
+		);
+		if (!providerId) return {};
 		const r = raw as Record<string, unknown>;
 		const providers =
 			(r[CODEX_K.modelProviders] as Record<string, unknown>) || {};
-		const aigateway =
-			(providers[CODEX_K.providerId as string] as Record<string, unknown>) ||
-			{};
+		const gateway = (providers[providerId] as Record<string, unknown>) || {};
 		return {
-			baseUrl: (aigateway[CODEX_K.baseUrl as string] as string) || undefined,
+			baseUrl: (gateway[CODEX_K.baseUrl as string] as string) || undefined,
 		};
 	} catch (e) {
 		throw new Error(`Failed to parse Codex config at ${path}: ${e}`);
@@ -246,17 +253,18 @@ function readOpenCodeConfig(
 	if (!existsSync(path)) return {};
 	try {
 		const raw = parseJsonc(readFileSync(path, "utf-8"));
-		// Guard: skip non-CoDev configs (no aigateway provider).
-		if (!hasNestedKey(raw, OPENCODE_K.provider, OPENCODE_K.providerKey))
-			return {};
+		// Guard: skip non-CoDev configs (no provider we recognize).
+		const providerId = firstNestedKey(
+			raw,
+			OPENCODE_K.provider,
+			codevProviderIds(),
+		);
+		if (!providerId) return {};
 		const r = raw as Record<string, unknown>;
 		const provider = (r[OPENCODE_K.provider] as Record<string, unknown>) || {};
-		const aigateway =
-			(provider[OPENCODE_K.providerKey as string] as Record<string, unknown>) ||
-			{};
+		const gateway = (provider[providerId] as Record<string, unknown>) || {};
 		const options =
-			(aigateway[OPENCODE_K.options as string] as Record<string, unknown>) ||
-			{};
+			(gateway[OPENCODE_K.options as string] as Record<string, unknown>) || {};
 		return {
 			baseUrl: (options[OPENCODE_K.baseURL as string] as string) || undefined,
 		};
@@ -282,9 +290,15 @@ const CONTINUE_K = {
 	model: atob("bW9kZWw="),
 	apiBase: atob("YXBpQmFzZQ=="),
 	apiKey: atob("YXBpS2V5"),
-	configName: atob("Q29EZXYgKEFJIEdhdGV3YXkp"),
+	// The config title is `CoDev (<provider name>)`, so only the prefix is
+	// stable — that prefix is what isCodevContinueConfig matches on.
+	configNamePrefix: atob("Q29EZXYgKA=="),
 	configVersion: atob("MC4wLjE="),
 };
+
+function continueConfigName(providerName: string): string {
+	return `${CONTINUE_K.configNamePrefix}${providerName})`;
+}
 
 // OpenCode and the codev-code fork share one config loader, so they share this
 // hazard: each reads *both* `<base>.json` and `<base>.jsonc` from its config
@@ -370,9 +384,10 @@ export function getBackupStatus(tool: Tool): BackupStatus[] {
 
 // Detect which AI tools currently have a CoDev-managed config on disk. Used
 // by `codevhub model` to know whose configs to rewrite when the user switches
-// the default model. Each marker is something CoDev distinctly writes — the
-// `aigateway` provider id (codex/opencode) or `ANTHROPIC_DEFAULT_OPUS_MODEL`
-// (claude-code) — none of which would appear in a user-authored config.
+// the default model. Each marker is something CoDev distinctly writes — one of
+// the known provider ids (codex/opencode, see codevProviderIds) or
+// `ANTHROPIC_DEFAULT_OPUS_MODEL` (claude-code) — none of which would appear in
+// a user-authored config.
 //
 // Continue's config file is shared across editors (VS Code + JetBrains both
 // read the same ~/.continue/config.yaml), so when the marker is present we
@@ -396,6 +411,22 @@ function hasNestedKey(obj: unknown, outer: string, inner: string): boolean {
 	return inner in (next as Record<string, unknown>);
 }
 
+// Like hasNestedKey, but for the provider maps, whose key is no longer a single
+// constant: returns the first candidate id present under `outer`, or null.
+// Candidates are ordered most-specific-first (the saved id, then the built-ins),
+// so a config carrying both a custom and a legacy entry resolves to the custom.
+function firstNestedKey(
+	obj: unknown,
+	outer: string,
+	candidates: string[],
+): string | null {
+	if (!obj || typeof obj !== "object") return null;
+	const next = (obj as Record<string, unknown>)[outer];
+	if (!next || typeof next !== "object") return null;
+	const map = next as Record<string, unknown>;
+	return candidates.find((id) => id in map) ?? null;
+}
+
 function isCodevClaudeConfig(): boolean {
 	const path = sourcePathOf("claude-settings");
 	if (!existsSync(path)) return false;
@@ -412,7 +443,10 @@ function isCodevCodexConfig(): boolean {
 	if (!existsSync(path)) return false;
 	try {
 		const config = TOML.parse(readFileSync(path, "utf-8")) as unknown;
-		return hasNestedKey(config, CODEX_K.modelProviders, CODEX_K.providerId);
+		return (
+			firstNestedKey(config, CODEX_K.modelProviders, codevProviderIds()) !==
+			null
+		);
 	} catch {
 		return false;
 	}
@@ -425,21 +459,24 @@ function isCodevOpenCodeConfig(
 	if (!existsSync(path)) return false;
 	try {
 		const config = parseJsonc(readFileSync(path, "utf-8"));
-		return hasNestedKey(config, OPENCODE_K.provider, OPENCODE_K.providerKey);
+		return (
+			firstNestedKey(config, OPENCODE_K.provider, codevProviderIds()) !== null
+		);
 	} catch {
 		return false;
 	}
 }
 
 // Continue's config is YAML; pulling in a YAML parser just for one substring
-// check would be overkill. The top-level `name:` we emit is verbatim and
-// distinctive, so a substring search on the raw file is sufficient.
+// check would be overkill. The top-level `name:` we emit ends in the provider
+// name, so only its prefix is fixed — still distinctive enough that a substring
+// search on the raw file is sufficient.
 function isCodevContinueConfig(): boolean {
 	const path = sourcePathOf("continue-config");
 	if (!existsSync(path)) return false;
 	try {
 		const raw = readFileSync(path, "utf-8");
-		return raw.includes(CONTINUE_K.configName);
+		return raw.includes(CONTINUE_K.configNamePrefix);
 	} catch {
 		return false;
 	}
@@ -775,18 +812,19 @@ export function configureCodex(creds: Credentials): ConfigureResult[] {
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
 		: AI_GATEWAY_OPENAI_URL();
 	const model = requireModel(creds);
+	const provider = resolveProvider(creds);
 
 	writeToml(sourcePath, {
 		[CODEX_K.model]: model,
-		[CODEX_K.modelProvider]: CODEX_K.providerId,
+		[CODEX_K.modelProvider]: provider.id,
 		// The gateway model isn't in Codex's catalog, so Codex would otherwise
 		// assume a 272K fallback window — larger than the real 196608 ceiling.
 		// Pin the true window and compact at ~85% of it, mirroring Claude Code.
 		[CODEX_K.modelContextWindow]: GATEWAY_CONTEXT_WINDOW,
 		[CODEX_K.autoCompactTokenLimit]: GATEWAY_COMPACT_TRIGGER,
 		[CODEX_K.modelProviders]: {
-			[CODEX_K.providerId]: {
-				[CODEX_K.name]: CODEX_K.displayName,
+			[provider.id]: {
+				[CODEX_K.name]: provider.name,
 				[CODEX_K.baseUrl]: baseUrl,
 				[CODEX_K.wireApi]: CODEX_K.wireApiValue,
 				[CODEX_K.bearerToken]: creds.apiKey,
@@ -812,7 +850,9 @@ export function configureContinue(creds: Credentials): ConfigureResult[] {
 		creds.models && creds.models.length > 0 ? creds.models : [defaultModel];
 
 	const lines: string[] = [];
-	lines.push(`${CONTINUE_K.name}: ${yamlScalar(CONTINUE_K.configName)}`);
+	lines.push(
+		`${CONTINUE_K.name}: ${yamlScalar(continueConfigName(resolveProvider(creds).name))}`,
+	);
 	lines.push(`${CONTINUE_K.version}: ${yamlScalar(CONTINUE_K.configVersion)}`);
 	lines.push(`${CONTINUE_K.schema}: ${yamlScalar(CONTINUE_K.schemaValue)}`);
 	lines.push(`${CONTINUE_K.models}:`);
@@ -876,6 +916,7 @@ function configureOpenCodeKind(
 		? normalizeOpenCodeBaseUrl(creds.baseUrl)
 		: AI_GATEWAY_OPENAI_URL();
 	const defaultModel = requireModel(creds);
+	const provider = resolveProvider(creds);
 	// Fall back to [defaultModel] when `models` is unset so callers that don't
 	// know about the list (e.g. older fixtures, the fallback path with no
 	// fetched list) still produce a valid one-entry map.
@@ -904,7 +945,7 @@ function configureOpenCodeKind(
 		...(mcp !== undefined ? { [OPENCODE_K.mcp]: mcp } : {}),
 		// Top-level `model` pins the initial active model OpenCode uses on
 		// launch. Format is `<provider>/<modelId>` per OpenCode's schema.
-		[OPENCODE_K.model]: `${OPENCODE_K.providerKey}/${defaultModel}`,
+		[OPENCODE_K.model]: `${provider.id}/${defaultModel}`,
 		// OpenCode has no percentage trigger; it compacts at `context − reserved`.
 		// Reserve the headroom that lands the trigger at ~85% of the window, to
 		// match Claude Code and Codex.
@@ -913,9 +954,9 @@ function configureOpenCodeKind(
 			[OPENCODE_K.reserved]: GATEWAY_COMPACT_RESERVED,
 		},
 		[OPENCODE_K.provider]: {
-			[OPENCODE_K.providerKey]: {
+			[provider.id]: {
 				[OPENCODE_K.npm]: OPENCODE_K.npmPkg,
-				[OPENCODE_K.name]: OPENCODE_K.displayName,
+				[OPENCODE_K.name]: provider.name,
 				[OPENCODE_K.options]: {
 					[OPENCODE_K.baseURL]: baseUrl,
 					[OPENCODE_K.apiKey]: creds.apiKey,

@@ -13,10 +13,11 @@ afterEach(() => {
 });
 
 describe("ManualCredentials", () => {
-	test("renders both field labels", () => {
+	test("renders all three field labels", () => {
 		const onDone = vi.fn();
 		const { lastFrame } = render(<ManualCredentials onDone={onDone} />);
 		const output = lastFrame() ?? "";
+		expect(output).toContain("Provider Name");
 		expect(output).toContain("API URL");
 		expect(output).toContain("API Key");
 	});
@@ -25,16 +26,30 @@ describe("ManualCredentials", () => {
 		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
 
-		stdin.write("https://example.com/v1");
+		stdin.write("Acme AI");
 		await tick();
 
-		expect(lastFrame() ?? "").toContain("https://example.com/v1");
+		expect(lastFrame() ?? "").toContain("Acme AI");
 	});
 
-	test("Enter advances through both fields and submits", async () => {
+	test("shows the id derived from the provider name as it is typed", async () => {
+		const onDone = vi.fn();
+		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
+
+		stdin.write("Acme AI Gateway");
+		await tick();
+
+		expect(lastFrame() ?? "").toContain("→ id: acme-ai-gateway");
+	});
+
+	test("Enter advances through all three fields and submits", async () => {
 		const onDone = vi.fn();
 		const { stdin } = render(<ManualCredentials onDone={onDone} />);
 
+		stdin.write("Acme AI");
+		await tick();
+		stdin.write("\r");
+		await tick();
 		stdin.write("https://example.com/v1");
 		await tick();
 		stdin.write("\r");
@@ -46,6 +61,7 @@ describe("ManualCredentials", () => {
 
 		expect(onDone).toHaveBeenCalledTimes(1);
 		expect(onDone).toHaveBeenCalledWith({
+			providerName: "Acme AI",
 			baseUrl: "https://example.com/v1",
 			apiKey: "sk-test",
 		});
@@ -55,6 +71,10 @@ describe("ManualCredentials", () => {
 		const onDone = vi.fn();
 		const { stdin } = render(<ManualCredentials onDone={onDone} />);
 
+		stdin.write("  Acme AI  ");
+		await tick();
+		stdin.write("\r");
+		await tick();
 		stdin.write("  https://example.com  ");
 		await tick();
 		stdin.write("\r");
@@ -65,15 +85,60 @@ describe("ManualCredentials", () => {
 		await tick();
 
 		expect(onDone).toHaveBeenCalledWith({
+			providerName: "Acme AI",
 			baseUrl: "https://example.com",
 			apiKey: "sk-key",
 		});
 	});
 
-	test("Enter on an empty field shows an error and does not advance", async () => {
+	test("an empty provider name advances and submits as ''", async () => {
+		// The caller resolves "" to the default provider identity; the form itself
+		// only has to let it through.
 		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
 
+		stdin.write("\r");
+		await tick();
+		expect(lastFrame() ?? "").not.toContain("Provider Name is required");
+
+		stdin.write("https://example.com");
+		await tick();
+		stdin.write("\r");
+		await tick();
+		stdin.write("sk-key");
+		await tick();
+		stdin.write("\r");
+		await tick();
+
+		expect(onDone).toHaveBeenCalledWith({
+			providerName: "",
+			baseUrl: "https://example.com",
+			apiKey: "sk-key",
+		});
+	});
+
+	test("ignores non-ASCII characters in the provider name", async () => {
+		// The name is the source of a TOML/JSON config key, so anything the slug
+		// couldn't represent never enters the field.
+		const onDone = vi.fn();
+		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
+
+		stdin.write("Cổng Ai");
+		await tick();
+
+		const nameLine = (lastFrame() ?? "")
+			.split("\n")
+			.find((l) => l.includes("Provider Name"));
+		expect(nameLine).toContain("Cng Ai");
+		expect(nameLine).not.toContain("ổ");
+	});
+
+	test("Enter on an empty API URL shows an error and does not advance", async () => {
+		const onDone = vi.fn();
+		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
+
+		stdin.write("\r");
+		await tick();
 		stdin.write("\r");
 		await tick();
 
@@ -82,10 +147,12 @@ describe("ManualCredentials", () => {
 		expect(onDone).not.toHaveBeenCalled();
 	});
 
-	test("Enter on an all-whitespace field shows the required error", async () => {
+	test("Enter on an all-whitespace API URL shows the required error", async () => {
 		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
 
+		stdin.write("\r");
+		await tick();
 		stdin.write("   ");
 		await tick();
 		stdin.write("\r");
@@ -100,6 +167,8 @@ describe("ManualCredentials", () => {
 		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
 
+		stdin.write("\r");
+		await tick();
 		stdin.write("abc");
 		await tick();
 		stdin.write(BACKSPACE);
@@ -117,7 +186,9 @@ describe("ManualCredentials", () => {
 		const onDone = vi.fn();
 		const { stdin, lastFrame } = render(<ManualCredentials onDone={onDone} />);
 
-		// Empty Enter -> error
+		// Skip the optional provider name, then empty Enter on API URL -> error
+		stdin.write("\r");
+		await tick();
 		stdin.write("\r");
 		await tick();
 		expect(lastFrame() ?? "").toContain("API URL is required");

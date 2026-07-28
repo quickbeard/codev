@@ -259,8 +259,17 @@ async function typeManualCreds(
 	frames: string[],
 	baseUrl: string,
 	apiKey: string,
+	// The provider-name field comes first and is optional — an empty string
+	// just Enters past it, leaving the default identity to the caller.
+	providerName = "",
 ) {
 	await waitForFrame(frames, "Enter API credentials");
+	if (providerName) {
+		stdin.write(providerName);
+		await new Promise((r) => setTimeout(r, 30));
+	}
+	stdin.write("\r");
+	await new Promise((r) => setTimeout(r, 30));
 	stdin.write(baseUrl);
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
@@ -557,6 +566,7 @@ describe("InstallApp fail-stop invariant", () => {
 			frames,
 			"https://my-gateway.example.com/v1",
 			"sk-manual-123",
+			"Acme AI",
 		);
 		await pickFirstModel(stdin, frames);
 		await waitForFrame(frames, "Happy coding");
@@ -566,11 +576,29 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(history).toContain("Happy coding");
 		expect(loginSpy).toHaveBeenCalledTimes(1);
 		expect(fetchApiKeySpy).not.toHaveBeenCalled();
+		// The typed provider name reaches configure as the identity pair, and is
+		// persisted so `codevhub model` and the launch-time key refresh reuse it.
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-manual-123",
 			baseUrl: "https://my-gateway.example.com/v1",
 			model: "m-alpha",
 			models: ["m-alpha", "m-beta"],
+			providerId: "acme-ai",
+			providerName: "Acme AI",
+		});
+		// loadApiKey is stubbed for these tests, so assert the file saveApiKey
+		// actually wrote into the temp home.
+		expect(
+			JSON.parse(
+				readFileSync(
+					join(installAppTempHome, ".codev-hub", "auth.json"),
+					"utf-8",
+				),
+			),
+		).toMatchObject({
+			api_key: "sk-manual-123",
+			provider_id: "acme-ai",
+			provider_name: "Acme AI",
 		});
 	});
 
@@ -635,11 +663,15 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(history).toContain("Happy coding");
 		expect(fetchApiKeySpy).toHaveBeenCalledTimes(2);
 		expect(configureSpy).toHaveBeenCalledTimes(1);
+		// No provider name typed on this fallback path, so the manual default
+		// identity applies.
 		expect(configureSpy).toHaveBeenCalledWith({
 			apiKey: "sk-fallback-123",
 			baseUrl: "https://fallback.example.com/v1",
 			model: "m-alpha",
 			models: ["m-alpha", "m-beta"],
+			providerId: "ai-gateway",
+			providerName: "AI Gateway",
 		});
 	});
 

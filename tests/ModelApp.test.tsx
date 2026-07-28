@@ -180,7 +180,11 @@ describe("ModelApp", () => {
 		expect(allFrames(frames)).toContain("Enter API credentials");
 		expect(allFrames(frames)).toContain("Saved API key was rejected");
 
-		// Type new baseUrl + apiKey.
+		// Type a provider name (first field), then baseUrl + apiKey.
+		stdin.write("Acme AI");
+		await tick();
+		stdin.write("\r");
+		await tick();
 		stdin.write("https://new-gw.example.com/v1");
 		await tick();
 		stdin.write("\r");
@@ -205,6 +209,8 @@ describe("ModelApp", () => {
 			baseUrl: "https://new-gw.example.com/v1",
 			model: "m1",
 			models: ["m1", "m2"],
+			providerId: "acme-ai",
+			providerName: "Acme AI",
 		});
 	});
 
@@ -245,7 +251,10 @@ describe("ModelApp", () => {
 		const { stdin, frames } = render(<ModelApp />);
 		await waitForFrame(frames, "Enter API credentials");
 
-		// Drive ManualCredentials with new (but still 'invalid') creds.
+		// Drive ManualCredentials with new (but still 'invalid') creds. Enter past
+		// the optional provider-name field first.
+		stdin.write("\r");
+		await tick();
 		stdin.write("https://retry.example.com/v1");
 		await tick();
 		stdin.write("\r");
