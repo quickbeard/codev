@@ -26,6 +26,7 @@ import {
 } from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
 import { logError, logInfo, logWarn } from "@/lib/log.js";
+import { providerFromName } from "@/lib/provider.js";
 import { formatToolList } from "@/lib/text.js";
 
 // ModelSelect handles its own /v1/models fetch — we don't duplicate it here.
@@ -94,6 +95,8 @@ export function ModelApp() {
 			apiKey: saved.apiKey,
 			baseUrl: saved.baseUrl,
 			model: saved.model,
+			providerId: saved.providerId,
+			providerName: saved.providerName,
 		});
 		setTools(detected);
 		setPhase("model-choice");
@@ -143,12 +146,14 @@ export function ModelApp() {
 
 	const handleFetchKeyDone = useCallback(
 		(apiKey: string) => {
-			// Persist the new key alongside the previous baseUrl/model so a
-			// Ctrl-C between here and `configuring` leaves auth.json coherent.
+			// Persist the new key alongside the previous baseUrl/model/provider so
+			// a Ctrl-C between here and `configuring` leaves auth.json coherent.
 			saveApiKey({
 				apiKey,
 				baseUrl: creds?.baseUrl,
 				model: creds?.model,
+				providerId: creds?.providerId,
+				providerName: creds?.providerName,
 			});
 			setCreds((prev) =>
 				prev ? { ...prev, apiKey } : { apiKey, model: undefined },
@@ -165,16 +170,21 @@ export function ModelApp() {
 
 	const handleManualDone = useCallback(
 		(value: ManualCredentialsValue) => {
+			const provider = providerFromName(value.providerName);
 			saveApiKey({
 				apiKey: value.apiKey,
 				baseUrl: value.baseUrl,
 				model: creds?.model,
+				providerId: provider.id,
+				providerName: provider.name,
 			});
-			setCreds((prev) =>
-				prev
-					? { ...prev, apiKey: value.apiKey, baseUrl: value.baseUrl }
-					: { apiKey: value.apiKey, baseUrl: value.baseUrl, model: undefined },
-			);
+			setCreds((prev) => ({
+				...(prev ?? { model: undefined }),
+				apiKey: value.apiKey,
+				baseUrl: value.baseUrl,
+				providerId: provider.id,
+				providerName: provider.name,
+			}));
 			reAuthed.current = true;
 			setPhase("model-choice");
 		},
@@ -215,6 +225,8 @@ export function ModelApp() {
 				apiKey: creds.apiKey,
 				baseUrl: creds.baseUrl,
 				model: creds.model,
+				providerId: creds.providerId,
+				providerName: creds.providerName,
 			});
 			logInfo(`default model updated to ${creds.model}`, {
 				action: "configure.tool",

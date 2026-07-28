@@ -192,8 +192,17 @@ async function typeManualCreds(
 	frames: string[],
 	baseUrl: string,
 	apiKey: string,
+	// The provider-name field comes first and is optional — an empty string
+	// just Enters past it, leaving the default identity to the caller.
+	providerName = "",
 ) {
 	await waitForFrame(frames, "Enter API credentials");
+	if (providerName) {
+		stdin.write(providerName);
+		await new Promise((r) => setTimeout(r, 30));
+	}
+	stdin.write("\r");
+	await new Promise((r) => setTimeout(r, 30));
 	stdin.write(baseUrl);
 	await new Promise((r) => setTimeout(r, 30));
 	stdin.write("\r");
@@ -300,6 +309,8 @@ describe("ConfigApp", () => {
 			baseUrl: "https://my-gateway.example.com/v1",
 			model: "m-alpha",
 			models: ["m-alpha", "m-beta"],
+			providerId: "ai-gateway",
+			providerName: "AI Gateway",
 		});
 		// codev-code is always configured too, even in config mode.
 		expect(configure.configureCodevCode).toHaveBeenCalledWith({
@@ -307,6 +318,8 @@ describe("ConfigApp", () => {
 			baseUrl: "https://my-gateway.example.com/v1",
 			model: "m-alpha",
 			models: ["m-alpha", "m-beta"],
+			providerId: "ai-gateway",
+			providerName: "AI Gateway",
 		});
 	});
 

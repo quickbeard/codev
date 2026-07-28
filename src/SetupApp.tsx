@@ -57,6 +57,7 @@ import {
 } from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
 import { logApiKeyConfigured, logDebug, logError, logWarn } from "@/lib/log.js";
+import { providerFromName } from "@/lib/provider.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 import { disableClaudeCodeLoginPrompt } from "@/lib/vscode-settings.js";
 
@@ -395,6 +396,11 @@ export function SetupApp({ mode }: SetupAppProps) {
 					apiKey: savedCreds.apiKey,
 					baseUrl: savedCreds.baseUrl,
 					model: savedCreds.model,
+					// A reused key keeps whatever provider it was configured with —
+					// a manually-named one stays named; an SSO key has none saved and
+					// falls through to the default identity at configure time.
+					providerId: savedCreds.providerId,
+					providerName: savedCreds.providerName,
 				});
 				// Don't pre-mark the saved model as selected — the green ● should
 				// only appear after the user actually picks a row on this run.
@@ -429,11 +435,15 @@ export function SetupApp({ mode }: SetupAppProps) {
 
 	const handleManualDone = useCallback((value: ManualCredentialsValue) => {
 		logApiKeyConfigured("manual", value.apiKey, value.baseUrl);
+		// A blank provider name resolves to the manual fallback identity.
+		const provider = providerFromName(value.providerName);
 		// Defer saveApiKey to the model-choice step so we only persist a
 		// complete tuple (apiKey + baseUrl + model) to ~/.codev-hub/auth.json.
 		setCreds({
 			apiKey: value.apiKey,
 			baseUrl: value.baseUrl,
+			providerId: provider.id,
+			providerName: provider.name,
 		});
 		setStep("model-choice");
 	}, []);
@@ -465,7 +475,13 @@ export function SetupApp({ mode }: SetupAppProps) {
 				setStep("configuring");
 				return;
 			}
-			saveApiKey({ apiKey: creds.apiKey, baseUrl: creds.baseUrl, model });
+			saveApiKey({
+				apiKey: creds.apiKey,
+				baseUrl: creds.baseUrl,
+				model,
+				providerId: creds.providerId,
+				providerName: creds.providerName,
+			});
 			// Smoke-test the chosen model before writing configs: a 1-token
 			// completion through the gateway surfaces a runtime 403 (key not
 			// allowed for the model / over budget / edge block) HERE instead of at
