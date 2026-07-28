@@ -2,9 +2,7 @@
 
 CoDev — AI Coding Agent Hub. Install, configure, and manage multiple AI coding agents.
 
-Requires Node.js ≥ 22.21 (Node 24+ recommended). 22.21 is the release that added
-`HTTP_PROXY`/`HTTPS_PROXY` support to the Node 22 line — below it Node silently
-ignores proxy settings, so sign-in cannot work behind a corporate proxy.
+Requires Node.js ≥ 22.21 (Node 24+ recommended).
 
 ## Install
 
@@ -20,36 +18,6 @@ codevhub install
 ```
 
 After install, go to your project and type `codev`, `claude`, `codex`, or `opencode` to launch.
-
-## Check your setup first: `codevhub doctor`
-
-On a corporate network — behind a proxy, a TLS-inspecting gateway, or an
-internal npm mirror — run this before `codevhub install`:
-
-```bash
-codevhub doctor
-```
-
-It is read-only (it installs and configures nothing) and checks, in order:
-
-- **Environment** — Node version, npm, the global npm prefix (on `PATH` and
-  writable), the npm registry/proxy configuration, your proxy and TLS
-  environment variables, and whether the OS certificate store is readable.
-- **Network** — the CoDev backend and the npm registry are actually reachable.
-- **Account** — sign-in, gateway API key, CoDev configuration, and Supabase
-  (used by `codevhub upload`).
-- **LLM access** — the key is valid, models are listable, and a real one-token
-  completion succeeds. Only the last of these proves inference is permitted.
-- **This machine** — what is already installed, configured, and backed up.
-
-When something fails it prints what happened, the most likely cause given your
-proxy and TLS settings, the fix, and the raw error — never a bare
-`fetch failed`. If the network checks fail it offers to re-run everything
-through a proxy you type in, then prints the exact `export` / `setx` commands to
-make the working settings permanent.
-
-Use `codevhub doctor --force` to test a real sign-in instead of reusing a cached
-session. Exit code is 0 when nothing failed (warnings do not fail it), 1 otherwise.
 
 ## CodeGraph integration
 

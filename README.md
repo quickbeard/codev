@@ -2,9 +2,7 @@
 
 CoDev — AI Coding Agent Hub. Install, configure, and manage multiple AI coding agents.
 
-Requires Node.js ≥ 22.21 (Node 24+ recommended). 22.21 is the release that added
-`HTTP_PROXY`/`HTTPS_PROXY` support to the Node 22 line — below it Node silently
-ignores proxy settings, so sign-in cannot work behind a corporate proxy.
+Requires Node.js ≥ 22.21 (Node 24+ recommended).
 
 ## Install
 
