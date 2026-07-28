@@ -15,6 +15,9 @@
     "dist"
   ],
   "packageManager": "pnpm@10.26.0",
+  "engines": {
+    "node": ">=22.21.0"
+  },
   "scripts": {
     "dev": "tsx src/index.tsx",
     "build": "tsx build.ts",

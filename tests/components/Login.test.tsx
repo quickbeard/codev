@@ -128,7 +128,11 @@ describe("Login", () => {
 		expect(onDone).not.toHaveBeenCalled();
 	});
 
-	test("surfaces err.cause when present (real-world: fetch failed → DNS detail)", async () => {
+	// Node's fetch throws a bare `TypeError: fetch failed` and hides the reason
+	// on err.cause. Rather than echoing that, Login now renders the full
+	// diagnosis: what actually failed, why it most likely happened on this
+	// machine, and the fix. `fetch failed` must never reach the user alone.
+	test("renders a full diagnosis for a DNS failure, not `fetch failed`", async () => {
 		vi.spyOn(auth, "login").mockImplementation(() => {
 			const err = new TypeError("fetch failed");
 			(err as Error & { cause?: unknown }).cause = new Error(
@@ -143,9 +147,12 @@ describe("Login", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		const output = lastFrame() ?? "";
-		expect(output).toContain(
-			"Login failed: fetch failed (getaddrinfo ENOTFOUND sso.example.com)",
-		);
+		// Names the real failure and the host, in plain language.
+		expect(output).toContain("Could not resolve sso.example.com");
+		// And tells the user what to do about it.
+		expect(output).toContain("NODE_USE_ENV_PROXY");
+		// The bare Node message is not what's shown on its own.
+		expect(output).not.toContain("Login failed: fetch failed");
 	});
 
 	test("keeps the happy path to a one-line spinner until the fallback delay elapses", async () => {

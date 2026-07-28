@@ -1,0 +1,222 @@
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { BACKEND_URL } from "@/lib/const.js";
+import {
+	applyEnvProxy,
+	backendHost,
+	hasProxyConfigured,
+	httpApi,
+	matchingNoProxyEntry,
+	noProxyEntryMatches,
+	PROXY_APPLIED_ENV,
+	proxyAutoEnabled,
+	readProxyEnv,
+	resetProxyState,
+	stripNoProxyFor,
+} from "@/lib/proxy.js";
+import { spawner } from "@/lib/reexec.js";
+
+// Every proxy variable Node or we might read. Cleared before each test so a
+// developer's own shell can't leak into the assertions.
+const PROXY_VARS = [
+	"HTTP_PROXY",
+	"http_proxy",
+	"HTTPS_PROXY",
+	"https_proxy",
+	"NO_PROXY",
+	"no_proxy",
+	"NODE_USE_ENV_PROXY",
+	"NODE_USE_SYSTEM_CA",
+	"NODE_TLS_REJECT_UNAUTHORIZED",
+	PROXY_APPLIED_ENV,
+];
+
+beforeEach(() => {
+	for (const name of PROXY_VARS) vi.stubEnv(name, "");
+	resetProxyState();
+});
+
+afterEach(() => {
+	vi.unstubAllEnvs();
+	vi.restoreAllMocks();
+});
+
+describe("readProxyEnv", () => {
+	test("reads both upper and lower case spellings", () => {
+		vi.stubEnv("http_proxy", "http://lower:1");
+		vi.stubEnv("HTTPS_PROXY", "http://upper:2");
+		const env = readProxyEnv();
+		expect(env.httpProxy).toBe("http://lower:1");
+		expect(env.httpsProxy).toBe("http://upper:2");
+		expect(hasProxyConfigured(env)).toBe(true);
+	});
+
+	test("treats an empty string as unset", () => {
+		vi.stubEnv("HTTP_PROXY", "   ");
+		expect(hasProxyConfigured(readProxyEnv())).toBe(false);
+	});
+
+	test("NODE_USE_ENV_PROXY=0 counts as off", () => {
+		vi.stubEnv("NODE_USE_ENV_PROXY", "0");
+		expect(readProxyEnv().useEnvProxy).toBe(false);
+	});
+
+	test("reports NODE_TLS_REJECT_UNAUTHORIZED verbatim so 0 can be flagged", () => {
+		vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", "0");
+		expect(readProxyEnv().tlsRejectUnauthorized).toBe("0");
+	});
+});
+
+describe("NO_PROXY matching", () => {
+	test.each([
+		["*.viettel.vn", "netmind.viettel.vn", true],
+		[".viettel.vn", "netmind.viettel.vn", true],
+		["viettel.vn", "netmind.viettel.vn", true],
+		["viettel.vn", "viettel.vn", true],
+		["*", "anything.example.com", true],
+		["netmind.viettel.vn:443", "netmind.viettel.vn", true],
+		["other.vn", "netmind.viettel.vn", false],
+		// A suffix that is not on a label boundary must not match.
+		["ettel.vn", "netmind.viettel.vn", false],
+		["", "netmind.viettel.vn", false],
+	])("%s vs %s → %s", (entry, host, expected) => {
+		expect(noProxyEntryMatches(entry, host)).toBe(expected);
+	});
+
+	// The documented cause of "Login failed" on internal machines: images ship
+	// with *.viettel.vn in NO_PROXY, which routes our backend traffic direct.
+	test("finds the entry that exempts the CoDev backend", () => {
+		vi.stubEnv("NO_PROXY", "localhost,127.0.0.1,*.viettel.vn");
+		expect(matchingNoProxyEntry(readProxyEnv(), backendHost())).toBe(
+			"*.viettel.vn",
+		);
+	});
+
+	test("returns null when nothing exempts the backend", () => {
+		vi.stubEnv("NO_PROXY", "localhost,127.0.0.1");
+		expect(matchingNoProxyEntry(readProxyEnv(), backendHost())).toBeNull();
+	});
+
+	test("stripNoProxyFor removes only the offending entries", () => {
+		expect(
+			stripNoProxyFor("localhost, *.viettel.vn ,127.0.0.1", backendHost()),
+		).toBe("localhost,127.0.0.1");
+	});
+
+	test("backendHost matches the configured backend URL", () => {
+		expect(backendHost()).toBe(new URL(BACKEND_URL).hostname);
+	});
+});
+
+describe("applyEnvProxy", () => {
+	test("no-ops when no proxy is configured", () => {
+		const spy = vi.spyOn(httpApi, "setGlobalProxyFromEnv");
+		expect(applyEnvProxy().action).toBe("none");
+		expect(spy).not.toHaveBeenCalled();
+	});
+
+	test("does nothing when the user already set NODE_USE_ENV_PROXY", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://p:8080");
+		vi.stubEnv("NODE_USE_ENV_PROXY", "1");
+		const spy = vi.spyOn(httpApi, "setGlobalProxyFromEnv");
+		expect(applyEnvProxy().action).toBe("already-active");
+		expect(spy).not.toHaveBeenCalled();
+	});
+
+	test("enables the proxy in-process when Node supports it", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://p:8080");
+		vi.spyOn(httpApi, "supported").mockReturnValue(true);
+		const apply = vi
+			.spyOn(httpApi, "setGlobalProxyFromEnv")
+			.mockImplementation(() => {});
+		const spawn = vi.spyOn(spawner, "spawnSync");
+
+		expect(applyEnvProxy().action).toBe("applied");
+		expect(apply).toHaveBeenCalledOnce();
+		// The whole point of the fast path: no extra process.
+		expect(spawn).not.toHaveBeenCalled();
+		// The environment must reflect reality afterwards. Without this,
+		// diagnoseError would report "Node is IGNORING your proxy settings" about
+		// a request that had just gone through the proxy — and children we spawn
+		// (npm, the agents) would not inherit it.
+		expect(process.env.NODE_USE_ENV_PROXY).toBe("1");
+		expect(readProxyEnv().useEnvProxy).toBe(true);
+		expect(proxyAutoEnabled()).toBe(true);
+	});
+
+	test("a user-set NODE_USE_ENV_PROXY is not reported as auto-enabled", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://p:8080");
+		vi.stubEnv("NODE_USE_ENV_PROXY", "1");
+		expect(applyEnvProxy().action).toBe("already-active");
+		// The distinction drives the advice: only the auto path needs to tell the
+		// user to set it in their shell for npm and the agents.
+		expect(proxyAutoEnabled()).toBe(false);
+	});
+
+	test("falls back to a re-exec on a Node without setGlobalProxyFromEnv", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://p:8080");
+		vi.spyOn(httpApi, "supported").mockReturnValue(false);
+		vi.spyOn(process.stderr, "write").mockReturnValue(true);
+		const spawn = vi
+			.spyOn(spawner, "spawnSync")
+			// biome-ignore lint/suspicious/noExplicitAny: minimal SpawnSyncReturns stub
+			.mockReturnValue({ status: 0 } as any);
+
+		const result = applyEnvProxy();
+		expect(result.action).toBe("reexec");
+		expect(result.exitCode).toBe(0);
+
+		// The child must carry the flag Node only reads at bootstrap, plus the
+		// sentinel that stops it looping if Node still ignores it.
+		const env = spawn.mock.calls[0]?.[2]?.env as NodeJS.ProcessEnv;
+		expect(env.NODE_USE_ENV_PROXY).toBe("1");
+		expect(env[PROXY_APPLIED_ENV]).toBe("1");
+	});
+
+	test("the sentinel stops a second attempt in the re-exec child", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://p:8080");
+		vi.stubEnv(PROXY_APPLIED_ENV, "1");
+		vi.spyOn(httpApi, "supported").mockReturnValue(false);
+		const spawn = vi.spyOn(spawner, "spawnSync");
+
+		expect(applyEnvProxy().action).toBe("already-active");
+		expect(spawn).not.toHaveBeenCalled();
+	});
+
+	test("falls back to a re-exec when setGlobalProxyFromEnv throws", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://p:8080");
+		vi.spyOn(httpApi, "supported").mockReturnValue(true);
+		vi.spyOn(httpApi, "setGlobalProxyFromEnv").mockImplementation(() => {
+			throw new Error("nope");
+		});
+		vi.spyOn(process.stderr, "write").mockReturnValue(true);
+		const spawn = vi
+			.spyOn(spawner, "spawnSync")
+			// biome-ignore lint/suspicious/noExplicitAny: minimal SpawnSyncReturns stub
+			.mockReturnValue({ status: 3 } as any);
+
+		const result = applyEnvProxy();
+		expect(result.action).toBe("reexec");
+		expect(result.exitCode).toBe(3);
+		expect(spawn).toHaveBeenCalledOnce();
+	});
+
+	// The warning has to survive every branch: a NO_PROXY exemption defeats the
+	// proxy no matter how (or whether) it was enabled.
+	test("warns about a backend NO_PROXY exemption even with no proxy set", () => {
+		vi.stubEnv("NO_PROXY", "*.viettel.vn");
+		const result = applyEnvProxy();
+		expect(result.action).toBe("none");
+		expect(result.noProxyWarning).toContain("*.viettel.vn");
+		expect(result.noProxyWarning).toContain("Login failed");
+	});
+
+	test("warns about a backend NO_PROXY exemption on the applied path", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://p:8080");
+		vi.stubEnv("NO_PROXY", "*.viettel.vn");
+		vi.spyOn(httpApi, "supported").mockReturnValue(true);
+		vi.spyOn(httpApi, "setGlobalProxyFromEnv").mockImplementation(() => {});
+		const result = applyEnvProxy();
+		expect(result.action).toBe("applied");
+		expect(result.noProxyWarning).toContain("*.viettel.vn");
+	});
+});

@@ -1,0 +1,1572 @@
+import { accessSync, existsSync, constants as fsConstants } from "node:fs";
+import { delimiter, join } from "node:path";
+import { loadApiKey } from "@/lib/auth.js";
+import {
+	fetchApiKey,
+	fetchCodevConfig,
+	fetchModels,
+	fetchSupabaseSession,
+	smokeTestModel,
+	validateApiKey,
+} from "@/lib/backend.js";
+import {
+	detectConfiguredTools,
+	getBackupStatus,
+	type Tool,
+} from "@/lib/configure.js";
+import {
+	BACKEND_URL,
+	FALLBACK_MODEL,
+	MIN_NODE_STRING,
+	NODE_DOWNLOAD_URL,
+	nodeVersionMeets,
+	parseNodeVersion,
+	RECOMMENDED_NODE,
+} from "@/lib/const.js";
+import {
+	logDebug,
+	logError,
+	loggedFetch,
+	logInfo,
+	logWarn,
+	redactSecrets,
+} from "@/lib/log.js";
+import {
+	CLI,
+	detectInstalledViaNpm,
+	execAsync,
+	type NpmTool,
+	PKG,
+} from "@/lib/npm.js";
+import {
+	backendHost,
+	hasProxyConfigured,
+	matchingNoProxyEntry,
+	type ProxyEnv,
+	proxyAutoEnabled,
+	readProxyEnv,
+} from "@/lib/proxy.js";
+import { agentOnPath } from "@/lib/run.js";
+import { detectInstalledShims } from "@/lib/shims.js";
+import { isCertError, tlsApi } from "@/lib/tls.js";
+
+// ---------------------------------------------------------------------------
+// Requirements
+// ---------------------------------------------------------------------------
+
+// The Node floor and its rationale live in lib/const.ts so index.tsx can gate
+// on them without importing this module's dependency graph.
+
+// The internal registry mirror from the install guide. Suggested, never set.
+export const INTERNAL_NPM_REGISTRY =
+	"http://10.60.129.132/repository/npm-proxy";
+const PUBLIC_NPM_REGISTRY = /registry\.npmjs\.org/;
+
+// The package `codevhub` itself ships as — probed against the registry to prove
+// an authenticated read works end-to-end through the proxy.
+const SELF_PKG = "codev-ai";
+
+// Deliberately more generous than backend.ts's 5s/10s/15s, which are tuned for
+// the interactive install flow. Behind a slow proxy those produce spurious
+// timeouts, and a pre-flight check that cries wolf is worse than none.
+const REACH_TIMEOUT_MS = 20_000;
+
+// ---------------------------------------------------------------------------
+// Check model
+// ---------------------------------------------------------------------------
+
+export type CheckStatus = "pass" | "warn" | "fail" | "skip";
+export type CheckGroup =
+	| "environment"
+	| "network"
+	| "account"
+	| "llm"
+	| "state";
+
+export interface CheckResult {
+	status: CheckStatus;
+	/** One-line outcome. Always shown, whatever the status. */
+	detail: string;
+	/** Remediation. Collected into the final "Next steps" block. */
+	fix?: string;
+	/** Full diagnosis, rendered inline under a failing row. */
+	diagnosis?: Diagnosis;
+}
+
+export interface DoctorContext {
+	/** SSO access token, set once the login check passes. */
+	accessToken?: string;
+	/** Gateway API key, set by the api-key check. */
+	apiKey?: string;
+	/** Gateway base URL, set by the codev-config check. */
+	gatewayUrl?: string;
+	/** Model ids, set by the models check. */
+	models?: string[];
+	/** Supabase project URL, set by the codev-config check. */
+	supabaseUrl?: string;
+}
+
+export interface Check {
+	key: string;
+	label: string;
+	group: CheckGroup;
+	run: (ctx: DoctorContext) => Promise<CheckResult>;
+}
+
+export interface CheckOutcome extends CheckResult {
+	key: string;
+	label: string;
+	group: CheckGroup;
+}
+
+// ---------------------------------------------------------------------------
+// Error diagnosis
+//
+// This is the reason the command exists. `describeNetworkError` (lib/tls.ts)
+// unwraps ONE level of err.cause and only special-cases certificate codes;
+// everything else still reaches the user as `fetch failed` or
+// `fetch failed (connect ECONNREFUSED 10.0.0.1:8080)`, which tells a
+// non-engineer nothing. Here we walk the whole chain, name the failure in plain
+// language, say what most likely caused it *on this machine*, give the fix, and
+// print the raw chain so nothing is hidden from support.
+// ---------------------------------------------------------------------------
+
+export interface Diagnosis {
+	/** Plain language, not the errno. */
+	what: string;
+	/** Most likely cause, specific to this environment. */
+	cause: string;
+	/** The concrete fix. */
+	fix: string;
+	/** Connection state that determined the outcome. */
+	context: string[];
+	/** The verbatim error chain, one line per link. */
+	raw: string[];
+}
+
+/** What we were doing when it broke. Drives the context block. */
+export interface Attempt {
+	url?: string;
+	method?: string;
+	timeoutMs?: number;
+	/** For child processes: the exact command line. */
+	command?: string;
+}
+
+interface ErrorLink {
+	name: string;
+	message: string;
+	code?: string;
+	errno?: number;
+	syscall?: string;
+	hostname?: string;
+	address?: string;
+	port?: number;
+}
+
+// Node's fetch throws `TypeError: fetch failed` and hides the real reason on
+// .cause — sometimes several levels down, sometimes inside an AggregateError
+// (one entry per address family when a host resolves to both A and AAAA).
+// Flatten the whole thing; the first link carrying a `code` is the real failure.
+function errorChain(err: unknown, depth = 0): ErrorLink[] {
+	if (depth > 8 || !(err instanceof Error)) return [];
+	const e = err as NodeJS.ErrnoException & { errors?: unknown[] };
+	const link: ErrorLink = {
+		name: err.name,
+		message: err.message,
+		code: typeof e.code === "string" ? e.code : undefined,
+		errno: typeof e.errno === "number" ? e.errno : undefined,
+		syscall: typeof e.syscall === "string" ? e.syscall : undefined,
+		hostname: (e as { hostname?: string }).hostname,
+		address: (e as { address?: string }).address,
+		port: (e as { port?: number }).port,
+	};
+	const nested: ErrorLink[] = [];
+	if (Array.isArray(e.errors)) {
+		for (const inner of e.errors) nested.push(...errorChain(inner, depth + 1));
+	}
+	if (err.cause !== undefined) nested.push(...errorChain(err.cause, depth + 1));
+	return [link, ...nested];
+}
+
+// Codes we know how to explain. Used both to pick the root link and to recover
+// a code that only survives in the message text.
+const KNOWN_CODES = [
+	"ENOTFOUND",
+	"EAI_AGAIN",
+	"ECONNREFUSED",
+	"ETIMEDOUT",
+	"UND_ERR_CONNECT_TIMEOUT",
+	"ECONNRESET",
+	"EPROTO",
+	"UND_ERR_SOCKET",
+	"CERT_HAS_EXPIRED",
+	"ERR_TLS_CERT_ALTNAME_INVALID",
+];
+
+// Node normally sets `.code` on the underlying error, but code that catches and
+// re-throws routinely loses it while keeping the text ("getaddrinfo ENOTFOUND
+// host", "connect ECONNREFUSED 10.0.0.1:8080"). Recovering it from the message
+// is the difference between a real diagnosis and the generic fallback.
+function inferCodeFromMessage(message: string): string | undefined {
+	return KNOWN_CODES.find((code) => message.includes(code));
+}
+
+// A bare `Error("getaddrinfo ENOTFOUND api.example.com")` still names the host;
+// pull it out so the explanation can say which host failed.
+function inferHostFromMessage(message: string): string | undefined {
+	const dns = /(?:getaddrinfo|queryA\w*)\s+\w+\s+([\w.-]+)/.exec(message);
+	if (dns?.[1]) return dns[1];
+	const conn = /connect\s+\w+\s+([\d.a-f:]+):(\d+)/i.exec(message);
+	if (conn?.[1]) return conn[1];
+	return undefined;
+}
+
+/**
+ * The first link that carries an OS/undici error code — the real failure.
+ *
+ * Falls back to recovering the code (and host/port) from the message text, so
+ * a re-thrown error that lost its properties still gets a real diagnosis
+ * instead of the generic one.
+ */
+function rootLink(chain: ErrorLink[]): ErrorLink | undefined {
+	const withCode = chain.find((l) => l.code !== undefined);
+	if (withCode) return withCode;
+
+	for (const link of chain) {
+		const code = inferCodeFromMessage(link.message);
+		if (!code) continue;
+		const conn = /connect\s+\w+\s+([\d.a-f:]+):(\d+)/i.exec(link.message);
+		return {
+			...link,
+			code,
+			hostname: link.hostname ?? inferHostFromMessage(link.message),
+			address: link.address ?? conn?.[1],
+			port: link.port ?? (conn?.[2] ? Number(conn[2]) : undefined),
+		};
+	}
+	return chain[chain.length - 1];
+}
+
+function renderChain(chain: ErrorLink[]): string[] {
+	return chain.map((link, i) => {
+		const indent = i === 0 ? "" : `${"  ".repeat(i - 1)}└ `;
+		const facts = [
+			link.code && `code ${link.code}`,
+			link.syscall && `syscall ${link.syscall}`,
+			link.hostname && `hostname ${link.hostname}`,
+			link.address && `address ${link.address}`,
+			link.port !== undefined && `port ${link.port}`,
+		].filter(Boolean);
+		const suffix = facts.length > 0 ? `  (${facts.join(" · ")})` : "";
+		return redactSecrets(`${indent}${link.name}: ${link.message}${suffix}`);
+	});
+}
+
+/** Where a proxy applies from, for the context block. */
+function proxyDescription(proxy: ProxyEnv): string {
+	if (!hasProxyConfigured(proxy)) return "proxy: none";
+	const parts: string[] = [];
+	if (proxy.httpsProxy) parts.push(`HTTPS_PROXY=${proxy.httpsProxy}`);
+	if (proxy.httpProxy) parts.push(`HTTP_PROXY=${proxy.httpProxy}`);
+	return `proxy: ${parts.join(" · ")}`;
+}
+
+// The single most common silent failure: a proxy is set, but Node was never
+// told to use it, so every request goes direct and dies in the firewall. Node
+// gives no hint whatsoever that it ignored the variable.
+function proxyIgnoredNote(proxy: ProxyEnv): string | null {
+	if (!hasProxyConfigured(proxy)) return null;
+	if (proxy.useEnvProxy) return null;
+	return "NODE_USE_ENV_PROXY is unset — Node is IGNORING your proxy settings";
+}
+
+function connectionContext(attempt: Attempt): string[] {
+	const proxy = readProxyEnv();
+	const lines: string[] = [];
+	if (attempt.command) lines.push(`command: ${attempt.command}`);
+	if (attempt.url) {
+		const timeout = attempt.timeoutMs
+			? ` (timeout ${Math.round(attempt.timeoutMs / 1000)}s)`
+			: "";
+		lines.push(
+			redactSecrets(`${attempt.method ?? "GET"} ${attempt.url}${timeout}`),
+		);
+	}
+	const ignored = proxyIgnoredNote(proxy);
+	lines.push(
+		`${proxyDescription(proxy)} · NODE_USE_ENV_PROXY: ${
+			proxy.useEnvProxy ? "on" : "unset"
+		}`,
+	);
+	if (ignored) lines.push(`⚠ ${ignored}`);
+
+	const noProxyEntry = matchingNoProxyEntry(proxy, backendHost());
+	lines.push(
+		`NO_PROXY: ${proxy.noProxy ?? "unset"}${
+			noProxyEntry ? ` — "${noProxyEntry}" exempts ${backendHost()}` : ""
+		}`,
+	);
+	lines.push(`node ${process.version} · ${process.platform} ${process.arch}`);
+	return lines;
+}
+
+// A proxy is configured but Node was told to ignore it — that supersedes every
+// other explanation, because nothing else can be diagnosed until it's fixed.
+function proxyMisconfigFix(proxy: ProxyEnv): string | null {
+	if (!hasProxyConfigured(proxy) || proxy.useEnvProxy) return null;
+	return (
+		"Set NODE_USE_ENV_PROXY=1 alongside HTTP_PROXY/HTTPS_PROXY. Node ignores " +
+		"proxy environment variables without it, and reads it only at startup."
+	);
+}
+
+const NO_PROXY_SET_FIX =
+	"No proxy is configured. If this network requires one, set HTTP_PROXY, " +
+	"HTTPS_PROXY and NODE_USE_ENV_PROXY=1, then re-run.";
+
+/**
+ * Turn any thrown error into a four-part, human-readable diagnosis.
+ *
+ * Never returns a bare "fetch failed": every branch produces a plain-language
+ * `what`, a `cause` specific to this machine's proxy/TLS state, a concrete
+ * `fix`, and the raw chain for support.
+ */
+export function diagnoseError(err: unknown, attempt: Attempt = {}): Diagnosis {
+	const chain = errorChain(err);
+	const root = rootLink(chain);
+	const proxy = readProxyEnv();
+	const context = connectionContext(attempt);
+	const raw =
+		chain.length > 0 ? renderChain(chain) : [redactSecrets(String(err))];
+	const host = root?.hostname ?? hostOf(attempt.url) ?? "the server";
+	const proxied = hasProxyConfigured(proxy);
+	const misconfig = proxyMisconfigFix(proxy);
+
+	const base = (what: string, cause: string, fix: string): Diagnosis => ({
+		what,
+		// A configured-but-ignored proxy explains every network symptom below,
+		// so it wins the "likely cause" slot when present.
+		cause: misconfig ? `${cause} ${proxyIgnoredNote(proxy)}.` : cause,
+		fix: misconfig ?? fix,
+		context,
+		raw,
+	});
+
+	// AbortSignal.timeout produces a DOMException whose message ("The operation
+	// was aborted due to a timeout") names neither the host nor the duration —
+	// useless on its own, so rebuild it from the attempt.
+	if (root?.name === "TimeoutError" || root?.code === "ABORT_ERR") {
+		const secs = attempt.timeoutMs
+			? `${Math.round(attempt.timeoutMs / 1000)}s`
+			: "the timeout";
+		return base(
+			`No response from ${host} within ${secs}.`,
+			proxied
+				? "The proxy accepted the connection but never returned a response — it may be slow, overloaded, or blocking this host."
+				: "Traffic to this host is most likely being dropped by a firewall that expects it to go through a proxy.",
+			proxied
+				? "Confirm the proxy address is correct and that it is allowed to reach this host, then re-run."
+				: NO_PROXY_SET_FIX,
+		);
+	}
+
+	switch (root?.code) {
+		case "ENOTFOUND":
+		case "EAI_AGAIN":
+			return base(
+				`Could not resolve ${host} (DNS lookup failed).`,
+				proxied
+					? "A proxy is configured, so DNS should be resolved by the proxy — the request appears to have gone direct instead."
+					: "No proxy is configured and this network's DNS does not resolve external names.",
+				proxied
+					? "Check that the proxy URL is well-formed (http://host:port) and that this host is not listed in NO_PROXY."
+					: NO_PROXY_SET_FIX,
+			);
+
+		case "ECONNREFUSED":
+			return base(
+				`Connection refused by ${root.address ?? host}${
+					root.port !== undefined ? `:${root.port}` : ""
+				}.`,
+				proxied
+					? "That address is your proxy — nothing is listening on it, so the proxy host or port is wrong."
+					: "Nothing accepted a connection on that address.",
+				proxied
+					? "Double-check HTTP_PROXY / HTTPS_PROXY. The value must include the scheme and port, e.g. http://10.0.0.1:8080."
+					: NO_PROXY_SET_FIX,
+			);
+
+		case "ETIMEDOUT":
+		case "UND_ERR_CONNECT_TIMEOUT":
+			return base(
+				`Timed out connecting to ${root.address ?? host}.`,
+				proxied
+					? "The proxy address is reachable in principle but never completed the handshake."
+					: "A firewall is silently dropping this traffic, which usually means it must go through a proxy.",
+				proxied
+					? "Verify the proxy host and port with your IT team, then re-run."
+					: NO_PROXY_SET_FIX,
+			);
+
+		case "ECONNRESET":
+		case "EPROTO":
+		case "UND_ERR_SOCKET":
+			return base(
+				`The connection to ${host} was reset mid-handshake.`,
+				"Typically a TLS-intercepting proxy or HTTPS-scanning antivirus rejecting the request.",
+				misconfig ??
+					"Ask IT for your organization's root CA (a PEM file) and set NODE_EXTRA_CA_CERTS to its path, plus NODE_USE_SYSTEM_CA=1, then re-run.",
+			);
+
+		case "CERT_HAS_EXPIRED":
+			return base(
+				`${host} presented an expired TLS certificate.`,
+				"Either the server's certificate genuinely expired, or an intercepting proxy is re-signing with an expired root.",
+				"Check your system clock is correct. If it is, ask IT — their interception certificate has expired.",
+			);
+
+		case "ERR_TLS_CERT_ALTNAME_INVALID":
+			return base(
+				`The TLS certificate presented for ${host} is issued for a different hostname.`,
+				"A proxy is substituting its own certificate without matching the requested host.",
+				"Ask IT to confirm this host is correctly configured for TLS interception, then re-run.",
+			);
+
+		default:
+			break;
+	}
+
+	// Certificate trust failures — reuse tls.ts's classification so both paths
+	// agree on what counts as "untrusted chain".
+	if (isCertError(err) || root?.code?.includes("CERT")) {
+		return base(
+			`Node does not trust the TLS certificate presented for ${host}.`,
+			"A TLS-intercepting proxy or antivirus is re-signing traffic with a corporate root CA that Node's bundled certificate list does not include.",
+			`Set NODE_USE_SYSTEM_CA=1 so Node reads your OS trust store. If the root is not in the OS store either, ask IT for the root CA (PEM) and point NODE_EXTRA_CA_CERTS at it.${
+				tlsApi.supported()
+					? ""
+					: ` Note: Node ${process.version} cannot read the OS store at all — upgrade to Node ${RECOMMENDED_NODE}.`
+			}`,
+		);
+	}
+
+	// Unknown code — still never a bare "fetch failed". Name the deepest message
+	// we found and hand over the raw chain.
+	return base(
+		root?.message
+			? `Request to ${host} failed: ${redactSecrets(root.message)}`
+			: `Request to ${host} failed.`,
+		proxied
+			? "A proxy is configured; the failure happened somewhere between this machine, the proxy, and the destination."
+			: "No proxy is configured. If this network requires one, that is the most likely cause.",
+		misconfig ?? NO_PROXY_SET_FIX,
+	);
+}
+
+function hostOf(url: string | undefined): string | null {
+	if (!url) return null;
+	try {
+		return new URL(url).hostname;
+	} catch {
+		return null;
+	}
+}
+
+// Headers that betray an interceptor sitting between us and the destination.
+const INTERCEPTOR_HEADERS = [
+	"via",
+	"server",
+	"proxy-authenticate",
+	"www-authenticate",
+	"x-cache",
+	"cf-ray",
+	"x-squid-error",
+];
+
+/**
+ * Diagnose a non-2xx HTTP response.
+ *
+ * A response is not an exception, so `describeNetworkError` never sees these at
+ * all — yet a 407 or a proxy-issued 403 is exactly what internal users hit.
+ */
+export function diagnoseResponse(
+	status: number,
+	statusText: string,
+	headers: Headers,
+	body: string,
+	attempt: Attempt = {},
+): Diagnosis {
+	const context = connectionContext(attempt);
+	const signature = INTERCEPTOR_HEADERS.map((h) => {
+		const v = headers.get(h);
+		return v ? `${h}: ${v}` : null;
+	}).filter((v): v is string => v !== null);
+	const snippet = redactSecrets(body.trim()).slice(0, 400);
+	const raw = [
+		`HTTP ${status} ${statusText}`,
+		...signature.map(redactSecrets),
+		...(snippet ? [snippet + (body.trim().length > 400 ? "…" : "")] : []),
+	];
+	const host = hostOf(attempt.url) ?? "the server";
+
+	if (status === 407) {
+		return {
+			what: "The proxy requires authentication (HTTP 407).",
+			cause: `Your proxy is challenging this request: ${
+				headers.get("proxy-authenticate") ?? "no scheme advertised"
+			}.`,
+			fix: "Include your credentials in the proxy URL, e.g. HTTPS_PROXY=http://user:password@host:port, then re-run.",
+			context,
+			raw,
+		};
+	}
+
+	if (status === 403) {
+		const intercepted =
+			signature.length > 0 || /proxy|blocked|denied|firewall/i.test(body);
+		return {
+			what: `${host} returned HTTP 403 (forbidden).`,
+			cause: intercepted
+				? "The response carries proxy/gateway signatures, so this looks like the network blocking the request rather than a CoDev permissions problem."
+				: "Either your account lacks access, or a proxy is blocking the request without identifying itself.",
+			fix: "If you are behind a proxy, this is the documented npm/registry 403: unset HTTP_PROXY and HTTPS_PROXY in the CURRENT shell (do not open a new terminal) and retry.",
+			context,
+			raw,
+		};
+	}
+
+	if (status === 502 || status === 503 || status === 504) {
+		return {
+			what: `${host} returned HTTP ${status} (${statusText || "upstream error"}).`,
+			cause:
+				"Usually the proxy failing to reach the destination, rather than the destination itself being down.",
+			fix: "Retry shortly. If it persists, confirm with IT that the proxy is allowed to reach this host.",
+			context,
+			raw,
+		};
+	}
+
+	if (status === 401) {
+		return {
+			what: `${host} rejected the credentials (HTTP 401).`,
+			cause: "The token or API key sent with this request was not accepted.",
+			fix: "Run `codevhub login --force` to re-authenticate, then re-run.",
+			context,
+			raw,
+		};
+	}
+
+	return {
+		what: `${host} returned HTTP ${status}${statusText ? ` (${statusText})` : ""}.`,
+		cause:
+			signature.length > 0
+				? "The response carries proxy signatures, so a network appliance may have rewritten it."
+				: "The server rejected the request.",
+		fix: "See the raw response below; if it does not look like it came from CoDev, a proxy is intercepting the request.",
+		context,
+		raw,
+	};
+}
+
+/** Diagnose a failed child process (npm, agent CLIs). */
+export function diagnoseExec(
+	command: string,
+	exitCode: string | number | null,
+	stderr: string,
+	isEnoent: boolean,
+): Diagnosis {
+	// npm's own error text names the registry, proxy and .npmrc in play, so it
+	// is reproduced in FULL — truncating it destroys the diagnosis.
+	const raw = redactSecrets(stderr.trim() || "(no stderr)")
+		.split("\n")
+		.map((l) => l.trimEnd());
+
+	if (isEnoent) {
+		return {
+			what: `\`${command.split(" ")[0]}\` was not found on your PATH.`,
+			cause:
+				"The program is not installed, or its install directory is not on PATH.",
+			fix: "Install Node.js from nodejs.org (npm ships with it) and open a new terminal so PATH is refreshed.",
+			context: connectionContext({ command }),
+			raw,
+		};
+	}
+
+	const proxy = readProxyEnv();
+	const lower = stderr.toLowerCase();
+	let cause =
+		"The command ran but exited with an error. The full output is below.";
+	let fix = "Read the output below — npm names the registry and proxy it used.";
+
+	if (lower.includes("e403") || lower.includes("403 forbidden")) {
+		cause =
+			"A 403 from the registry. Behind a corporate proxy this is usually the proxy rejecting the request, not a package permissions problem.";
+		fix =
+			"Unset the proxy in the CURRENT shell and retry without opening a new terminal: `unset HTTPS_PROXY HTTP_PROXY` (Linux/macOS) or `$env:HTTPS_PROXY = $null; $env:HTTP_PROXY = $null` (PowerShell).";
+	} else if (lower.includes("eacces") || lower.includes("permission denied")) {
+		cause = "npm could not write to its global install directory.";
+		fix =
+			"Point npm at a writable prefix (`npm config set prefix ~/.npm-global`) and add its `bin` directory to PATH, or reinstall Node with a user-owned prefix. Avoid `sudo npm i -g`.";
+	} else if (
+		lower.includes("self-signed") ||
+		lower.includes("self signed") ||
+		lower.includes("unable_to_get_issuer") ||
+		lower.includes("cert")
+	) {
+		cause =
+			"npm could not verify the registry's TLS certificate — a TLS-intercepting proxy is re-signing the connection.";
+		fix =
+			"Point npm at your organization's root CA: `npm config set cafile <path-to-root-ca.pem>`. npm keeps its own TLS config, separate from Node's.";
+	} else if (
+		lower.includes("etimedout") ||
+		lower.includes("econnrefused") ||
+		lower.includes("enotfound") ||
+		lower.includes("network")
+	) {
+		cause = hasProxyConfigured(proxy)
+			? "npm could not reach the registry. npm has its OWN proxy configuration, separate from Node's environment variables."
+			: "npm could not reach the registry and no proxy is configured.";
+		fix = `Set npm's proxy explicitly: \`npm config set proxy <url>\` and \`npm config set https-proxy <url>\`. On the internal network also set the registry mirror: \`npm config set registry ${INTERNAL_NPM_REGISTRY}\`.`;
+	}
+
+	return {
+		what: `\`${command}\` failed (exit code ${exitCode ?? "unknown"}).`,
+		cause,
+		fix,
+		context: connectionContext({ command }),
+		raw,
+	};
+}
+
+/**
+ * Compact single-string rendering, for callers with one line of screen space
+ * (Login / FetchApiKey's error frames). Keeps the plain-language explanation
+ * and the fix — the two things `fetch failed` never gave anyone.
+ */
+export function renderDiagnosisCompact(d: Diagnosis): string {
+	const lines = [d.what, d.cause, `Fix: ${d.fix}`];
+	return lines.join("\n");
+}
+
+/**
+ * True when an error came from the transport layer (DNS/TCP/TLS) rather than
+ * from an HTTP response our own code turned into an Error.
+ *
+ * Node's fetch always nests the real reason on `.cause`; a
+ * `new Error("Backend /config failed (403): forbidden")` thrown by backend.ts
+ * has none. The distinction matters: the proxy-oriented reasoning in
+ * `diagnoseError` is exactly right for the former and actively misleading for
+ * the latter, whose own message is already precise.
+ */
+export function isTransportError(err: unknown): boolean {
+	return err instanceof Error && err.cause !== undefined;
+}
+
+/**
+ * Compact, always-useful failure text for callers with a single error frame:
+ * a full diagnosis for transport failures, the server's own message otherwise.
+ */
+export function describeFailure(err: unknown, attempt: Attempt = {}): string {
+	if (isTransportError(err)) {
+		return renderDiagnosisCompact(diagnoseError(err, attempt));
+	}
+	return err instanceof Error ? redactSecrets(err.message) : String(err);
+}
+
+// ---------------------------------------------------------------------------
+// Probing helpers
+// ---------------------------------------------------------------------------
+
+/** Run a thunk, converting any throw into a `fail` with a full diagnosis. */
+async function guard(
+	attempt: Attempt,
+	fn: () => Promise<CheckResult>,
+): Promise<CheckResult> {
+	try {
+		return await fn();
+	} catch (err) {
+		const diagnosis = diagnoseError(err, attempt);
+		return {
+			status: "fail",
+			detail: diagnosis.what,
+			fix: diagnosis.fix,
+			diagnosis,
+		};
+	}
+}
+
+/**
+ * Transport-only reachability probe. ANY HTTP response — including 401/403/404
+ * — proves the network path works, which is all this is asking. Only DNS/TCP/
+ * TLS failures fail it.
+ */
+async function reach(url: string, label: string): Promise<CheckResult> {
+	const attempt = { url, method: "GET", timeoutMs: REACH_TIMEOUT_MS };
+	return guard(attempt, async () => {
+		const res = await loggedFetch("doctor.reach", url, {
+			method: "GET",
+			signal: AbortSignal.timeout(REACH_TIMEOUT_MS),
+		});
+		// 407 is the one status that means the transport is NOT usable.
+		if (res.status === 407) {
+			const diagnosis = diagnoseResponse(
+				res.status,
+				res.statusText,
+				res.headers,
+				await res.text().catch(() => ""),
+				attempt,
+			);
+			return {
+				status: "fail",
+				detail: diagnosis.what,
+				fix: diagnosis.fix,
+				diagnosis,
+			};
+		}
+		return {
+			status: "pass",
+			detail: `${label} reachable (HTTP ${res.status}).`,
+		};
+	});
+}
+
+/** `npm config get <key>`, or null when npm can't answer. */
+async function npmConfig(key: string): Promise<string | null> {
+	const r = await execAsync("npm", ["config", "get", key]);
+	if (r.error) return null;
+	const value = r.stdout.trim();
+	// npm prints the literal string "undefined"/"null" for unset keys.
+	if (!value || value === "undefined" || value === "null") return null;
+	return value;
+}
+
+// ---------------------------------------------------------------------------
+// Group 1 — environment (synchronous, no network)
+// ---------------------------------------------------------------------------
+
+const nodeVersionCheck: Check = {
+	key: "node-version",
+	label: "Node.js version",
+	group: "environment",
+	run: async () => {
+		const version = process.versions.node;
+		if (!nodeVersionMeets(version)) {
+			return {
+				status: "fail",
+				detail: `Node ${version} is too old — CoDev requires >= ${MIN_NODE_STRING}.`,
+				fix: `Install Node ${RECOMMENDED_NODE} from ${NODE_DOWNLOAD_URL} and re-run.`,
+				diagnosis: {
+					what: `Node ${version} is below the required ${MIN_NODE_STRING}.`,
+					cause:
+						"Support for HTTP_PROXY/HTTPS_PROXY was added to the Node 22 line in 22.21.0. Below that, Node silently ignores proxy environment variables, so sign-in can never work behind a corporate proxy no matter how you configure it.",
+					fix: `Install Node ${RECOMMENDED_NODE} from ${NODE_DOWNLOAD_URL}, open a new terminal, and re-run \`codevhub doctor\`.`,
+					context: [
+						`node ${process.version} · ${process.platform} ${process.arch}`,
+						`required >= ${MIN_NODE_STRING} · recommended ${RECOMMENDED_NODE}`,
+					],
+					raw: [`process.versions.node = ${version}`],
+				},
+			};
+		}
+		const [major] = parseNodeVersion(version);
+		if (major < 24) {
+			return {
+				status: "pass",
+				detail: `Node ${version} meets the minimum (Node ${RECOMMENDED_NODE} recommended).`,
+			};
+		}
+		return { status: "pass", detail: `Node ${version}.` };
+	},
+};
+
+const npmAvailableCheck: Check = {
+	key: "npm-available",
+	label: "npm available",
+	group: "environment",
+	run: async () => {
+		const r = await execAsync("npm", ["-v"]);
+		if (r.error) {
+			const diagnosis = diagnoseExec(
+				"npm -v",
+				r.error.code ?? null,
+				r.stderr,
+				r.error.code === "ENOENT",
+			);
+			return {
+				status: "fail",
+				detail: diagnosis.what,
+				fix: diagnosis.fix,
+				diagnosis,
+			};
+		}
+		return { status: "pass", detail: `npm ${r.stdout.trim()}.` };
+	},
+};
+
+// The two most common global-install failures, both documented: the prefix bin
+// directory missing from PATH (Windows "PowerShell can't find the package") and
+// EACCES writing into it.
+const npmPrefixCheck: Check = {
+	key: "npm-prefix",
+	label: "npm global prefix",
+	group: "environment",
+	run: async () => {
+		const prefix = await npmConfig("prefix");
+		if (!prefix) {
+			return {
+				status: "warn",
+				detail: "Could not read `npm config get prefix`.",
+				fix: "Confirm npm is installed and working (`npm -v`).",
+			};
+		}
+		// npm puts global bins in <prefix>/bin on Unix and directly in <prefix>
+		// on Windows.
+		const binDir = process.platform === "win32" ? prefix : join(prefix, "bin");
+		const onPath = (process.env.PATH ?? "")
+			.split(delimiter)
+			.some((dir) => dir && normalizePath(dir) === normalizePath(binDir));
+
+		let writable = true;
+		try {
+			accessSync(existsSync(binDir) ? binDir : prefix, fsConstants.W_OK);
+		} catch {
+			writable = false;
+		}
+
+		if (!writable) {
+			return {
+				status: "fail",
+				detail: `npm's global directory is not writable: ${binDir}`,
+				fix: "Point npm at a writable prefix (`npm config set prefix ~/.npm-global`) and add its bin directory to PATH. Avoid `sudo npm i -g`, which creates root-owned files.",
+				diagnosis: {
+					what: `\`npm i -g\` cannot write to ${binDir}.`,
+					cause:
+						"The global prefix is owned by another user (commonly root, after an earlier `sudo npm i -g`), so installing agents will fail with EACCES.",
+					fix: "Run `npm config set prefix ~/.npm-global`, add `~/.npm-global/bin` to PATH, open a new terminal, and re-run.",
+					context: [`prefix: ${prefix}`, `bin: ${binDir}`],
+					raw: [`accessSync(${binDir}, W_OK) threw`],
+				},
+			};
+		}
+
+		if (!onPath) {
+			return {
+				status: "warn",
+				detail: `npm's global bin directory is not on PATH: ${binDir}`,
+				fix:
+					process.platform === "win32"
+						? 'Add it in PowerShell: $npmPath = npm config get prefix; [Environment]::SetEnvironmentVariable("PATH", "$([Environment]::GetEnvironmentVariable(\'PATH\',\'User\'));$npmPath", "User") — then open a new terminal.'
+						: `Add it to your shell profile: export PATH="${binDir}:$PATH" — then open a new terminal.`,
+			};
+		}
+
+		return { status: "pass", detail: `${binDir} (on PATH, writable).` };
+	},
+};
+
+function normalizePath(p: string): string {
+	const trimmed = p.replace(/[\\/]+$/, "");
+	return process.platform === "win32" ? trimmed.toLowerCase() : trimmed;
+}
+
+const npmRegistryCheck: Check = {
+	key: "npm-registry",
+	label: "npm registry configuration",
+	group: "environment",
+	run: async () => {
+		const [registry, proxy, httpsProxy, strictSsl, cafile] = await Promise.all([
+			npmConfig("registry"),
+			npmConfig("proxy"),
+			npmConfig("https-proxy"),
+			npmConfig("strict-ssl"),
+			npmConfig("cafile"),
+		]);
+		const parts = [`registry: ${registry ?? "unset"}`];
+		if (proxy) parts.push(`proxy: ${proxy}`);
+		if (httpsProxy) parts.push(`https-proxy: ${httpsProxy}`);
+		if (cafile) parts.push(`cafile: ${cafile}`);
+		if (strictSsl === "false") parts.push("strict-ssl: false");
+		const detail = parts.join(" · ");
+
+		// npm keeps its own proxy/TLS configuration entirely separate from Node's
+		// environment variables — a working `codevhub` says nothing about whether
+		// `npm i -g` will work.
+		const env = readProxyEnv();
+		if (hasProxyConfigured(env) && !proxy && !httpsProxy) {
+			return {
+				status: "warn",
+				detail,
+				fix: `Your shell has a proxy but npm does not — npm keeps its own config. Run: npm config set proxy ${env.httpsProxy ?? env.httpProxy} && npm config set https-proxy ${env.httpsProxy ?? env.httpProxy}`,
+			};
+		}
+		if (registry && PUBLIC_NPM_REGISTRY.test(registry)) {
+			return {
+				status: "warn",
+				detail,
+				fix: `On the internal network the public registry is usually unreachable. Set the mirror: npm config set registry ${INTERNAL_NPM_REGISTRY}`,
+			};
+		}
+		return { status: "pass", detail };
+	},
+};
+
+const proxyEnvCheck: Check = {
+	key: "proxy-env",
+	label: "Proxy & TLS environment",
+	group: "environment",
+	run: async () => {
+		const env = readProxyEnv();
+		const host = backendHost();
+		const parts = [
+			`HTTP_PROXY: ${env.httpProxy ?? "unset"}`,
+			`HTTPS_PROXY: ${env.httpsProxy ?? "unset"}`,
+			`NO_PROXY: ${env.noProxy ?? "unset"}`,
+			`NODE_USE_ENV_PROXY: ${env.useEnvProxy ? "on" : "unset"}`,
+			`NODE_USE_SYSTEM_CA: ${env.useSystemCa ? "on" : "unset"}`,
+		];
+		if (env.tlsRejectUnauthorized !== null) {
+			parts.push(`NODE_TLS_REJECT_UNAUTHORIZED: ${env.tlsRejectUnauthorized}`);
+		}
+		const detail = parts.join(" · ");
+
+		const problems: string[] = [];
+		if (hasProxyConfigured(env) && proxyAutoEnabled()) {
+			// We turned it on for this process, so proxying genuinely works right
+			// now — but npm and the agents are separate processes that inherit the
+			// user's shell, not ours.
+			problems.push(
+				"NODE_USE_ENV_PROXY was not set, so CoDev enabled proxy support for this run. Set NODE_USE_ENV_PROXY=1 in your shell so npm and the agents get it too.",
+			);
+		} else if (hasProxyConfigured(env) && !env.useEnvProxy) {
+			problems.push(
+				"A proxy is set but NODE_USE_ENV_PROXY is not — Node ignores proxy environment variables without it. Set NODE_USE_ENV_PROXY=1.",
+			);
+		}
+		const noProxyEntry = matchingNoProxyEntry(env, host);
+		if (noProxyEntry) {
+			problems.push(
+				`NO_PROXY contains "${noProxyEntry}", which sends ${host} traffic direct instead of through the proxy. This is the documented cause of "Login failed" — remove that entry.`,
+			);
+		}
+		if (env.tlsRejectUnauthorized === "0") {
+			problems.push(
+				"NODE_TLS_REJECT_UNAUTHORIZED=0 disables TLS verification for every connection. It works, but it is a troubleshooting setting — prefer NODE_USE_SYSTEM_CA=1 or NODE_EXTRA_CA_CERTS once your root CA is available.",
+			);
+		}
+		if (hasProxyConfigured(env) && !env.useSystemCa) {
+			problems.push(
+				"A proxy is set but NODE_USE_SYSTEM_CA is not. Intercepting proxies re-sign TLS with a corporate root that Node does not trust by default; set NODE_USE_SYSTEM_CA=1.",
+			);
+		}
+
+		if (problems.length === 0) {
+			return { status: "pass", detail };
+		}
+		return { status: "warn", detail, fix: problems.join("\n") };
+	},
+};
+
+const systemCaCheck: Check = {
+	key: "system-ca",
+	label: "System certificate store",
+	group: "environment",
+	run: async () => {
+		if (!tlsApi.supported()) {
+			return {
+				status: "warn",
+				detail: `Node ${process.version} cannot read the OS certificate store.`,
+				fix: `Upgrade to Node ${RECOMMENDED_NODE}, or set NODE_EXTRA_CA_CERTS to your organization's root CA (a PEM file).`,
+			};
+		}
+		let count = 0;
+		try {
+			count = tlsApi.getCACertificates("system").length;
+		} catch {
+			count = 0;
+		}
+		if (count === 0) {
+			return {
+				status: "warn",
+				detail: "The OS certificate store is empty or unreadable.",
+				fix: "If you are behind a TLS-intercepting proxy, ask IT for the root CA (PEM) and set NODE_EXTRA_CA_CERTS to its path.",
+			};
+		}
+		return {
+			status: "pass",
+			detail: `${count} certificates readable from the OS trust store.`,
+		};
+	},
+};
+
+/**
+ * The subset cheap enough to run at the head of `codevhub install`.
+ *
+ * Strictly pure: reads `process.versions` and `process.env` and nothing else.
+ * Everything excluded here is excluded for a concrete reason, not for tidiness:
+ *
+ *   - the npm checks each spawn `npm config get`, ~300ms apiece, and `install`
+ *     runs npm for real moments later anyway — a broken npm surfaces there with
+ *     the same diagnosis;
+ *   - `system-ca` reads the OS trust store, which is ~20ms on macOS but 300ms+
+ *     on Windows where it BLOCKS THE EVENT LOOP. lib/tls.ts documents exactly
+ *     this: an earlier revision paid that cost eagerly and stalled Ink's render
+ *     timers badly enough to fail timing-sensitive tests that never fetch.
+ *
+ * `codevhub doctor` runs the full set, where a second of latency is the point.
+ */
+export const PREFLIGHT_CHECKS: Check[] = [nodeVersionCheck, proxyEnvCheck];
+
+export const ENVIRONMENT_CHECKS: Check[] = [
+	nodeVersionCheck,
+	npmAvailableCheck,
+	npmPrefixCheck,
+	npmRegistryCheck,
+	proxyEnvCheck,
+	systemCaCheck,
+];
+
+// ---------------------------------------------------------------------------
+// Group 2 — network (transport only, no auth)
+// ---------------------------------------------------------------------------
+
+const backendReachCheck: Check = {
+	key: "backend-reach",
+	label: "Reach the CoDev backend",
+	group: "network",
+	run: () => reach(BACKEND_URL, backendHost()),
+};
+
+const npmReachCheck: Check = {
+	key: "npm-reach",
+	label: "Reach the npm registry",
+	group: "network",
+	run: async () => {
+		const ping = await execAsync("npm", ["ping"]);
+		if (ping.error) {
+			const diagnosis = diagnoseExec(
+				"npm ping",
+				ping.error.code ?? null,
+				ping.stderr,
+				ping.error.code === "ENOENT",
+			);
+			return {
+				status: "fail",
+				detail: diagnosis.what,
+				fix: diagnosis.fix,
+				diagnosis,
+			};
+		}
+		// A ping proves the registry answers; a real metadata read proves the
+		// proxy will let a package through.
+		const view = await execAsync("npm", ["view", SELF_PKG, "version"]);
+		if (view.error) {
+			const diagnosis = diagnoseExec(
+				`npm view ${SELF_PKG} version`,
+				view.error.code ?? null,
+				view.stderr,
+				view.error.code === "ENOENT",
+			);
+			return {
+				status: "fail",
+				detail: diagnosis.what,
+				fix: diagnosis.fix,
+				diagnosis,
+			};
+		}
+		return {
+			status: "pass",
+			detail: `Registry reachable; ${SELF_PKG}@${view.stdout.trim()} is installable.`,
+		};
+	},
+};
+
+export const NETWORK_CHECKS: Check[] = [backendReachCheck, npmReachCheck];
+
+// ---------------------------------------------------------------------------
+// Group 3 — account (needs SSO). The login step itself is the <Login>
+// component, mounted by DoctorApp; these run once it resolves.
+// ---------------------------------------------------------------------------
+
+const apiKeyCheck: Check = {
+	key: "api-key",
+	label: "Fetch a gateway API key",
+	group: "account",
+	run: async (ctx) => {
+		if (!ctx.accessToken) {
+			return { status: "skip", detail: "Skipped — sign-in did not complete." };
+		}
+		const attempt = { url: `${BACKEND_URL}/auth/exchange`, method: "POST" };
+		return guard(attempt, async () => {
+			const key = await fetchApiKey(ctx.accessToken as string);
+			if (!key) {
+				return {
+					status: "fail",
+					detail: "The backend returned an empty API key.",
+					fix: "Your account may not be provisioned for the gateway yet — contact the CoDev team.",
+				};
+			}
+			ctx.apiKey = key;
+			return { status: "pass", detail: "API key issued." };
+		});
+	},
+};
+
+const configCheck: Check = {
+	key: "codev-config",
+	label: "Fetch CoDev configuration",
+	group: "account",
+	run: async (ctx) => {
+		if (!ctx.accessToken) {
+			return { status: "skip", detail: "Skipped — sign-in did not complete." };
+		}
+		const attempt = { url: `${BACKEND_URL}/config`, method: "POST" };
+		return guard(attempt, async () => {
+			const config = await fetchCodevConfig(ctx.accessToken as string);
+			ctx.gatewayUrl = config.gatewayUrl;
+			ctx.supabaseUrl = config.supabaseUrl;
+			return {
+				status: "pass",
+				detail: `Gateway ${config.gatewayUrl}.`,
+			};
+		});
+	},
+};
+
+const supabaseCheck: Check = {
+	key: "supabase-reach",
+	label: "Reach Supabase (log upload)",
+	group: "account",
+	run: async (ctx) => {
+		if (!ctx.accessToken) {
+			return { status: "skip", detail: "Skipped — sign-in did not complete." };
+		}
+		const attempt = {
+			url: `${BACKEND_URL}/supabase/exchange`,
+			method: "POST",
+		};
+		return guard(attempt, async () => {
+			await fetchSupabaseSession(ctx.accessToken as string);
+			// Supabase is a different host from the backend and the gateway, so it
+			// can be blocked independently. `codevhub upload` depends on it.
+			if (ctx.supabaseUrl) {
+				const r = await reach(ctx.supabaseUrl, "Supabase");
+				if (r.status !== "pass") return r;
+			}
+			return {
+				status: "pass",
+				detail: "Supabase session issued and reachable.",
+			};
+		});
+	},
+};
+
+export const ACCOUNT_CHECKS: Check[] = [
+	apiKeyCheck,
+	configCheck,
+	supabaseCheck,
+];
+
+// ---------------------------------------------------------------------------
+// Group 4 — LLM
+// ---------------------------------------------------------------------------
+
+const gatewayKeyCheck: Check = {
+	key: "gateway-key",
+	label: "Validate the gateway key",
+	group: "llm",
+	run: async (ctx) => {
+		if (!ctx.apiKey) {
+			return { status: "skip", detail: "Skipped — no API key to validate." };
+		}
+		const attempt = { url: `${ctx.gatewayUrl ?? ""}/key/info`, method: "GET" };
+		return guard(attempt, async () => {
+			const ok = await validateApiKey(ctx.apiKey as string);
+			return ok
+				? { status: "pass", detail: "Key accepted by the gateway." }
+				: {
+						status: "fail",
+						detail: "The gateway rejected the key (401/403).",
+						fix: "Run `codevhub login --force` to mint a fresh key, then re-run.",
+					};
+		});
+	},
+};
+
+const modelsCheck: Check = {
+	key: "gateway-models",
+	label: "List available models",
+	group: "llm",
+	run: async (ctx) => {
+		if (!ctx.apiKey) {
+			return { status: "skip", detail: "Skipped — no API key." };
+		}
+		const attempt = { url: `${ctx.gatewayUrl ?? ""}/v1/models`, method: "GET" };
+		return guard(attempt, async () => {
+			const models = await fetchModels(ctx.apiKey as string);
+			ctx.models = models;
+			const preview = models.slice(0, 3).join(", ");
+			return {
+				status: "pass",
+				detail: `${models.length} models available (${preview}${
+					models.length > 3 ? ", …" : ""
+				}).`,
+			};
+		});
+	},
+};
+
+// The only check that proves inference is actually permitted: /key/info and
+// /v1/models both succeed for a key that is then 403'd on every completion.
+const completionCheck: Check = {
+	key: "llm-completion",
+	label: "Send a test request to the LLM",
+	group: "llm",
+	run: async (ctx) => {
+		if (!ctx.apiKey) {
+			return { status: "skip", detail: "Skipped — no API key." };
+		}
+		const model = ctx.models?.[0] ?? FALLBACK_MODEL;
+		// smokeTestModel never throws — it returns a reason string.
+		const reason = await smokeTestModel(ctx.apiKey, model);
+		if (!reason) {
+			return { status: "pass", detail: `${model} answered a test prompt.` };
+		}
+		return {
+			status: "fail",
+			detail: reason,
+			fix: "The key exists but cannot run this model. Check model entitlement, budget, and any region/IP restrictions with the CoDev team.",
+			diagnosis: {
+				what: `The gateway refused a real completion for ${model}.`,
+				cause:
+					"Listing models only proves the key exists. This is the error your agents would hit on their first message — model entitlement, an exhausted budget, or an edge/WAF block.",
+				fix: "Contact the CoDev team with the response below; it distinguishes a permissions problem from a budget one.",
+				context: connectionContext({
+					url: `${ctx.gatewayUrl ?? ""}/v1/chat/completions`,
+					method: "POST",
+				}),
+				raw: [redactSecrets(reason)],
+			},
+		};
+	},
+};
+
+export const LLM_CHECKS: Check[] = [
+	gatewayKeyCheck,
+	modelsCheck,
+	completionCheck,
+];
+
+// ---------------------------------------------------------------------------
+// Group 5 — state (informational; never fails, never blocks)
+// ---------------------------------------------------------------------------
+
+const NPM_TOOLS: NpmTool[] = ["codev-code", "claude-code", "codex", "opencode"];
+
+const installedAgentsCheck: Check = {
+	key: "installed-agents",
+	label: "Agents installed",
+	group: "state",
+	run: async () => {
+		const found: string[] = [];
+		for (const tool of NPM_TOOLS) {
+			if (await detectInstalledViaNpm(tool)) {
+				found.push(`${PKG[tool]} (${CLI[tool]})`);
+			}
+		}
+		return found.length > 0
+			? { status: "pass", detail: found.join(", ") }
+			: {
+					status: "skip",
+					detail: "None — `codevhub install` has not run yet.",
+				};
+	},
+};
+
+const configuredAgentsCheck: Check = {
+	key: "configured-agents",
+	label: "CoDev-managed configs",
+	group: "state",
+	run: async () => {
+		const tools = detectConfiguredTools();
+		if (tools.length === 0) {
+			return { status: "skip", detail: "None." };
+		}
+		const withBackups = tools.filter((tool: Tool) =>
+			getBackupStatus(tool).some((s) => s.hasBackup),
+		);
+		return {
+			status: "pass",
+			detail: `${tools.join(", ")}${
+				withBackups.length > 0
+					? ` · backups exist for ${withBackups.join(", ")}`
+					: " · no backups"
+			}`,
+		};
+	},
+};
+
+const shimsCheck: Check = {
+	key: "shims",
+	label: "PATH shims",
+	group: "state",
+	run: async () => {
+		const shims = detectInstalledShims();
+		return shims.length > 0
+			? { status: "pass", detail: shims.join(", ") }
+			: { status: "skip", detail: "None installed." };
+	},
+};
+
+const editorCliCheck: Check = {
+	key: "editor-clis",
+	label: "Editor CLIs",
+	group: "state",
+	run: async () => {
+		const found = ["code", "idea", "pycharm", "webstorm"].filter((cmd) =>
+			agentOnPath(cmd),
+		);
+		return found.length > 0
+			? { status: "pass", detail: `${found.join(", ")} on PATH.` }
+			: {
+					status: "skip",
+					detail:
+						"None on PATH — editor extension installs will be skipped with a warning.",
+				};
+	},
+};
+
+const savedKeyCheck: Check = {
+	key: "saved-key",
+	label: "Saved credentials",
+	group: "state",
+	run: async () => {
+		const saved = loadApiKey();
+		if (!saved?.apiKey) {
+			return { status: "skip", detail: "No API key saved yet." };
+		}
+		return {
+			status: "pass",
+			detail: `Key saved${saved.model ? ` · model ${saved.model}` : ""}${
+				saved.providerName ? ` · provider ${saved.providerName}` : ""
+			}.`,
+		};
+	},
+};
+
+export const STATE_CHECKS: Check[] = [
+	installedAgentsCheck,
+	configuredAgentsCheck,
+	shimsCheck,
+	editorCliCheck,
+	savedKeyCheck,
+];
+
+// ---------------------------------------------------------------------------
+// Runner
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a group of checks in order, mirroring each result into the diagnostic
+ * log. A check must never throw — but if one somehow does, it becomes a `fail`
+ * rather than taking the whole command down.
+ */
+export async function runChecks(
+	checks: Check[],
+	ctx: DoctorContext,
+	onResult?: (outcome: CheckOutcome) => void,
+): Promise<CheckOutcome[]> {
+	const outcomes: CheckOutcome[] = [];
+	for (const check of checks) {
+		let result: CheckResult;
+		try {
+			result = await check.run(ctx);
+		} catch (err) {
+			const diagnosis = diagnoseError(err);
+			result = {
+				status: "fail",
+				detail: diagnosis.what,
+				fix: diagnosis.fix,
+				diagnosis,
+			};
+		}
+		const outcome: CheckOutcome = {
+			...result,
+			key: check.key,
+			label: check.label,
+			group: check.group,
+		};
+		logCheck(outcome);
+		outcomes.push(outcome);
+		onResult?.(outcome);
+	}
+	return outcomes;
+}
+
+function logCheck(outcome: CheckOutcome): void {
+	// Everything goes through `extra`, never `unsafeUnredacted` — raw error
+	// bodies can carry bearer tokens and must stay scrubbed on disk.
+	const fields = {
+		action: "doctor.check",
+		outcome:
+			outcome.status === "pass"
+				? ("success" as const)
+				: outcome.status === "fail"
+					? ("failure" as const)
+					: undefined,
+		extra: {
+			key: outcome.key,
+			group: outcome.group,
+			status: outcome.status,
+			detail: outcome.detail,
+			fix: outcome.fix,
+			diagnosis_raw: outcome.diagnosis?.raw,
+			diagnosis_context: outcome.diagnosis?.context,
+		},
+	};
+	const msg = `doctor ${outcome.key}: ${outcome.status}`;
+	if (outcome.status === "fail") logError(msg, fields);
+	else if (outcome.status === "warn") logWarn(msg, fields);
+	else if (outcome.status === "skip") logDebug(msg, fields);
+	else logInfo(msg, fields);
+}
+
+export function hasFailure(outcomes: CheckOutcome[]): boolean {
+	return outcomes.some((o) => o.status === "fail");
+}
+
+// ---------------------------------------------------------------------------
+// Remediation summary
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-platform instructions for making proxy settings permanent, so the user
+ * can set them up BEFORE running `codevhub install`. Mirrors the install guide.
+ */
+export function persistProxyInstructions(proxy?: {
+	http?: string;
+	https?: string;
+}): string[] {
+	const value = proxy?.https ?? proxy?.http ?? "<PROXY-IP>:<PROXY-PORT>";
+	const url = /^https?:\/\//.test(value) ? value : `http://${value}`;
+	if (process.platform === "win32") {
+		return [
+			"Windows (PowerShell) — set these for your user, then open a new terminal:",
+			`  [Environment]::SetEnvironmentVariable("HTTP_PROXY", "${url}", "User")`,
+			`  [Environment]::SetEnvironmentVariable("HTTPS_PROXY", "${url}", "User")`,
+			'  [Environment]::SetEnvironmentVariable("NODE_USE_ENV_PROXY", "1", "User")',
+			'  [Environment]::SetEnvironmentVariable("NODE_USE_SYSTEM_CA", "1", "User")',
+			"",
+			"npm keeps its own proxy configuration, separate from the above:",
+			`  npm config set proxy ${url}`,
+			`  npm config set https-proxy ${url}`,
+			`  npm config set registry ${INTERNAL_NPM_REGISTRY}`,
+		];
+	}
+	return [
+		"Linux / macOS — add these to ~/.bashrc or ~/.zshrc, then `source` it:",
+		`  export HTTP_PROXY=${url}`,
+		`  export HTTPS_PROXY=${url}`,
+		"  export NODE_USE_ENV_PROXY=1",
+		"  export NODE_USE_SYSTEM_CA=1",
+		"",
+		"npm keeps its own proxy configuration, separate from the above:",
+		`  npm config set proxy ${url}`,
+		`  npm config set https-proxy ${url}`,
+		`  npm config set registry ${INTERNAL_NPM_REGISTRY}`,
+	];
+}
+
+/**
+ * The "Next steps" block: every unresolved issue in order, then the persistent
+ * setup instructions. Printed whenever anything failed or warned, because the
+ * point of the command is to leave the user able to fix things before
+ * `codevhub install`.
+ */
+export function buildNextSteps(
+	outcomes: CheckOutcome[],
+	proxy?: { http?: string; https?: string },
+): string[] {
+	const actionable = outcomes.filter(
+		(o) => (o.status === "fail" || o.status === "warn") && o.fix,
+	);
+	if (actionable.length === 0) return [];
+
+	const lines: string[] = [];
+	for (const [i, o] of actionable.entries()) {
+		lines.push(
+			`${i + 1}. ${o.label} — ${o.status === "fail" ? "FAILED" : "warning"}`,
+		);
+		for (const fixLine of (o.fix ?? "").split("\n")) {
+			lines.push(`   ${fixLine}`);
+		}
+	}
+
+	const proxyRelated = outcomes.some(
+		(o) =>
+			o.status !== "pass" &&
+			(o.key === "proxy-env" ||
+				o.group === "network" ||
+				o.group === "account" ||
+				o.group === "llm"),
+	);
+	if (proxyRelated) {
+		lines.push("");
+		lines.push(...persistProxyInstructions(proxy));
+	}
+
+	lines.push("");
+	lines.push(
+		"Re-run `codevhub doctor` to confirm, then run `codevhub install`.",
+	);
+	return lines;
+}
+
+// ---------------------------------------------------------------------------
+// Re-exec handoff
+//
+// DoctorApp cannot spawn the retry itself: spawnSync with inherited stdio while
+// Ink still owns the TTY corrupts the terminal. Instead the app records its
+// intent here and exits; index.tsx reads it after waitUntilExit() resolves.
+// Same shape of indirection as reexec.ts.
+// ---------------------------------------------------------------------------
+
+export interface DoctorOutcome {
+	exitCode: number;
+	/** Set when the user supplied a proxy and wants the checks re-run with it. */
+	retryWithProxy: { http: string; https: string } | null;
+}
+
+export const doctorOutcome: DoctorOutcome = {
+	exitCode: 0,
+	retryWithProxy: null,
+};
+
+export function resetDoctorOutcome(): void {
+	doctorOutcome.exitCode = 0;
+	doctorOutcome.retryWithProxy = null;
+}
+
+/** Normalize a user-typed `host:port` into a proxy URL. */
+export function normalizeProxyInput(input: string): string | null {
+	const trimmed = input.trim();
+	if (!trimmed) return null;
+	const withScheme = /^https?:\/\//i.test(trimmed)
+		? trimmed
+		: `http://${trimmed}`;
+	try {
+		const url = new URL(withScheme);
+		if (!url.hostname) return null;
+		return url.toString().replace(/\/$/, "");
+	} catch {
+		return null;
+	}
+}
+
+/** Set when doctor has already retried, so the prompt is offered only once. */
+export const DOCTOR_PROXY_ENV = "CODEV_DOCTOR_PROXY";
+
+export function alreadyRetriedWithProxy(): boolean {
+	const v = process.env[DOCTOR_PROXY_ENV];
+	return v !== undefined && v !== "" && v !== "0";
+}

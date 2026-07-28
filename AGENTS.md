@@ -34,7 +34,7 @@ The CLI is layered. Each layer has one job and only depends on the layer below i
 - `src/index.tsx` — argv dispatcher. Maps each command to its app component or logic function and exits.
 - `src/<Name>App.tsx` — command-root Ink components, one per command (`InstallApp`, `UpdateApp`, `UploadApp`). Each is a state machine that wires together components from `src/components/` and orchestrates the command's flow. `index.tsx` mounts these via `render(<XApp />)`.
 - `src/components/*.tsx` — reusable Ink components (Banner, Frame, Step, TaskList) and command-phase components (Install, Configure, Login, FetchApiKey, Update). Apps and other components import these; they never import apps.
-- `src/lib/*.ts` — non-UI logic modules (`auth`, `configure`, `npm`, `paths`, `markdown`, `statistics`, `export`, `upload`, `run`, `restore`, `backend`, `help`, `const`, `reexec`, `supabase`). Components and apps import logic; logic never imports UI.
+- `src/lib/*.ts` — non-UI logic modules (`auth`, `configure`, `npm`, `paths`, `markdown`, `statistics`, `export`, `upload`, `run`, `restore`, `backend`, `help`, `const`, `reexec`, `supabase`, `proxy`, `doctor`). Components and apps import logic; logic never imports UI.
 - `src/providers/*.ts` — agent-specific reader implementations used by `src/lib/export.ts` (one file per agent).
 
 When adding a new command:
@@ -154,11 +154,49 @@ Node verifies TLS against its **own bundled Mozilla CA snapshot and never consul
 - **At most one retry per process.** `applySystemCaCertsOnce` returns null once it has run, so a chain that stays untrusted surfaces its error instead of looping. Replay is safe: a TLS handshake fails before any body is sent, and every call site passes a replayable body (string/URLSearchParams/FormData/Buffer), never a stream — keep it that way.
 - **Merge `default` + `system`, never `bundled` + `system`.** `"default"` already folds in `NODE_EXTRA_CA_CERTS`; narrowing it would silently drop the certs of users who fixed this the documented way.
 - **Every failure mode is a no-op**, including an empty system store (`setDefaultCACertificates` is then never called, keeping Node's behavior byte-identical). Trust config isn't ours to have opinions about, and a bad merge would break users whose certs already work.
-- The APIs need Node ≥22.19/24.5 (our floor is 22.5), hence `tlsApi.supported()`. They're accessed off the default import, never destructured — a named ESM import of a builtin export that doesn't exist is a link-time error on older Node.
+- The APIs need Node ≥22.19/24.5, hence `tlsApi.supported()`. Our floor is 22.21, so every supported 22.x is fine — but **24.0–24.4 is not**, which is what keeps the guard load-bearing. They're accessed off the default import, never destructured — a named ESM import of a builtin export that doesn't exist is a link-time error on older Node.
 
 `describeNetworkError` unwraps Node's bare `fetch failed` (the real reason hides on `err.cause`) and appends a remedy for cert codes. It exists because **Node's own `--use-system-ca` hint pointedly excludes `SELF_SIGNED_CERT_IN_CHAIN`** — `crypto_common.cc` gates it on `DEPTH_ZERO_SELF_SIGNED_CERT` / `UNABLE_TO_VERIFY_LEAF_SIGNATURE` / `UNABLE_TO_GET_ISSUER_CERT` only, so the corporate-proxy case, the one the hint most exists for, is the one that prints nothing. If a cert error survives the merge, the root isn't in the OS store either, so the hint names `NODE_EXTRA_CA_CERTS` rather than `--use-system-ca`, which would be a dead end. Keep `certHint` **pure** — reading the OS store to word a sentence would put that same Windows stall on the error path, and the retry has already read it.
 
 Note the blast radius: this only covers **our own** process. `npm i -g` during install and the agents themselves are separate processes behind the same proxy and need `NODE_EXTRA_CA_CERTS` / npm's `cafile` of their own.
+
+## HTTP proxies
+
+TLS trust (above) and proxying are **separate problems** with separate fixes; a machine behind a corporate gateway usually has both.
+
+Node does not honor `HTTP_PROXY`/`HTTPS_PROXY` on its own. Support is gated behind `NODE_USE_ENV_PROXY=1` and read at **bootstrap**, so assigning `process.env` mid-run is too late for the already-initialized global dispatcher. Users who follow the install guide and export only the proxy variables therefore get no proxy at all — silently, with no warning from Node — and every `fetch` dies in the firewall.
+
+`src/lib/proxy.ts#applyEnvProxy` closes that gap once, from `index.tsx` right after `initLogging` and before dispatch, so `install`, `login`, `upload`, `model` and the launch-time key refresh all benefit rather than just the command being debugged. It no-ops unless a proxy is set and `NODE_USE_ENV_PROXY` is unset, then takes one of two paths:
+
+1. **`http.setGlobalProxyFromEnv()`** when the running Node has it. Verified empirically to route global `fetch`, not just `node:http`/`https` Agent traffic — which is what makes the fast path viable at all. Probed behind the `httpApi` indirection, same shape as `tlsApi` (off the default import, never destructured).
+2. **Re-exec** with `NODE_USE_ENV_PROXY=1` otherwise, via `reexec.ts#spawner`, guarded by a `CODEV_PROXY_APPLIED=1` sentinel so it can never loop.
+
+`readEither` normalizes each spelling **independently** (`nonEmpty(env.HTTP_PROXY) ?? nonEmpty(env.http_proxy)`). A plain `??` only falls through on `undefined`, so an exported-but-empty `HTTP_PROXY` would mask a perfectly good lowercase one — `tests/lib/proxy.test.ts` pins this.
+
+`NO_PROXY` is the other half. An entry covering our own backend (internal images ship a blanket `*.viettel.vn`) routes sign-in traffic *around* the proxy and straight into the firewall — the documented cause of `Login failed`. `matchingNoProxyEntry` detects it. The split in responsibility is deliberate: **`index.tsx` only warns** (rewriting the user's environment mid-command is overreach), while **`doctor` strips it in its retry child**, where the user has explicitly asked us to try a proxy.
+
+Blast radius again: **npm keeps its own proxy and TLS configuration** (`npm config set proxy` / `https-proxy` / `cafile` / `registry`), entirely separate from these variables. A working `codevhub` proves nothing about `npm i -g`, which is why `doctor` checks them separately.
+
+## `codevhub doctor`
+
+Pre-flight for everything `install` depends on, so users on a locked-down network find out *before* `npm i -g` mutates their machine. Read-only apart from the diagnostic log — it never installs or configures anything.
+
+`src/lib/doctor.ts` holds a `Check[]` registry in five groups (`environment`, `network`, `account`, `llm`, `state`), each `run` returning `pass`/`warn`/`fail`/`skip` and never throwing. `DoctorApp` walks the groups; `components/CheckList.tsx` renders them. `Login` is mounted for the sign-in check so `doctor` exercises the real flow, including the paste-back fallback.
+
+**The diagnosis layer is the point of the command**, not a detail. `lib/tls.ts#describeNetworkError` unwraps one level of `err.cause` and only special-cases cert codes; everything else still reaches the user as `fetch failed (connect ECONNREFUSED 10.0.0.1:8080)`, which tells a non-engineer nothing. `diagnoseError` walks the **whole** chain (including `AggregateError`, which Node emits one entry per address family into) and returns four parts — what happened in plain language, the likely cause *given this machine's proxy state*, the fix, and the raw chain verbatim. Load-bearing details:
+
+- **A configured-but-ignored proxy supersedes every other explanation** and takes the `fix` slot, because nothing else can be diagnosed until it is fixed.
+- **`rootLink` recovers a code from the message text** when `.code` was lost to a re-throw (`"getaddrinfo ENOTFOUND host"`), which is the difference between a real diagnosis and the generic fallback.
+- **`AbortSignal.timeout` is special-cased** — its own message names neither host nor duration, so both are rebuilt from the `Attempt`.
+- **HTTP responses are diagnosed too** (`diagnoseResponse`). A non-2xx is not an exception, so `describeNetworkError` never sees it — yet 407 and a proxy-issued 403 are exactly what internal users hit. Interceptor headers (`via`, `proxy-authenticate`, …) distinguish "the network blocked this" from "your account lacks access".
+- **npm's stderr is reproduced in full** (`diagnoseExec`) — it names the registry, proxy and `.npmrc` in play, and truncating it destroys the diagnosis.
+- **Nothing bypasses redaction.** Raw chains and response bodies go through `extra`, never `unsafeUnredacted`, and terminal output is scrubbed via `log.ts#redactSecrets` (the same `SCRUB_PATTERNS`) because users paste this into chats.
+
+`Login`/`FetchApiKey` render `describeFailure`, which upgrades **transport** errors (those with an `err.cause`) to the compact diagnosis while leaving a backend's own precise HTTP message alone — proxy-oriented reasoning about `Backend /config failed (403)` would be actively misleading. Single-line reasons stay inline (`Login failed: <reason>`); only a multi-line diagnosis breaks onto its own lines. `Login` also takes an optional `onError`, which hands failure to the parent and drops its retry prompt — `doctor` records login as one check among many and must reach its summary.
+
+**The re-exec handoff.** When the network group fails, `DoctorApp` offers a proxy prompt and, on submit, records `doctorOutcome.retryWithProxy` and exits — `index.tsx` spawns the retry after `waitUntilExit()` resolves. It **cannot** happen inside the component: `spawnSync` with inherited stdio while Ink still owns the TTY corrupts the terminal. `CODEV_DOCTOR_PROXY=1` on the child stops the prompt being offered twice.
+
+**`PREFLIGHT_CHECKS` vs `ENVIRONMENT_CHECKS`.** `SetupApp` runs the former at the head of install/config. It is strictly pure — `process.versions` and `process.env` only. The npm checks are excluded because each spawns `npm config get` (~300ms) and install runs npm for real moments later anyway; `system-ca` is excluded because the OS-store read blocks the event loop for 300ms+ on Windows, which is precisely the stall documented in the TLS section above. The pre-flight is **advisory and never blocks** — the one condition that genuinely cannot proceed (Node below the floor) is already refused at startup in `index.tsx`.
 
 ## Diagnostic logging
 

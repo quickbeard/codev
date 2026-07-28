@@ -10,6 +10,9 @@ import {
 	GATEWAY_COMPACT_TRIGGER,
 	GATEWAY_CONTEXT_WINDOW,
 	GATEWAY_MAX_OUTPUT_TOKENS,
+	MIN_NODE_STRING,
+	nodeVersionMeets,
+	parseNodeVersion,
 	SUPABASE_ANON_KEY,
 	SUPABASE_URL,
 } from "@/lib/const.js";
@@ -121,5 +124,44 @@ describe("gateway compaction constants", () => {
 		expect(GATEWAY_COMPACT_TRIGGER).toBe(167117);
 		expect(GATEWAY_COMPACT_RESERVED).toBe(GATEWAY_CONTEXT_WINDOW - 167117);
 		expect(GATEWAY_COMPACT_RESERVED).toBe(29491);
+	});
+});
+
+// This gate decides whether the CLI runs at all, and the boundary is an
+// oddly specific patch release: 22.21.0 is where HTTP_PROXY support was
+// backported to the Node 22 line. A naive `major < 22 || minor < 21` compare
+// would wrongly reject every 23.x and 24.x, so pin both directions.
+describe("Node version gate", () => {
+	test("parses a v-prefixed version", () => {
+		expect(parseNodeVersion("v24.15.0")).toEqual([24, 15, 0]);
+		expect(parseNodeVersion("22.21.0")).toEqual([22, 21, 0]);
+	});
+
+	test.each([
+		["22.21.0", true],
+		["22.21.1", true],
+		["22.22.0", true],
+		["v24.15.0", true],
+		// Newer majors must pass even though their minor is below 21.
+		["23.0.0", true],
+		["24.0.0", true],
+		["24.5.0", true],
+		["22.20.9", false],
+		["22.5.0", false],
+		["22.0.0", false],
+		["21.99.99", false],
+		["20.11.0", false],
+	])("%s meets the floor: %s", (version, expected) => {
+		expect(nodeVersionMeets(version)).toBe(expected);
+	});
+
+	test("the floor string matches what the comparison enforces", () => {
+		expect(nodeVersionMeets(MIN_NODE_STRING)).toBe(true);
+		const [major, minor, patch] = parseNodeVersion(MIN_NODE_STRING);
+		expect(nodeVersionMeets(`${major}.${minor}.${patch - 1}`)).toBe(false);
+	});
+
+	test("the suite's own Node satisfies the gate it ships", () => {
+		expect(nodeVersionMeets(process.versions.node)).toBe(true);
 	});
 });

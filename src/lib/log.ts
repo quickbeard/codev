@@ -491,6 +491,14 @@ function scrubLine(line: string): string {
 	return out;
 }
 
+// The same value-shape scrubbing, exposed for text that is about to be printed
+// to the TERMINAL rather than written to disk — `codevhub doctor` echoes raw
+// error bodies and response headers, and users paste that output into chat.
+// Sharing SCRUB_PATTERNS keeps one definition of "this must never be shown".
+export function redactSecrets(text: string): string {
+	return scrubLine(text);
+}
+
 export interface PruneLimits {
 	maxAgeDays?: number;
 	maxTotalBytes?: number;

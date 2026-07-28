@@ -30,6 +30,35 @@ export const GATEWAY_MAX_OUTPUT_TOKENS = 65536;
 
 export const VERSION: string = pkg.version;
 
+// Node 22.21.0 (2025-10-20) is where HTTP_PROXY/HTTPS_PROXY support was
+// backported to the 22 LTS line (nodejs/node#57872). Below it Node's `fetch`
+// silently ignores proxy environment variables, so sign-in can never work
+// behind a corporate proxy no matter how the user configures their shell —
+// which is why the floor is this oddly specific patch and not a rounder number.
+// It supersedes the older 22.5 floor, which only existed for `node:sqlite`.
+//
+// Lives here rather than in lib/doctor.ts so index.tsx can gate on it without
+// pulling in doctor's dependency graph before the version check has run.
+export const MIN_NODE = { major: 22, minor: 21, patch: 0 } as const;
+export const MIN_NODE_STRING = "22.21.0";
+export const RECOMMENDED_NODE = "24 (LTS)";
+export const NODE_DOWNLOAD_URL = "https://nodejs.org/en/download";
+
+export function parseNodeVersion(version: string): [number, number, number] {
+	const [major = 0, minor = 0, patch = 0] = version
+		.replace(/^v/, "")
+		.split(".")
+		.map((n) => Number.parseInt(n, 10) || 0);
+	return [major, minor, patch];
+}
+
+export function nodeVersionMeets(version: string): boolean {
+	const [major, minor, patch] = parseNodeVersion(version);
+	if (major !== MIN_NODE.major) return major > MIN_NODE.major;
+	if (minor !== MIN_NODE.minor) return minor > MIN_NODE.minor;
+	return patch >= MIN_NODE.patch;
+}
+
 export const HELP_HINT = "Run `codevhub --help` to see all commands.";
 export const HAPPY_CODING = "Happy coding! 🎉";
 
