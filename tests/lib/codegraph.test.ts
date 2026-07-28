@@ -1,22 +1,45 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { MockInstance } from "vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+	CODEV_TARGET_SPEC,
 	type CodegraphTarget,
+	codegraphEligible,
 	codegraphRunner,
 	codegraphTargets,
 	detectCodegraphInstalled,
 	ensureCodegraphInstalled,
 	formatCodegraphTargets,
 	forwardToCodegraph,
+	registerCodevTarget,
 	runCodegraphInstall,
 	runCodegraphUninstall,
 	setupCodegraph,
+	supportsCustomTargets,
 	toolToCodegraphTarget,
+	unwireCodevCodeMcp,
+	wireCodevCodeMcp,
 } from "@/lib/codegraph.js";
 import type { Tool } from "@/lib/configure.js";
 import * as npm from "@/lib/npm.js";
+
+// The entry both wiring paths produce — mirrors codegraph's opencode family.
+const MCP_ENTRY = {
+	type: "local",
+	command: ["codegraph", "serve", "--mcp"],
+	enabled: true,
+};
 
 describe("toolToCodegraphTarget", () => {
 	test("maps the three CLI agents to their CodeGraph target", () => {
@@ -33,6 +56,25 @@ describe("toolToCodegraphTarget", () => {
 	test("returns null for Continue (no CodeGraph target)", () => {
 		expect(toolToCodegraphTarget("vscode-continue")).toBeNull();
 		expect(toolToCodegraphTarget("jetbrains-continue")).toBeNull();
+	});
+});
+
+describe("codegraphEligible", () => {
+	test("true when a tool maps to a built-in target", () => {
+		expect(codegraphEligible(["codex"])).toBe(true);
+		expect(codegraphEligible(["vscode-claude-code"])).toBe(true);
+	});
+
+	test("true for a codev-code-only selection (custom target / shim path)", () => {
+		expect(codegraphEligible(["codev-code"])).toBe(true);
+		expect(codegraphEligible(["codev-code", "vscode-continue"])).toBe(true);
+	});
+
+	test("false for Continue-only selections", () => {
+		expect(codegraphEligible(["vscode-continue", "jetbrains-continue"])).toBe(
+			false,
+		);
+		expect(codegraphEligible([])).toBe(false);
 	});
 });
 
@@ -66,6 +108,7 @@ describe("formatCodegraphTargets", () => {
 		expect(formatCodegraphTargets(["claude"])).toBe("Claude Code");
 		expect(formatCodegraphTargets(["codex"])).toBe("Codex");
 		expect(formatCodegraphTargets(["opencode"])).toBe("OpenCode");
+		expect(formatCodegraphTargets(["codev"])).toBe("CoDev Code");
 	});
 
 	test("joins two targets with 'and' (no comma)", () => {
@@ -215,6 +258,168 @@ describe("detectCodegraphInstalled", () => {
 	});
 });
 
+describe("supportsCustomTargets", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	test("probes with the read-only `targets list` and reports support", async () => {
+		const execSpy = vi
+			.spyOn(npm, "execAsync")
+			.mockResolvedValue({ stdout: "codev", stderr: "", error: null });
+		expect(await supportsCustomTargets()).toBe(true);
+		expect(execSpy).toHaveBeenCalledWith("codegraph", ["targets", "list"]);
+	});
+
+	test("reports no support when the binary rejects the command", async () => {
+		vi.spyOn(npm, "execAsync").mockResolvedValue({
+			stdout: "",
+			stderr: "error: unknown command 'targets'",
+			error: new Error("exit 1"),
+		});
+		expect(await supportsCustomTargets()).toBe(false);
+	});
+});
+
+describe("registerCodevTarget", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	test("upserts the CoDev Code spec via `targets add`", async () => {
+		const execSpy = vi
+			.spyOn(npm, "execAsync")
+			.mockResolvedValue({ stdout: "", stderr: "", error: null });
+		expect(await registerCodevTarget()).toBeNull();
+		expect(execSpy).toHaveBeenCalledWith("codegraph", [
+			"targets",
+			"add",
+			CODEV_TARGET_SPEC,
+		]);
+		// The spec must satisfy `targets add` validation: opencode family keyed
+		// by appName, with the id the install CSV will reference.
+		expect(JSON.parse(CODEV_TARGET_SPEC)).toMatchObject({
+			id: "codev",
+			family: "opencode",
+			appName: "codev",
+		});
+	});
+
+	test("surfaces stderr as the error string on failure", async () => {
+		vi.spyOn(npm, "execAsync").mockResolvedValue({
+			stdout: "",
+			stderr: "invalid spec",
+			error: new Error("exit 1"),
+		});
+		expect(await registerCodevTarget()).toBe("invalid spec");
+	});
+});
+
+describe("wireCodevCodeMcp / unwireCodevCodeMcp", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "codev-codegraph-test-"));
+		vi.stubEnv("HOME", tempDir);
+		vi.stubEnv("USERPROFILE", tempDir);
+	});
+
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	const jsonPath = () => join(tempDir, ".config", "codev", "codev.json");
+	const jsoncPath = () => join(tempDir, ".config", "codev", "codev.jsonc");
+
+	test("creates codev.json with $schema and the mcp entry from scratch", () => {
+		expect(wireCodevCodeMcp()).toBeNull();
+		const config = JSON.parse(readFileSync(jsonPath(), "utf-8"));
+		expect(config.$schema).toBe("https://opencode.ai/config.json");
+		expect(config.mcp.codegraph).toEqual(MCP_ENTRY);
+	});
+
+	test("adds the entry to an existing jsonc, preserving comments and sibling servers", () => {
+		mkdirSync(join(tempDir, ".config", "codev"), { recursive: true });
+		writeFileSync(
+			jsoncPath(),
+			`{
+  // the user's own server
+  "mcp": {
+    "mine": { "type": "local", "command": ["mine"], "enabled": true }
+  }
+}
+`,
+		);
+		expect(wireCodevCodeMcp()).toBeNull();
+		// An existing .jsonc is the fork's preferred read target — the shim must
+		// edit it, not shadow it with a fresh .json.
+		expect(existsSync(jsonPath())).toBe(false);
+		const text = readFileSync(jsoncPath(), "utf-8");
+		// The comment and the user's own server both survive the surgical edit.
+		expect(text).toContain("// the user's own server");
+		expect(text).toContain('"mine"');
+		expect(text).toContain('"codegraph"');
+	});
+
+	test("is idempotent — an already-correct entry leaves the file byte-identical", () => {
+		expect(wireCodevCodeMcp()).toBeNull();
+		const before = readFileSync(jsonPath(), "utf-8");
+		expect(wireCodevCodeMcp()).toBeNull();
+		expect(readFileSync(jsonPath(), "utf-8")).toBe(before);
+	});
+
+	test("refuses to edit a file with syntax errors and reports it", () => {
+		mkdirSync(join(tempDir, ".config", "codev"), { recursive: true });
+		writeFileSync(jsonPath(), "{ definitely not json");
+		const err = wireCodevCodeMcp();
+		expect(err).toContain("syntax errors");
+		expect(readFileSync(jsonPath(), "utf-8")).toBe("{ definitely not json");
+	});
+
+	test("unwire removes the entry and drops an emptied mcp wrapper", () => {
+		expect(wireCodevCodeMcp()).toBeNull();
+		expect(unwireCodevCodeMcp()).toBeNull();
+		const config = JSON.parse(readFileSync(jsonPath(), "utf-8"));
+		expect(config.mcp).toBeUndefined();
+		// The rest of the file survives.
+		expect(config.$schema).toBe("https://opencode.ai/config.json");
+	});
+
+	test("unwire preserves sibling mcp servers", () => {
+		mkdirSync(join(tempDir, ".config", "codev"), { recursive: true });
+		writeFileSync(
+			jsonPath(),
+			JSON.stringify(
+				{
+					mcp: {
+						codegraph: MCP_ENTRY,
+						mine: { type: "local", command: ["mine"], enabled: true },
+					},
+				},
+				null,
+				2,
+			),
+		);
+		expect(unwireCodevCodeMcp()).toBeNull();
+		const config = JSON.parse(readFileSync(jsonPath(), "utf-8"));
+		expect(config.mcp.codegraph).toBeUndefined();
+		expect(config.mcp.mine.command).toEqual(["mine"]);
+	});
+
+	test("unwire no-ops when the file or the entry is absent", () => {
+		// No file at all.
+		expect(unwireCodevCodeMcp()).toBeNull();
+		expect(existsSync(jsonPath())).toBe(false);
+		// File without the entry: left byte-identical.
+		mkdirSync(join(tempDir, ".config", "codev"), { recursive: true });
+		const body = JSON.stringify({ theme: "dark" }, null, 2);
+		writeFileSync(jsonPath(), body);
+		expect(unwireCodevCodeMcp()).toBeNull();
+		expect(readFileSync(jsonPath(), "utf-8")).toBe(body);
+	});
+});
+
 describe("setupCodegraph", () => {
 	let execSpy: MockInstance;
 
@@ -262,6 +467,122 @@ describe("setupCodegraph", () => {
 		const result = await setupCodegraph(["opencode"]);
 		expect(result.status).toBe("warning");
 		expect(result.message).toContain("install exploded");
+	});
+
+	test("never probes for custom targets when codev-code isn't selected", async () => {
+		await setupCodegraph(["claude-code", "codex"]);
+		const probeCalls = execSpy.mock.calls.filter(
+			(c) => (c[1] as string[])[0] === "targets",
+		);
+		expect(probeCalls).toEqual([]);
+	});
+});
+
+// The codev-code wiring inside setupCodegraph touches the real filesystem on
+// the shim path, so these run against a stubbed HOME like the wire/unwire
+// suite above.
+describe("setupCodegraph with codev-code", () => {
+	let tempDir: string;
+	let execSpy: MockInstance;
+
+	// Route execAsync by subcommand: `targets list` (the probe) and `targets
+	// add` (registration) get configurable results; everything else (the
+	// install) succeeds and is captured for CSV assertions.
+	function routeExec(opts: { probeOk: boolean; addOk?: boolean }) {
+		execSpy.mockImplementation(async (_cmd: string, args: string[]) => {
+			const ok = { stdout: "", stderr: "", error: null };
+			const fail = (msg: string) => ({
+				stdout: "",
+				stderr: msg,
+				error: new Error("exit 1"),
+			});
+			if (args[0] === "targets" && args[1] === "list") {
+				return opts.probeOk ? ok : fail("unknown command 'targets'");
+			}
+			if (args[0] === "targets" && args[1] === "add") {
+				return (opts.addOk ?? true) ? ok : fail("spec rejected");
+			}
+			return ok;
+		});
+	}
+
+	function installCsv(): string | undefined {
+		const call = execSpy.mock.calls.find(
+			(c) => (c[1] as string[])[0] === "install",
+		);
+		return call ? (call[1] as string[])[2] : undefined;
+	}
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "codev-codegraph-setup-test-"));
+		vi.stubEnv("HOME", tempDir);
+		vi.stubEnv("USERPROFILE", tempDir);
+		execSpy = vi.spyOn(npm, "execAsync");
+	});
+
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		vi.restoreAllMocks();
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	const jsonPath = () => join(tempDir, ".config", "codev", "codev.json");
+
+	test("Path A: capable binary ⇒ registers the custom target, `codev` joins the CSV, no direct write", async () => {
+		routeExec({ probeOk: true });
+		const result = await setupCodegraph(["claude-code", "codev-code"]);
+		expect(result.status).toBe("ok");
+		expect(result.targets).toEqual(["claude", "codev"]);
+		expect(execSpy).toHaveBeenCalledWith("codegraph", [
+			"targets",
+			"add",
+			CODEV_TARGET_SPEC,
+		]);
+		expect(installCsv()).toBe("claude,codev");
+		// codegraph owns the write on this path — the shim must not run.
+		expect(existsSync(jsonPath())).toBe(false);
+	});
+
+	test("Path B: older binary ⇒ CSV stays built-in-only and the shim writes the entry", async () => {
+		routeExec({ probeOk: false });
+		const result = await setupCodegraph(["claude-code", "codev-code"]);
+		expect(result.status).toBe("ok");
+		expect(result.targets).toEqual(["claude", "codev"]);
+		expect(installCsv()).toBe("claude");
+		const config = JSON.parse(readFileSync(jsonPath(), "utf-8"));
+		expect(config.mcp.codegraph).toEqual(MCP_ENTRY);
+	});
+
+	test("Path B with a codev-code-only selection: no install call at all, entry still written", async () => {
+		routeExec({ probeOk: false });
+		const result = await setupCodegraph(["codev-code"]);
+		expect(result.status).toBe("ok");
+		expect(result.targets).toEqual(["codev"]);
+		expect(installCsv()).toBeUndefined();
+		const config = JSON.parse(readFileSync(jsonPath(), "utf-8"));
+		expect(config.mcp.codegraph).toEqual(MCP_ENTRY);
+	});
+
+	test("falls back to the shim when registration fails on a capable binary", async () => {
+		routeExec({ probeOk: true, addOk: false });
+		const result = await setupCodegraph(["codev-code"]);
+		expect(result.status).toBe("ok");
+		expect(result.targets).toEqual(["codev"]);
+		expect(installCsv()).toBeUndefined();
+		const config = JSON.parse(readFileSync(jsonPath(), "utf-8"));
+		expect(config.mcp.codegraph).toEqual(MCP_ENTRY);
+	});
+
+	test("a failing shim write folds into a warning without dropping built-in wiring", async () => {
+		routeExec({ probeOk: false });
+		// An unparseable existing config makes the shim refuse to edit.
+		mkdirSync(join(tempDir, ".config", "codev"), { recursive: true });
+		writeFileSync(jsonPath(), "{ definitely not json");
+		const result = await setupCodegraph(["claude-code", "codev-code"]);
+		expect(result.status).toBe("warning");
+		expect(result.message).toContain("CoDev Code MCP wiring failed");
+		expect(result.targets).toEqual(["claude"]);
+		expect(installCsv()).toBe("claude");
 	});
 });
 

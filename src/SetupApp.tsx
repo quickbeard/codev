@@ -44,6 +44,7 @@ import { smokeTestModel, validateApiKey } from "@/lib/backend.js";
 import {
 	CODEGRAPH_TASK_KEY,
 	type CodegraphSetupResult,
+	codegraphEligible,
 	codegraphTargets,
 	formatCodegraphTargets,
 	setupCodegraph,
@@ -56,6 +57,7 @@ import {
 } from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
 import { logApiKeyConfigured, logDebug, logError, logWarn } from "@/lib/log.js";
+import { providerFromName } from "@/lib/provider.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 import { disableClaudeCodeLoginPrompt } from "@/lib/vscode-settings.js";
 
@@ -320,11 +322,12 @@ export function SetupApp({ mode }: SetupAppProps) {
 			}
 			// Config mode skips the *agent* install (they're treated as already
 			// installed, so the survivor set equals `tools`), but still installs
-			// CodeGraph. When any selected agent maps to a CodeGraph target, show
-			// the CodeGraph-only Install step right after login; otherwise run the
-			// post-login side-effects directly. authData is passed explicitly
-			// because the setAuth above hasn't flushed to state yet this tick.
-			if (codegraphTargets(tools).length > 0) {
+			// CodeGraph. When any selected agent is CodeGraph-eligible (built-in
+			// target or CoDev Code), show the CodeGraph-only Install step right
+			// after login; otherwise run the post-login side-effects directly.
+			// authData is passed explicitly because the setAuth above hasn't
+			// flushed to state yet this tick.
+			if (codegraphEligible(tools)) {
 				setStep("installing");
 			} else {
 				runPostInstallSideEffects(tools, authData);
@@ -393,6 +396,11 @@ export function SetupApp({ mode }: SetupAppProps) {
 					apiKey: savedCreds.apiKey,
 					baseUrl: savedCreds.baseUrl,
 					model: savedCreds.model,
+					// A reused key keeps whatever provider it was configured with —
+					// a manually-named one stays named; an SSO key has none saved and
+					// falls through to the default identity at configure time.
+					providerId: savedCreds.providerId,
+					providerName: savedCreds.providerName,
 				});
 				// Don't pre-mark the saved model as selected — the green ● should
 				// only appear after the user actually picks a row on this run.
@@ -427,11 +435,15 @@ export function SetupApp({ mode }: SetupAppProps) {
 
 	const handleManualDone = useCallback((value: ManualCredentialsValue) => {
 		logApiKeyConfigured("manual", value.apiKey, value.baseUrl);
+		// A blank provider name resolves to the manual fallback identity.
+		const provider = providerFromName(value.providerName);
 		// Defer saveApiKey to the model-choice step so we only persist a
 		// complete tuple (apiKey + baseUrl + model) to ~/.codev-hub/auth.json.
 		setCreds({
 			apiKey: value.apiKey,
 			baseUrl: value.baseUrl,
+			providerId: provider.id,
+			providerName: provider.name,
 		});
 		setStep("model-choice");
 	}, []);
@@ -463,7 +475,13 @@ export function SetupApp({ mode }: SetupAppProps) {
 				setStep("configuring");
 				return;
 			}
-			saveApiKey({ apiKey: creds.apiKey, baseUrl: creds.baseUrl, model });
+			saveApiKey({
+				apiKey: creds.apiKey,
+				baseUrl: creds.baseUrl,
+				model,
+				providerId: creds.providerId,
+				providerName: creds.providerName,
+			});
 			// Smoke-test the chosen model before writing configs: a 1-token
 			// completion through the gateway surfaces a runtime 403 (key not
 			// allowed for the model / over budget / edge block) HERE instead of at
@@ -615,7 +633,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 						</Step>
 					)}
 				{(mode === "install" ||
-					(mode === "config" && codegraphTargets(tools).length > 0)) &&
+					(mode === "config" && codegraphEligible(tools))) &&
 					POST_LOGIN.includes(step) && (
 						<Step
 							active={step === "installing"}
@@ -779,7 +797,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 						</Step>
 					))}
 				{(step === "finalizing" || step === "done") &&
-					codegraphTargets(installedTools).length > 0 &&
+					codegraphEligible(installedTools) &&
 					codegraphResult?.status !== "skipped" && (
 						<Step
 							active={step === "finalizing"}

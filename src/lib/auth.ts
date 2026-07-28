@@ -69,6 +69,11 @@ export interface ApiKeyCreds {
 	apiKey: string;
 	baseUrl?: string;
 	model?: string;
+	// Set only for manually-entered keys, where the user names their own
+	// provider. Absent ⇒ the key is SSO-issued and takes the netGate default
+	// (see lib/provider.ts#resolveProvider).
+	providerId?: string;
+	providerName?: string;
 }
 
 // auth.json holds three independent blocks: SSO tokens (issued by the IdP),
@@ -87,6 +92,8 @@ interface AuthFileContents {
 	api_key?: string;
 	base_url?: string;
 	model?: string;
+	provider_id?: string;
+	provider_name?: string;
 	supabase_url?: string;
 	supabase_anon_key?: string;
 	gateway_url?: string;
@@ -198,6 +205,10 @@ function saveAuth(data: AuthData): void {
 	});
 }
 
+// Writes the whole api-key block, so an omitted field *clears* it: callers that
+// re-save a key (model switch, re-auth, launch-time refresh) must thread the
+// provider pair through, or a manually-named provider silently reverts to the
+// netGate default on the next write.
 export function saveApiKey(creds: ApiKeyCreds): void {
 	const existing = readAuthFile() ?? {};
 	writeAuthFile({
@@ -205,6 +216,8 @@ export function saveApiKey(creds: ApiKeyCreds): void {
 		api_key: creds.apiKey,
 		base_url: creds.baseUrl,
 		model: creds.model,
+		provider_id: creds.providerId,
+		provider_name: creds.providerName,
 	});
 }
 
@@ -225,6 +238,8 @@ export function loadApiKey(): ApiKeyCreds | null {
 		apiKey: raw.api_key,
 		baseUrl: raw.base_url,
 		model: raw.model,
+		providerId: raw.provider_id,
+		providerName: raw.provider_name,
 	};
 }
 

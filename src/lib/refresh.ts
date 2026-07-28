@@ -100,6 +100,11 @@ export async function ensureFreshGatewayKey(tool: Tool): Promise<void> {
 			apiKey,
 			baseUrl: creds.baseUrl,
 			model: creds.model,
+			// Keep the configured provider identity — the rewrite below replaces
+			// the whole agent config, so dropping it would silently re-label a
+			// manually-named provider as the default.
+			providerId: creds.providerId,
+			providerName: creds.providerName,
 		};
 		saveApiKey(next);
 		reconfigure(tool, next);
