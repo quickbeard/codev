@@ -389,9 +389,15 @@ export function diagnoseError(err: unknown, attempt: Attempt = {}): Diagnosis {
 				`Connection refused by ${root.address ?? host}${
 					root.port !== undefined ? `:${root.port}` : ""
 				}.`,
-				proxied
+				// Only call it "your proxy" when the error actually named the
+				// address it tried. Without one we fall back to the request host,
+				// and asserting that the *destination* is the proxy contradicts the
+				// line right above it.
+				proxied && root.address
 					? "That address is your proxy — nothing is listening on it, so the proxy host or port is wrong."
-					: "Nothing accepted a connection on that address.",
+					: proxied
+						? "A proxy is configured, so the refusal most likely came from the proxy rather than the destination."
+						: "Nothing accepted a connection on that address.",
 				proxied
 					? "Double-check HTTP_PROXY / HTTPS_PROXY. The value must include the scheme and port, e.g. http://10.0.0.1:8080."
 					: NO_PROXY_SET_FIX,

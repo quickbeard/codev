@@ -319,6 +319,20 @@ describe("diagnoseError", () => {
 			expect(d.fix).toContain("HTTP_PROXY");
 		});
 
+		// Without an address in the error we fall back to the request host, and
+		// claiming the *destination* is the proxy contradicts the line above it.
+		test("an addressless refusal does not call the destination the proxy", () => {
+			vi.stubEnv("HTTPS_PROXY", "http://10.0.0.1:8080");
+			vi.stubEnv("NODE_USE_ENV_PROXY", "1");
+			const d = diagnoseError(
+				fetchError("ECONNREFUSED", "connect ECONNREFUSED"),
+				{ url: "https://api.example.com/x" },
+			);
+			expect(d.what).toContain("api.example.com");
+			expect(d.cause).not.toContain("That address is your proxy");
+			expect(d.cause).toMatch(/most likely came from the proxy/i);
+		});
+
 		test("a NO_PROXY exemption for the backend is reported in the context", () => {
 			vi.stubEnv("HTTPS_PROXY", "http://10.0.0.1:8080");
 			vi.stubEnv("NODE_USE_ENV_PROXY", "1");

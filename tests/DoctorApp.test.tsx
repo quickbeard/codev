@@ -288,9 +288,10 @@ describe("DoctorApp", () => {
 		expect(frames.join("\n")).not.toContain("Proxy (host:port)");
 	});
 
-	// A working proxy means the problem is elsewhere; asking for one again
-	// would just be noise.
-	test("no prompt when a proxy is already configured and active", async () => {
+	// A wrong proxy address is one of the likeliest reasons the checks failed,
+	// so the prompt must still be offered — an earlier revision suppressed it
+	// here and left exactly that user with no way to try a different one.
+	test("still prompts when a proxy is already configured, naming the current one", async () => {
 		vi.stubEnv("HTTPS_PROXY", "http://10.0.0.1:8080");
 		vi.stubEnv("NODE_USE_ENV_PROXY", "1");
 		vi.spyOn(log, "loggedFetch").mockRejectedValue(
@@ -303,8 +304,33 @@ describe("DoctorApp", () => {
 		stubHappyPath();
 
 		const { frames } = render(<DoctorApp />);
-		await waitForFrame(frames, "check(s) failed");
-		expect(frames.join("\n")).not.toContain("Proxy (host:port)");
+		await waitForFrame(frames, "Proxy (host:port)");
+		const output = frames.join("\n");
+		// The question shifts from "do you need a proxy?" to "is this one wrong?".
+		expect(output).toContain("even though a proxy is configured");
+		expect(output).toContain("http://10.0.0.1:8080");
+		expect(output).toContain("Enter to keep the current one");
+	});
+
+	test("offers concrete examples of what to type", async () => {
+		vi.spyOn(log, "loggedFetch").mockRejectedValue(
+			Object.assign(new TypeError("fetch failed"), {
+				cause: Object.assign(new Error("connect ECONNREFUSED 1.2.3.4:443"), {
+					code: "ECONNREFUSED",
+				}),
+			}),
+		);
+		stubHappyPath();
+
+		const { frames } = render(<DoctorApp />);
+		await waitForFrame(frames, "Proxy (host:port)");
+		const output = frames.join("\n");
+		expect(output).toContain("Examples:");
+		// Each example answers a question "host:port" alone leaves open.
+		expect(output).toContain("10.60.129.1:3128");
+		expect(output).toContain("proxy.corp.vn:8080");
+		expect(output).toContain("user:pass@");
+		expect(output).toContain("http:// is assumed");
 	});
 
 	// Login must not park the run on a retry prompt — the summary is the value.

@@ -26,7 +26,7 @@ import {
 	STATE_CHECKS,
 } from "@/lib/doctor.js";
 import { logDebug } from "@/lib/log.js";
-import { hasProxyConfigured, readProxyEnv } from "@/lib/proxy.js";
+import { readProxyEnv } from "@/lib/proxy.js";
 
 type Phase =
 	| "preparing"
@@ -138,17 +138,21 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 			}));
 		}).then((results) => {
 			// The network group is the proxy gate: a hard failure there is the
-			// signal that this machine may need a proxy we don't know about. Offer
-			// the prompt once — never when we're already the retry child, and never
-			// when a proxy is configured AND active (it's set up; something else is
-			// wrong, and asking again would just be noise).
-			if (group === "network" && hasFailure(results)) {
-				const env = readProxyEnv();
-				const proxyAlreadyWorking = hasProxyConfigured(env) && env.useEnvProxy;
-				if (!alreadyRetriedWithProxy() && !proxyAlreadyWorking) {
-					setPhase("proxy-prompt");
-					return;
-				}
+			// signal that this machine may need a different proxy than it has.
+			// Offered whether or not one is already configured — an earlier
+			// revision suppressed it when a proxy was active, on the reasoning
+			// that "it's set up, so something else is wrong". That was backwards:
+			// a wrong proxy address is among the likeliest reasons the checks
+			// failed, and suppressing the prompt left exactly that user with no
+			// way to try another one. The only guard is the retry sentinel, so a
+			// child that still fails prints its summary instead of asking again.
+			if (
+				group === "network" &&
+				hasFailure(results) &&
+				!alreadyRetriedWithProxy()
+			) {
+				setPhase("proxy-prompt");
+				return;
 			}
 			setPhase(next);
 		});
@@ -239,6 +243,11 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 		};
 	};
 
+	// What the environment already points at, so the prompt can ask "is this one
+	// wrong?" rather than "do you need a proxy?".
+	const proxyEnv = readProxyEnv();
+	const currentProxy = proxyEnv.httpsProxy ?? proxyEnv.httpProxy;
+
 	const allOutcomes = [
 		...outcomes.environment,
 		...outcomes.network,
@@ -280,7 +289,10 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 
 				{phase === "proxy-prompt" && (
 					<Step active title={proxyPromptTitle()}>
-						<ProxyPrompt onSubmit={handleProxySubmit} />
+						<ProxyPrompt
+							onSubmit={handleProxySubmit}
+							currentProxy={currentProxy}
+						/>
 					</Step>
 				)}
 
