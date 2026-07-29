@@ -17,6 +17,14 @@ export function cliLogsDir(): string {
 	return join(homedir(), ".codev-hub", "logs");
 }
 
+// The machine-readable result of the last `codevhub doctor` run. Deliberately a
+// single file rather than a dated series: it is a snapshot of "how is this
+// machine right now", and a stale one is worse than none when someone attaches
+// it to a support ticket. Every run replaces it.
+export function doctorReportPath(): string {
+	return join(homedir(), ".codev-hub", "doctor-report.json");
+}
+
 // Maps a working directory to a per-project subfolder name. Strips the user's
 // home prefix so the folder is shorter, replaces non-alphanumeric chars with
 // dashes, then collapses runs of dashes and trims them. Falls back to "home"

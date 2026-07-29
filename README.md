@@ -2,7 +2,7 @@
 
 CoDev — AI Coding Agent Hub. Install, configure, and manage multiple AI coding agents.
 
-Requires Node.js ≥ 22.5 (Node 24+ recommended).
+Requires Node.js ≥ 22.21 (Node 24+ recommended).
 
 ## Install
 
@@ -13,10 +13,72 @@ npm install -g codev-ai
 Then run:
 
 ```bash
+codevhub doctor    # check your environment and network first
 codevhub install
 ```
 
 After install, go to your project and type `codev`, `claude`, `codex`, or `opencode` to launch.
+
+## Check your setup first: `codevhub doctor`
+
+On a corporate network — behind a proxy, a TLS-inspecting gateway, or an
+internal npm mirror — run this before `codevhub install`:
+
+```bash
+codevhub doctor
+codevhub doctor --force    # also force a real sign-in instead of reusing the cached session
+```
+
+It is read-only (it installs and configures nothing) and checks, in order:
+
+- **Environment** — Node version, npm, the global npm prefix (on `PATH` and
+  writable), the npm registry/proxy configuration, your proxy and TLS
+  environment variables, and whether the OS certificate store is readable.
+- **Network** — the CoDev backend and the npm registry are actually reachable.
+- **Account** — sign-in, gateway API key, CoDev configuration, and Supabase
+  (used by `codevhub upload`).
+- **LLM access** — the key is valid, models are listable, and a real one-token
+  completion succeeds. Only the last of these proves inference is permitted;
+  `/key/info` and `/v1/models` both pass for a key that is then 403'd on every
+  completion.
+- **This machine** — what is already installed, configured, and backed up.
+
+Failures expand in place into what happened, the most likely cause given your
+proxy and TLS settings, the fix, and the raw error chain — never a bare
+`fetch failed`. If the network checks fail it offers to re-run everything
+through a proxy you type in (nothing is written to disk), so you see the fix
+work before it prints the exact `export` / `setx` commands to make it permanent.
+
+Exit code is 0 when nothing failed — warnings do not fail it — and 1 otherwise.
+
+Every run also writes a machine-readable report to
+**`~/.codev-hub/doctor-report.json`**, replacing the previous one. It holds the
+full results, diagnoses, your Node and proxy environment, and the suggested next
+steps — attach it to a support ticket rather than pasting screenshots. Secrets
+are scrubbed before it is written. The same results additionally land in the
+diagnostic log, so `codevhub logs` can replay a whole run.
+
+### Working behind a proxy
+
+Node does **not** honor `HTTP_PROXY`/`HTTPS_PROXY` on its own — it needs
+`NODE_USE_ENV_PROXY=1`, read at startup. CoDev applies that for you when it sees
+a proxy configured, but it is worth setting permanently:
+
+```bash
+export HTTP_PROXY=http://<PROXY-IP>:<PROXY-PORT>
+export HTTPS_PROXY=http://<PROXY-IP>:<PROXY-PORT>
+export NODE_USE_ENV_PROXY=1
+export NODE_USE_SYSTEM_CA=1
+```
+
+Two traps `codevhub doctor` will catch for you:
+
+- **`NO_PROXY` covering the CoDev backend** (for example a blanket
+  `*.viettel.vn`) routes sign-in traffic *around* the proxy and straight into
+  the firewall. This is the usual cause of `Login failed`.
+- **npm keeps its own proxy and TLS configuration**, separate from these
+  variables — `npm config set proxy`, `https-proxy`, `cafile`, `registry`. A
+  working `codevhub` says nothing about whether `npm i -g` will work.
 
 ## CodeGraph integration
 

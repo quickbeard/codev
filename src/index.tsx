@@ -3,14 +3,23 @@ import { join } from "node:path";
 import { styleText } from "node:util";
 import { render } from "ink";
 import { ConfigApp } from "@/ConfigApp.js";
+import { DoctorApp } from "@/DoctorApp.js";
 import { InstallApp } from "@/InstallApp.js";
 import { LoginApp } from "@/LoginApp.js";
 import { clearSkillhubCookie, logout } from "@/lib/auth.js";
 import { runClearLogs } from "@/lib/clear-logs.js";
 import { forwardToCodegraph } from "@/lib/codegraph.js";
+import {
+	MIN_NODE_STRING,
+	NODE_DOWNLOAD_URL,
+	nodeVersionMeets,
+	RECOMMENDED_NODE,
+} from "@/lib/const.js";
+import { doctorOutcome, rerunDoctorWithProxy } from "@/lib/doctor.js";
 import { printHelp, printVersion } from "@/lib/help.js";
 import { initLogging } from "@/lib/log.js";
 import { runLogs } from "@/lib/logs.js";
+import { applyEnvProxy } from "@/lib/proxy.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
 import { ensureFreshGatewayKey } from "@/lib/refresh.js";
 import {
@@ -41,16 +50,18 @@ import { SkillPushApp } from "@/SkillPushApp.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
 
-// `node:sqlite` (used by the OpenCode provider) was added in Node 22.5 and
-// stabilized in Node 23.5. Earlier 22.x patches don't expose the module even
-// with --experimental-sqlite.
-const MIN_NODE_VERSION = "22.5.0";
-const [nodeMajor = 0, nodeMinor = 0] = process.versions.node
-	.split(".")
-	.map((n) => Number.parseInt(n, 10) || 0);
-if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 5)) {
+// The floor is 22.21.0 — the release that backported HTTP_PROXY/HTTPS_PROXY
+// support to the Node 22 line. Below it Node silently ignores proxy environment
+// variables, so on a corporate network every command fails at sign-in with no
+// way to fix it. (`node:sqlite`, the previous reason for a 22.5 floor, is
+// comfortably below this and still handled by the --experimental-sqlite
+// re-exec in lib/reexec.ts.)
+if (!nodeVersionMeets(process.versions.node)) {
 	console.error(
-		`CoDev requires Node.js >= ${MIN_NODE_VERSION}. Current version: ${process.versions.node}.`,
+		`CoDev requires Node.js >= ${MIN_NODE_STRING} (Node ${RECOMMENDED_NODE} recommended). ` +
+			`Current version: ${process.version}.\n` +
+			`Below ${MIN_NODE_STRING}, Node ignores HTTP_PROXY/HTTPS_PROXY entirely, so sign-in ` +
+			`cannot work behind a corporate proxy.\nDownload: ${NODE_DOWNLOAD_URL}`,
 	);
 	process.exit(1);
 }
@@ -86,6 +97,22 @@ function flagValue(argv: string[], name: string): string | undefined {
 // before dispatch so every command logs its start/end and crashes. File-only —
 // never stdout/stderr, which the Ink apps own.
 initLogging(command ?? "help", args);
+
+// Node does not honor HTTP_PROXY/HTTPS_PROXY unless NODE_USE_ENV_PROXY is set,
+// and it reads that only at startup. Users who follow the install guide and
+// export just the proxy variables therefore get no proxy at all — silently.
+// Enable it here, before dispatch, so every command benefits rather than just
+// the one being debugged. Best-effort: a failure never blocks the command,
+// because `codevhub doctor` must still be able to run and explain why.
+{
+	const proxyResult = applyEnvProxy();
+	if (proxyResult.action === "reexec") process.exit(proxyResult.exitCode ?? 1);
+	if (proxyResult.noProxyWarning) {
+		// Not fixable on the user's behalf — rewriting their NO_PROXY would be
+		// overreach — but it silently defeats the proxy, so say so once.
+		process.stderr.write(`Warning: ${proxyResult.noProxyWarning}\n`);
+	}
+}
 
 // Rewrite shims left behind by pre-0.4 hub versions (their bodies re-exec the
 // old `codev` hub command, which is now the agent). Best-effort: a filesystem
@@ -141,6 +168,26 @@ switch (command) {
 		} catch {
 			process.exit(1);
 		}
+		break;
+	}
+	// Pre-flight for everything `install` depends on: Node version, npm, proxy
+	// and TLS environment, network reachability, sign-in, API key, and a real
+	// LLM completion. Read-only — it never installs or configures anything.
+	case "doctor": {
+		const { waitUntilExit } = render(
+			<DoctorApp force={args.includes("--force") || args.includes("-f")} />,
+		);
+		try {
+			await waitUntilExit();
+		} catch {
+			process.exit(1);
+		}
+		// The app cannot re-exec itself: spawnSync with inherited stdio while Ink
+		// still owns the TTY corrupts the terminal. It records the intent instead
+		// and we act on it here, now that Ink has unmounted.
+		const retry = doctorOutcome.retryWithProxy;
+		if (retry) process.exit(rerunDoctorWithProxy(retry, args));
+		process.exit(doctorOutcome.exitCode);
 		break;
 	}
 	case "update": {

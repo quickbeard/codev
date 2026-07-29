@@ -3,6 +3,8 @@ import Spinner from "ink-spinner";
 import { useEffect, useState } from "react";
 import type { AuthData } from "@/lib/auth.js";
 import { fetchApiKey } from "@/lib/backend.js";
+import { BACKEND_URL } from "@/lib/const.js";
+import { describeFailure } from "@/lib/doctor.js";
 
 interface FetchApiKeyProps {
 	auth: AuthData;
@@ -40,7 +42,14 @@ export function FetchApiKey({ auth, onDone, onFallback }: FetchApiKeyProps) {
 			})
 			.catch((err: Error) => {
 				setPending(false);
-				setError(err.message);
+				// A transport failure here (proxy/TLS/DNS) gets the full diagnosis;
+				// a backend HTTP error keeps its own already-precise message.
+				setError(
+					describeFailure(err, {
+						url: `${BACKEND_URL}/auth/exchange`,
+						method: "POST",
+					}),
+				);
 			});
 	}, [auth.access_token, onDone, attempt]);
 
@@ -75,7 +84,17 @@ export function FetchApiKey({ auth, onDone, onFallback }: FetchApiKeyProps) {
 			)}
 			{error && (
 				<>
-					<Text color="red">{`Failed to fetch API key: ${error}`}</Text>
+					{/* One-line reasons stay inline; a multi-line transport
+					    diagnosis keeps its structure on following lines. */}
+					<Text color="red">{`Failed to fetch API key: ${error.split("\n")[0] ?? ""}`}</Text>
+					{error
+						.split("\n")
+						.slice(1)
+						.map((line, i) => (
+							<Text key={`key-err-${i.toString()}`} color="red">
+								{line}
+							</Text>
+						))}
 					<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
 				</>
 			)}

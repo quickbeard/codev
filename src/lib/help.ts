@@ -15,6 +15,9 @@ passed through to it as well — \`codevhub run "fix the tests"\`,
 \`codevhub serve\`, \`codevhub models\`, and so on.
 
 Hub commands:
+  doctor              Check your environment and network before installing
+                      (Node version, npm, proxy/TLS, sign-in, LLM access;
+                      --force to test a real sign-in instead of the cached one)
   install             Install and configure AI coding agents
   config              Configure existing AI coding agents
   update              Update installed AI coding agents

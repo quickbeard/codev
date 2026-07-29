@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { PasteBackPrompt, usePasteBack } from "@/components/PasteBack.js";
 import { type AuthData, login } from "@/lib/auth.js";
 import { clipboard } from "@/lib/clipboard.js";
-import { describeNetworkError } from "@/lib/tls.js";
+import { SSO_URL } from "@/lib/const.js";
+import { describeFailure } from "@/lib/doctor.js";
 
 interface LoginProps {
 	onDone: (auth: AuthData) => void;
@@ -14,9 +15,15 @@ interface LoginProps {
 	// only surfaces for headless/remote machines or a browser that didn't open.
 	// Overridable so tests can reveal it immediately.
 	fallbackDelayMs?: number;
+	// When provided, the parent owns the failure: this component reports the
+	// error upward and drops its own "Press Enter to retry" affordance. Used by
+	// `codevhub doctor`, which records login as one check among many and must
+	// keep going to the summary rather than parking on a retry prompt. Absent
+	// (install / config / login), the retry behaviour is unchanged.
+	onError?: (err: unknown) => void;
 }
 
-export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
+export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 	const [logs, setLogs] = useState<string[]>([]);
 	const [error, setError] = useState<string | null>(null);
 	const [attempt, setAttempt] = useState(0);
@@ -72,11 +79,15 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 				onDone(auth);
 			})
 			.catch((err: Error) => {
-				// Unwraps Node's bare `fetch failed` to the real reason (DNS, TLS,
-				// proxy interception) and appends a remedy for certificate failures.
-				setError(describeNetworkError(err));
+				// Full diagnosis, not Node's bare `fetch failed`: names the real
+				// failure (DNS / refused / timeout / TLS interception), says what
+				// most likely caused it on this machine given the proxy state, and
+				// gives the fix. This is where users on a corporate network most
+				// often meet a network error, so it gets the good message.
+				setError(describeFailure(err, { url: SSO_URL }));
+				onError?.(err);
 			});
-	}, [addLog, onDone, attempt]);
+	}, [addLog, onDone, onError, attempt]);
 
 	// Reveal the manual fallback a few seconds after the URL is ready, so the
 	// happy path stays a clean one-line spinner.
@@ -102,14 +113,28 @@ export function Login({ onDone, fallbackDelayMs = 3000 }: LoginProps) {
 
 	useInput((_input, key) => {
 		// A fatal failure takes over the screen: Enter restarts the attempt.
-		if (error && key.return) setAttempt((n) => n + 1);
+		// When the parent handles errors (doctor), it decides what happens next
+		// and this key would fight with its own flow.
+		if (!onError && error && key.return) setAttempt((n) => n + 1);
 	});
 
 	if (error) {
+		// A plain one-line reason stays inline ("Login failed: <reason>"); a
+		// multi-line diagnosis (what happened / likely cause / fix) breaks onto
+		// its own lines so the structure survives.
+		const lines = error.split("\n");
+		const [first = "", ...rest] = lines;
 		return (
 			<Box flexDirection="column">
-				<Text color="red">{`Login failed: ${error}`}</Text>
-				<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
+				<Text color="red">{`Login failed: ${first}`}</Text>
+				{rest.map((line, i) => (
+					<Text key={`login-err-${i.toString()}`} color="red">
+						{line}
+					</Text>
+				))}
+				{!onError && (
+					<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
+				)}
 			</Box>
 		);
 	}
