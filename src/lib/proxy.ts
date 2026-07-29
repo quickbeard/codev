@@ -234,6 +234,37 @@ export function matchingNoProxyEntry(
 	return null;
 }
 
+/**
+ * Set a variable in a child environment, removing any other spelling of it.
+ *
+ * Windows environment variables are **case-insensitive**, so `http_proxy` and
+ * `HTTP_PROXY` are one variable — but a plain `{...process.env, HTTP_PROXY: x}`
+ * produces an object holding both the user's original key (with the old value)
+ * and ours. Handing that to `spawnSync` leaves which one wins to chance, and if
+ * the stale one wins the proxy retry silently tests the wrong address.
+ *
+ * Removing the variants is right on POSIX too: there both spellings are real
+ * and both are consulted, so leaving the old one behind is the same ambiguity
+ * by a different mechanism.
+ */
+export function overrideEnvVar(
+	env: NodeJS.ProcessEnv,
+	name: string,
+	value: string,
+): void {
+	const lower = name.toLowerCase();
+	for (const key of Object.keys(env)) {
+		if (key !== name && key.toLowerCase() === lower) delete env[key];
+	}
+	env[name] = value;
+}
+
+/** Every key in `env` that spells `name`, in any case. */
+export function envVarKeys(env: NodeJS.ProcessEnv, name: string): string[] {
+	const lower = name.toLowerCase();
+	return Object.keys(env).filter((key) => key.toLowerCase() === lower);
+}
+
 /** NO_PROXY with every entry that would exempt `host` removed. */
 export function stripNoProxyFor(noProxy: string, host: string): string {
 	return noProxy

@@ -55,9 +55,11 @@ import {
 import { doctorReportPath } from "@/lib/paths.js";
 import {
 	backendHost,
+	envVarKeys,
 	hasProxyConfigured,
 	maskProxyCredentials,
 	matchingNoProxyEntry,
+	overrideEnvVar,
 	type ProxyEnv,
 	type ProxyEnvVar,
 	proxyAutoEnabled,
@@ -1951,25 +1953,31 @@ export function rerunDoctorWithProxy(
 		return 1;
 	}
 	const traceId = currentTraceId();
-	const env: NodeJS.ProcessEnv = {
-		...process.env,
-		HTTP_PROXY: proxy.http,
-		HTTPS_PROXY: proxy.https,
-		NODE_USE_ENV_PROXY: "1",
-		// Intercepting proxies re-sign TLS with a corporate root, so reading the
-		// OS trust store is part of "try it with the proxy", not a separate step.
-		NODE_USE_SYSTEM_CA: "1",
-		// Offer the prompt only once — if the retry still fails, the summary must
-		// be allowed to print rather than asking again.
-		[DOCTOR_PROXY_ENV]: "1",
-		...(traceId ? { CODEV_TRACE_PARENT: traceId } : {}),
-	};
+	const env: NodeJS.ProcessEnv = { ...process.env };
+	// Assigned through overrideEnvVar rather than spread: Windows environment
+	// variables are case-insensitive, so a user's existing `http_proxy` would
+	// survive alongside our `HTTP_PROXY` and the child could pick up the stale
+	// address — testing a proxy the user did not type.
+	overrideEnvVar(env, "HTTP_PROXY", proxy.http);
+	overrideEnvVar(env, "HTTPS_PROXY", proxy.https);
+	overrideEnvVar(env, "NODE_USE_ENV_PROXY", "1");
+	// Intercepting proxies re-sign TLS with a corporate root, so reading the
+	// OS trust store is part of "try it with the proxy", not a separate step.
+	overrideEnvVar(env, "NODE_USE_SYSTEM_CA", "1");
+	// Offer the prompt only once — if the retry still fails, the summary must
+	// be allowed to print rather than asking again.
+	overrideEnvVar(env, DOCTOR_PROXY_ENV, "1");
+	if (traceId) overrideEnvVar(env, "CODEV_TRACE_PARENT", traceId);
+
 	// A NO_PROXY entry covering our own backend would send that traffic direct
 	// and defeat the proxy we're testing — the documented cause of "Login
 	// failed". Drop it for the child only; the user's environment is untouched.
+	// Every spelling is stripped, since any of them would defeat the retry.
 	const host = backendHost();
-	if (env.NO_PROXY) env.NO_PROXY = stripNoProxyFor(env.NO_PROXY, host);
-	if (env.no_proxy) env.no_proxy = stripNoProxyFor(env.no_proxy, host);
+	for (const key of envVarKeys(env, "NO_PROXY")) {
+		const value = env[key];
+		if (value) env[key] = stripNoProxyFor(value, host);
+	}
 
 	// execArgv is forwarded so the child keeps whatever flags this process was
 	// started with — without it, a `pnpm dev` run (node + tsx loader flags)

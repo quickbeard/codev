@@ -37,7 +37,7 @@ import {
 import * as log from "@/lib/log.js";
 import * as npm from "@/lib/npm.js";
 import * as proxy from "@/lib/proxy.js";
-import { PROXY_APPLIED_ENV } from "@/lib/proxy.js";
+import { envVarKeys, PROXY_APPLIED_ENV } from "@/lib/proxy.js";
 import * as reexec from "@/lib/reexec.js";
 import * as tls from "@/lib/tls.js";
 
@@ -1185,9 +1185,30 @@ describe("the proxy retry command", () => {
 		rerunDoctorWithProxy(PROXY, []);
 
 		const env = spawn.mock.calls[0]?.[2]?.env as NodeJS.ProcessEnv;
-		expect(env.NO_PROXY).toBe("localhost,127.0.0.1");
+		// Looked up case-insensitively and ignoring empty spellings: Windows
+		// stores the key in whatever case it was first created with, so
+		// `env.NO_PROXY` alone is not portable, and an unset variant legitimately
+		// stays empty because there is nothing in it to strip.
+		const effective = envVarKeys(env, "NO_PROXY")
+			.map((key) => env[key])
+			.filter((value): value is string => Boolean(value));
+		expect(effective).toEqual(["localhost,127.0.0.1"]);
 		// The user's own environment is untouched — only the child's copy changes.
 		expect(process.env.NO_PROXY).toBe("localhost,*.viettel.vn,127.0.0.1");
+	});
+
+	// Windows environment variables are case-insensitive, so a user's existing
+	// `http_proxy` would otherwise survive the spread alongside our `HTTP_PROXY`
+	// and the child could start up on the stale address.
+	test("leaves exactly one spelling of each variable it overrides", () => {
+		vi.stubEnv("http_proxy", "http://stale:1");
+		const spawn = captureSpawn();
+		rerunDoctorWithProxy(PROXY, []);
+
+		const env = spawn.mock.calls[0]?.[2]?.env as NodeJS.ProcessEnv;
+		const keys = envVarKeys(env, "HTTP_PROXY");
+		expect(keys).toEqual(["HTTP_PROXY"]);
+		expect(env.HTTP_PROXY).toBe("http://10.0.0.1:8080");
 	});
 
 	test("propagates the child's exit code", () => {

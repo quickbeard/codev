@@ -3,11 +3,13 @@ import { BACKEND_URL } from "@/lib/const.js";
 import {
 	applyEnvProxy,
 	backendHost,
+	envVarKeys,
 	hasProxyConfigured,
 	httpApi,
 	maskProxyCredentials,
 	matchingNoProxyEntry,
 	noProxyEntryMatches,
+	overrideEnvVar,
 	PROXY_APPLIED_ENV,
 	proxyAutoEnabled,
 	proxyEnvSummary,
@@ -265,9 +267,11 @@ describe("proxyEnvSummary", () => {
 		for (const v of summary) expect(v.value).toBeNull();
 	});
 
+	// Explicit env, not process.env: on Windows environment variables are
+	// case-insensitive, so stubbing `http_proxy` there also answers to
+	// `HTTP_PROXY` and the two spellings cannot be told apart.
 	test("reports a set variable in the user's own spelling", () => {
-		vi.stubEnv("http_proxy", "http://10.0.0.1:8080");
-		const summary = proxyEnvSummary();
+		const summary = proxyEnvSummary({ http_proxy: "http://10.0.0.1:8080" });
 		// The lowercase spelling is appended; the uppercase stays listed as unset
 		// rather than silently absorbing the lowercase value.
 		expect(summary.find((v) => v.name === "http_proxy")?.value).toBe(
@@ -279,10 +283,11 @@ describe("proxyEnvSummary", () => {
 	// readProxyEnv models a fixed set of fields; anything outside it was
 	// invisible, including the remedy our own TLS guidance hands out.
 	test("includes variables readProxyEnv does not model", () => {
-		vi.stubEnv("NODE_EXTRA_CA_CERTS", "/etc/ssl/corp.pem");
-		vi.stubEnv("npm_config_registry", "http://mirror.internal/npm");
-		vi.stubEnv("NODE_OPTIONS", "--max-old-space-size=4096");
-		const names = proxyEnvSummary().map((v) => v.name);
+		const names = proxyEnvSummary({
+			NODE_EXTRA_CA_CERTS: "/etc/ssl/corp.pem",
+			npm_config_registry: "http://mirror.internal/npm",
+			NODE_OPTIONS: "--max-old-space-size=4096",
+		}).map((v) => v.name);
 		expect(names).toEqual(
 			expect.arrayContaining([
 				"NODE_EXTRA_CA_CERTS",
@@ -293,17 +298,17 @@ describe("proxyEnvSummary", () => {
 	});
 
 	test("masks credentials in the reported values", () => {
-		vi.stubEnv("HTTPS_PROXY", "http://user:hunter2@10.0.0.1:8080");
-		const value = proxyEnvSummary().find(
-			(v) => v.name === "HTTPS_PROXY",
-		)?.value;
+		const value = proxyEnvSummary({
+			HTTPS_PROXY: "http://user:hunter2@10.0.0.1:8080",
+		}).find((v) => v.name === "HTTPS_PROXY")?.value;
 		expect(value).toBe("http://user:***@10.0.0.1:8080");
 	});
 
 	test("an empty variable is reported as unset, not as a blank value", () => {
-		vi.stubEnv("HTTP_PROXY", "   ");
 		expect(
-			proxyEnvSummary().find((v) => v.name === "HTTP_PROXY")?.value,
+			proxyEnvSummary({ HTTP_PROXY: "   " }).find(
+				(v) => v.name === "HTTP_PROXY",
+			)?.value,
 		).toBeNull();
 	});
 });
@@ -348,5 +353,46 @@ describe("proxyForUrl", () => {
 		vi.stubEnv("HTTPS_PROXY", "http://10.0.0.1:8080");
 		vi.stubEnv("NODE_USE_ENV_PROXY", "1");
 		expect(proxyForUrl("not a url")).toBeNull();
+	});
+});
+
+/**
+ * Windows environment variables are case-insensitive, so `http_proxy` and
+ * `HTTP_PROXY` are one variable — but a plain `{...process.env, HTTP_PROXY: x}`
+ * yields an object holding both the user's original key (old value) and ours.
+ * Handing that to spawnSync leaves which one wins to chance, and a stale win
+ * means the proxy retry silently tests an address the user never typed.
+ */
+describe("child environment overrides", () => {
+	test("replaces the value and removes every other spelling", () => {
+		const env: NodeJS.ProcessEnv = {
+			http_proxy: "http://stale:1",
+			HTTP_Proxy: "http://also-stale:2",
+			PATH: "/usr/bin",
+		};
+		overrideEnvVar(env, "HTTP_PROXY", "http://fresh:8080");
+		expect(envVarKeys(env, "HTTP_PROXY")).toEqual(["HTTP_PROXY"]);
+		expect(env.HTTP_PROXY).toBe("http://fresh:8080");
+		// Unrelated variables survive untouched.
+		expect(env.PATH).toBe("/usr/bin");
+	});
+
+	test("setting a variable that is not present just adds it", () => {
+		const env: NodeJS.ProcessEnv = {};
+		overrideEnvVar(env, "NODE_USE_ENV_PROXY", "1");
+		expect(env).toEqual({ NODE_USE_ENV_PROXY: "1" });
+	});
+
+	test("envVarKeys finds every spelling and nothing else", () => {
+		const env: NodeJS.ProcessEnv = {
+			NO_PROXY: "a",
+			no_proxy: "b",
+			NOT_A_PROXY: "c",
+		};
+		expect(envVarKeys(env, "NO_PROXY").sort()).toEqual([
+			"NO_PROXY",
+			"no_proxy",
+		]);
+		expect(envVarKeys(env, "MISSING")).toEqual([]);
 	});
 });
