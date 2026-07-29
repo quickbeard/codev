@@ -37,7 +37,10 @@ import {
 	loggedFetch,
 	logInfo,
 	logWarn,
+	type RequestRecord,
+	recordRequests,
 	redactSecrets,
+	requestLog,
 } from "@/lib/log.js";
 import {
 	CLI,
@@ -1676,6 +1679,8 @@ export interface DoctorReport {
 	checks: CheckOutcome[];
 	/** Every child process this run spawned, in order. */
 	commands: CommandRecord[];
+	/** Every HTTP request this run made, in order. */
+	requests: RequestRecord[];
 	nextSteps: string[];
 }
 
@@ -1688,10 +1693,15 @@ export interface DoctorReport {
  */
 export function startCommandRecording(): void {
 	recordCommands();
+	recordRequests();
 }
 
 export function recordedCommands(): CommandRecord[] {
 	return [...commandLog.entries];
+}
+
+export function recordedRequests(): RequestRecord[] {
+	return [...requestLog.entries];
 }
 
 export function buildDoctorReport(
@@ -1719,6 +1729,7 @@ export function buildDoctorReport(
 		},
 		checks: outcomes,
 		commands: recordedCommands(),
+		requests: recordedRequests(),
 		nextSteps: buildNextSteps(outcomes, proxyUsed),
 	};
 }

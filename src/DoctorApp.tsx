@@ -25,12 +25,13 @@ import {
 	LLM_CHECKS,
 	NETWORK_CHECKS,
 	recordedCommands,
+	recordedRequests,
 	runChecks,
 	STATE_CHECKS,
 	startCommandRecording,
 	writeDoctorReport,
 } from "@/lib/doctor.js";
-import { logDebug } from "@/lib/log.js";
+import { logDebug, type RequestRecord } from "@/lib/log.js";
 import type { CommandRecord } from "@/lib/npm.js";
 import { readProxyEnv } from "@/lib/proxy.js";
 
@@ -118,6 +119,7 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 	// Snapshotted at the terminal phase — the recorder is a mutable buffer, so
 	// reading it during render would tear as checks are still finishing.
 	const [commands, setCommands] = useState<CommandRecord[]>([]);
+	const [requests, setRequests] = useState<RequestRecord[]>([]);
 	const didPrepRef = useRef(false);
 	// Checks mutate the context as they resolve (token → key → gateway URL →
 	// models), so it must be a ref: a state read would see a stale snapshot
@@ -246,6 +248,7 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 		// The `state` group is informational, but it belongs in the file — it is
 		// what tells support what was already on the machine.
 		setCommands(recordedCommands());
+		setRequests(recordedRequests());
 		setReportPath(
 			writeDoctorReport(
 				buildDoctorReport(
@@ -357,20 +360,57 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 
 				{/* `doctor` runs things on someone else's machine, often a
 				    locked-down one. What it ran should be answerable from the
-				    output, not from the source. */}
+				    output, not from the source. Both halves matter: the
+				    subprocesses, and — on a corporate network, more usefully —
+				    the endpoints, which are what IT needs to allow-list. */}
 				{phase === "done" && commands.length > 0 && (
 					<Step title={<Text bold>Commands run</Text>}>
 						<Box flexDirection="column">
+							{/* One Text per row for the same reason as the endpoints
+							    below: a wrapped row must not shift the status column. */}
 							{commands.map((c, i) => (
-								<Box key={`cmd-${i.toString()}`}>
-									<Text color={c.ok ? "green" : "red"}>{c.ok ? "✓" : "✗"}</Text>
-									<Text>{` ${c.command}`}</Text>
-									<Text dimColor>{`  (${c.durationMs}ms)`}</Text>
-								</Box>
+								<Text
+									key={`cmd-${i.toString()}`}
+									color={c.ok ? undefined : "red"}
+								>
+									{`${c.ok ? "✓" : "✗"} ${c.command}  (${c.durationMs}ms)`}
+								</Text>
 							))}
 							<Text dimColor>
 								{
 									"All read-only — doctor never installs, uninstalls or changes configuration."
+								}
+							</Text>
+						</Box>
+					</Step>
+				)}
+				{phase === "done" && requests.length > 0 && (
+					<Step title={<Text bold>Endpoints contacted</Text>}>
+						<Box flexDirection="column">
+							{requests.map((r, i) => {
+								// This section answers "was the endpoint reachable?", so ANY
+								// response counts — a 401 means we got there and were told
+								// no, which is a success at this layer. Scoring on `ok`
+								// (2xx) marked the expected 401s red and contradicted the
+								// check rows above, which correctly call them a pass. Only
+								// "no response at all" is a failure here.
+								const reached = r.status !== null;
+								// One Text, not three: a long URL wrapping across separate
+								// flex children knocks the status icon out of its column.
+								return (
+									<Text
+										key={`req-${i.toString()}`}
+										color={reached ? undefined : "red"}
+									>
+										{`${reached ? "✓" : "✗"} ${r.method} ${r.url}  (${
+											r.status ?? "no response"
+										}, ${r.durationMs}ms)`}
+									</Text>
+								);
+							})}
+							<Text dimColor>
+								{
+									"Reachability only — a 401 here means the endpoint answered. Query strings are omitted; they can carry tokens."
 								}
 							</Text>
 						</Box>

@@ -9,12 +9,14 @@ import {
 	NETWORK_CHECKS,
 	PREFLIGHT_CHECKS,
 	recordedCommands,
+	recordedRequests,
 	rerunDoctorWithProxy,
 	runChecks,
 	STATE_CHECKS,
 	startCommandRecording,
 } from "@/lib/doctor.js";
 import * as log from "@/lib/log.js";
+import { loggedFetch, recordRequests, requestLog } from "@/lib/log.js";
 import { commandLog } from "@/lib/npm.js";
 import * as proxy from "@/lib/proxy.js";
 import * as reexec from "@/lib/reexec.js";
@@ -274,5 +276,100 @@ describe("the one non-npm command: the proxy retry", () => {
 		const spawn = vi.spyOn(reexec.spawner, "spawnSync");
 		await commandsFor(NETWORK_CHECKS);
 		expect(spawn).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * The npm list alone was only half the answer. `doctor`'s connection tests —
+ * backend, Supabase, the gateway — are HTTP, never touch `execAsync`, and so
+ * appeared nowhere. On a corporate network they are the *more* useful half:
+ * the endpoints are what IT needs in order to allow-list them.
+ *
+ * These stub global `fetch`, not `loggedFetch`: the recorder lives inside
+ * `loggedFetch`, so stubbing that export bypasses the very code under test.
+ */
+describe("the endpoints doctor contacted", () => {
+	beforeEach(() => {
+		// Undo the module-level loggedFetch stub so the real one — and its
+		// recorder — actually runs.
+		vi.restoreAllMocks();
+		recordRequests();
+	});
+
+	function stubFetch(status = 200) {
+		return vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response("", { status }));
+	}
+
+	test("records method, URL, status and duration", async () => {
+		stubFetch(200);
+		await loggedFetch("probe", "https://api.example.com/v1/models", {
+			method: "GET",
+		});
+		const [r] = recordedRequests();
+		expect(r?.method).toBe("GET");
+		expect(r?.url).toBe("https://api.example.com/v1/models");
+		expect(r?.status).toBe(200);
+		expect(typeof r?.durationMs).toBe("number");
+	});
+
+	// OAuth codes, signed-URL signatures and access tokens all live in query
+	// strings, and none of it helps a user see which endpoint was contacted.
+	test("drops the query string", async () => {
+		stubFetch(200);
+		await loggedFetch(
+			"probe",
+			"https://api.example.com/callback?code=SUPERSECRET&state=abc",
+		);
+		const [r] = recordedRequests();
+		expect(r?.url).toBe("https://api.example.com/callback");
+		expect(r?.url).not.toContain("SUPERSECRET");
+	});
+
+	// A 401 means the endpoint answered — reachability succeeded even though
+	// the request did not. It is recorded, so the UI can score it on
+	// "did anything come back" rather than on 2xx.
+	test("records a non-2xx response with its status", async () => {
+		stubFetch(401);
+		await loggedFetch("probe", "https://api.example.com/config", {
+			method: "POST",
+		});
+		const [r] = recordedRequests();
+		expect(r?.status).toBe(401);
+		expect(r?.ok).toBe(false);
+	});
+
+	test("a request that never got a response has a null status", async () => {
+		vi.spyOn(globalThis, "fetch").mockRejectedValue(
+			Object.assign(new TypeError("fetch failed"), {
+				cause: Object.assign(new Error("getaddrinfo ENOTFOUND x"), {
+					code: "ENOTFOUND",
+				}),
+			}),
+		);
+		await expect(
+			loggedFetch("probe", "https://api.example.com/x"),
+		).rejects.toThrow();
+		const [r] = recordedRequests();
+		expect(r?.status).toBeNull();
+		expect(r?.ok).toBe(false);
+	});
+
+	test("recording is off until doctor asks for it", async () => {
+		requestLog.enabled = false;
+		requestLog.entries = [];
+		stubFetch(200);
+		await loggedFetch("probe", "https://api.example.com/x");
+		expect(requestLog.entries).toEqual([]);
+	});
+
+	test("the report file carries the endpoints too", async () => {
+		stubFetch(200);
+		await loggedFetch("probe", "https://api.example.com/x");
+		const report = buildDoctorReport([], "2026-07-29T00:00:00.000Z");
+		expect(report.requests.map((r) => r.url)).toEqual([
+			"https://api.example.com/x",
+		]);
 	});
 });
