@@ -15,12 +15,12 @@ import {
 	nodeVersionMeets,
 	RECOMMENDED_NODE,
 } from "@/lib/const.js";
-import { DOCTOR_PROXY_ENV, doctorOutcome } from "@/lib/doctor.js";
+import { doctorOutcome, rerunDoctorWithProxy } from "@/lib/doctor.js";
 import { printHelp, printVersion } from "@/lib/help.js";
-import { currentTraceId, initLogging } from "@/lib/log.js";
+import { initLogging } from "@/lib/log.js";
 import { runLogs } from "@/lib/logs.js";
-import { applyEnvProxy, backendHost, stripNoProxyFor } from "@/lib/proxy.js";
-import { ensureNodeSqliteOrReexec, spawner } from "@/lib/reexec.js";
+import { applyEnvProxy } from "@/lib/proxy.js";
+import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
 import { ensureFreshGatewayKey } from "@/lib/refresh.js";
 import {
 	RESTORE_AGENTS,
@@ -91,44 +91,6 @@ function flagValue(argv: string[], name: string): string | undefined {
 		if (arg?.startsWith(eq)) return arg.slice(eq.length);
 	}
 	return undefined;
-}
-
-// Re-run `codevhub doctor` with the proxy the user just typed, so they see the
-// fix actually work before being told to make it permanent. Nothing is written
-// to disk; the settings live only in the child's environment.
-function rerunDoctorWithProxy(proxy: { http: string; https: string }): number {
-	const selfPath = process.argv[1];
-	if (!selfPath) {
-		console.error("Could not determine the CLI path to re-run.");
-		return 1;
-	}
-	const traceId = currentTraceId();
-	const env: NodeJS.ProcessEnv = {
-		...process.env,
-		HTTP_PROXY: proxy.http,
-		HTTPS_PROXY: proxy.https,
-		NODE_USE_ENV_PROXY: "1",
-		// Intercepting proxies re-sign TLS with a corporate root, so reading the
-		// OS trust store is part of "try it with the proxy", not a separate step.
-		NODE_USE_SYSTEM_CA: "1",
-		// Offer the prompt only once — if the retry still fails, the summary must
-		// be allowed to print rather than asking again.
-		[DOCTOR_PROXY_ENV]: "1",
-		...(traceId ? { CODEV_TRACE_PARENT: traceId } : {}),
-	};
-	// A NO_PROXY entry covering our own backend would send that traffic direct
-	// and defeat the proxy we're testing — the documented cause of "Login
-	// failed". Drop it for the child only; the user's environment is untouched.
-	const host = backendHost();
-	if (env.NO_PROXY) env.NO_PROXY = stripNoProxyFor(env.NO_PROXY, host);
-	if (env.no_proxy) env.no_proxy = stripNoProxyFor(env.no_proxy, host);
-
-	const result = spawner.spawnSync(
-		process.execPath,
-		[...process.execArgv, selfPath, "doctor", ...args],
-		{ stdio: "inherit", env },
-	);
-	return result.status ?? 1;
 }
 
 // Diagnostic logging (~/.codev-hub/logs/codev-YYYYMMDD.ndjson, ECS NDJSON) starts
@@ -224,7 +186,7 @@ switch (command) {
 		// still owns the TTY corrupts the terminal. It records the intent instead
 		// and we act on it here, now that Ink has unmounted.
 		const retry = doctorOutcome.retryWithProxy;
-		if (retry) process.exit(rerunDoctorWithProxy(retry));
+		if (retry) process.exit(rerunDoctorWithProxy(retry, args));
 		process.exit(doctorOutcome.exitCode);
 		break;
 	}

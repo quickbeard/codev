@@ -3,6 +3,7 @@ import * as backend from "@/lib/backend.js";
 import {
 	buildNextSteps,
 	type CheckOutcome,
+	DOCTOR_PROXY_ENV,
 	describeFailure,
 	diagnoseError,
 	diagnoseExec,
@@ -17,12 +18,14 @@ import {
 	PREFLIGHT_CHECKS,
 	persistProxyInstructions,
 	renderDiagnosisCompact,
+	rerunDoctorWithProxy,
 	runChecks,
 } from "@/lib/doctor.js";
 import * as log from "@/lib/log.js";
 import * as npm from "@/lib/npm.js";
 import * as proxy from "@/lib/proxy.js";
 import { PROXY_APPLIED_ENV } from "@/lib/proxy.js";
+import * as reexec from "@/lib/reexec.js";
 import * as tls from "@/lib/tls.js";
 
 const PROXY_VARS = [
@@ -961,6 +964,111 @@ describe("remediation output", () => {
 		}
 		// npm's proxy config is separate from the shell's, and users miss this.
 		expect(lines).toContain("npm config set https-proxy");
+	});
+});
+
+// The retry is the one place `doctor` shells out, and what it runs has to be
+// exactly reproducible by hand for support. These spell the command out.
+describe("the proxy retry command", () => {
+	const PROXY = { http: "http://10.0.0.1:8080", https: "http://10.0.0.1:8080" };
+
+	function captureSpawn() {
+		return (
+			vi
+				.spyOn(reexec.spawner, "spawnSync")
+				// biome-ignore lint/suspicious/noExplicitAny: minimal SpawnSyncReturns stub
+				.mockReturnValue({ status: 0 } as any)
+		);
+	}
+
+	test("runs `node <cli> doctor`, forwarding argv and node's own flags", () => {
+		const spawn = captureSpawn();
+		rerunDoctorWithProxy(PROXY, ["--force"]);
+
+		const [file, argv, opts] = spawn.mock.calls[0] ?? [];
+		// The whole command, spelled out:
+		//   <node> [...node flags] <cli entry> doctor --force
+		expect([file, ...(argv as string[])]).toEqual([
+			process.execPath,
+			...process.execArgv,
+			process.argv[1],
+			"doctor",
+			"--force",
+		]);
+		// It re-invokes node on the script directly — no shell, no `codevhub` bin.
+		expect(file).toBe(process.execPath);
+		expect(opts?.shell).toBeUndefined();
+		// Inherited stdio is what makes the retry look like one continuous session.
+		expect(opts?.stdio).toBe("inherit");
+	});
+
+	// Without execArgv a `pnpm dev` run (node + tsx loader flags) would spawn a
+	// child that cannot load TypeScript and dies immediately.
+	test("forwards node's own exec flags so a tsx dev run still works", () => {
+		const spawn = captureSpawn();
+		const original = process.execArgv;
+		Object.defineProperty(process, "execArgv", {
+			value: ["--import", "file:///tmp/tsx/loader.mjs"],
+			configurable: true,
+		});
+		try {
+			rerunDoctorWithProxy(PROXY, []);
+		} finally {
+			Object.defineProperty(process, "execArgv", {
+				value: original,
+				configurable: true,
+			});
+		}
+		const argv = spawn.mock.calls[0]?.[1] as string[];
+		expect(argv.slice(0, 2)).toEqual([
+			"--import",
+			"file:///tmp/tsx/loader.mjs",
+		]);
+		expect(argv).toContain("doctor");
+	});
+
+	test("sets exactly the environment the retry needs", () => {
+		const spawn = captureSpawn();
+		rerunDoctorWithProxy(PROXY, []);
+
+		const env = spawn.mock.calls[0]?.[2]?.env as NodeJS.ProcessEnv;
+		expect(env.HTTP_PROXY).toBe("http://10.0.0.1:8080");
+		expect(env.HTTPS_PROXY).toBe("http://10.0.0.1:8080");
+		// Node reads this only at bootstrap, which is the entire reason the retry
+		// is a new process rather than an in-place re-run.
+		expect(env.NODE_USE_ENV_PROXY).toBe("1");
+		// An intercepting proxy re-signs TLS, so trusting the OS store is part of
+		// "try it with the proxy", not a separate step.
+		expect(env.NODE_USE_SYSTEM_CA).toBe("1");
+		// Stops the child prompting again if it still fails.
+		expect(env[DOCTOR_PROXY_ENV]).toBe("1");
+	});
+
+	// A NO_PROXY entry covering our backend routes that traffic around the very
+	// proxy being tested — the documented cause of "Login failed".
+	test("drops a NO_PROXY entry that would bypass the proxy under test", () => {
+		vi.stubEnv("NO_PROXY", "localhost,*.viettel.vn,127.0.0.1");
+		const spawn = captureSpawn();
+		rerunDoctorWithProxy(PROXY, []);
+
+		const env = spawn.mock.calls[0]?.[2]?.env as NodeJS.ProcessEnv;
+		expect(env.NO_PROXY).toBe("localhost,127.0.0.1");
+		// The user's own environment is untouched — only the child's copy changes.
+		expect(process.env.NO_PROXY).toBe("localhost,*.viettel.vn,127.0.0.1");
+	});
+
+	test("propagates the child's exit code", () => {
+		vi.spyOn(reexec.spawner, "spawnSync")
+			// biome-ignore lint/suspicious/noExplicitAny: minimal SpawnSyncReturns stub
+			.mockReturnValue({ status: 3 } as any);
+		expect(rerunDoctorWithProxy(PROXY, [])).toBe(3);
+	});
+
+	test("a killed child (null status) is reported as a failure", () => {
+		vi.spyOn(reexec.spawner, "spawnSync")
+			// biome-ignore lint/suspicious/noExplicitAny: minimal SpawnSyncReturns stub
+			.mockReturnValue({ status: null } as any);
+		expect(rerunDoctorWithProxy(PROXY, [])).toBe(1);
 	});
 });
 

@@ -24,6 +24,7 @@ import {
 	RECOMMENDED_NODE,
 } from "@/lib/const.js";
 import {
+	currentTraceId,
 	logDebug,
 	logError,
 	loggedFetch,
@@ -45,7 +46,9 @@ import {
 	type ProxyEnv,
 	proxyAutoEnabled,
 	readProxyEnv,
+	stripNoProxyFor,
 } from "@/lib/proxy.js";
+import { spawner } from "@/lib/reexec.js";
 import { agentOnPath } from "@/lib/run.js";
 import { detectInstalledShims } from "@/lib/shims.js";
 import { isCertError, tlsApi } from "@/lib/tls.js";
@@ -1694,4 +1697,55 @@ export const DOCTOR_PROXY_ENV = "CODEV_DOCTOR_PROXY";
 export function alreadyRetriedWithProxy(): boolean {
 	const v = process.env[DOCTOR_PROXY_ENV];
 	return v !== undefined && v !== "" && v !== "0";
+}
+
+/**
+ * Re-run `codevhub doctor` with the proxy the user just typed, so they see the
+ * fix actually work before being told to make it permanent. Nothing is written
+ * to disk — the settings live only in the child's environment.
+ *
+ * Lives here rather than in index.tsx so the exact command and environment are
+ * assertable; the dispatcher only decides *when* to call it. It must still be
+ * invoked from index.tsx after Ink has unmounted: `spawnSync` with inherited
+ * stdio while Ink owns the TTY corrupts the terminal.
+ */
+export function rerunDoctorWithProxy(
+	proxy: { http: string; https: string },
+	args: string[],
+): number {
+	const selfPath = process.argv[1];
+	if (!selfPath) {
+		process.stderr.write("Could not determine the CLI path to re-run.\n");
+		return 1;
+	}
+	const traceId = currentTraceId();
+	const env: NodeJS.ProcessEnv = {
+		...process.env,
+		HTTP_PROXY: proxy.http,
+		HTTPS_PROXY: proxy.https,
+		NODE_USE_ENV_PROXY: "1",
+		// Intercepting proxies re-sign TLS with a corporate root, so reading the
+		// OS trust store is part of "try it with the proxy", not a separate step.
+		NODE_USE_SYSTEM_CA: "1",
+		// Offer the prompt only once — if the retry still fails, the summary must
+		// be allowed to print rather than asking again.
+		[DOCTOR_PROXY_ENV]: "1",
+		...(traceId ? { CODEV_TRACE_PARENT: traceId } : {}),
+	};
+	// A NO_PROXY entry covering our own backend would send that traffic direct
+	// and defeat the proxy we're testing — the documented cause of "Login
+	// failed". Drop it for the child only; the user's environment is untouched.
+	const host = backendHost();
+	if (env.NO_PROXY) env.NO_PROXY = stripNoProxyFor(env.NO_PROXY, host);
+	if (env.no_proxy) env.no_proxy = stripNoProxyFor(env.no_proxy, host);
+
+	// execArgv is forwarded so the child keeps whatever flags this process was
+	// started with — without it, a `pnpm dev` run (node + tsx loader flags)
+	// would spawn a child that cannot load TypeScript and dies immediately.
+	const result = spawner.spawnSync(
+		process.execPath,
+		[...process.execArgv, selfPath, "doctor", ...args],
+		{ stdio: "inherit", env },
+	);
+	return result.status ?? 1;
 }
