@@ -32,13 +32,7 @@ import {
 	logWarn,
 	redactSecrets,
 } from "@/lib/log.js";
-import {
-	CLI,
-	detectInstalledViaNpm,
-	execAsync,
-	type NpmTool,
-	PKG,
-} from "@/lib/npm.js";
+import { CLI, execAsync, type NpmTool, npmGlobalRoot, PKG } from "@/lib/npm.js";
 import {
 	backendHost,
 	hasProxyConfigured,
@@ -1375,12 +1369,20 @@ const installedAgentsCheck: Check = {
 	label: "Agents installed",
 	group: "state",
 	run: async () => {
-		const found: string[] = [];
-		for (const tool of NPM_TOOLS) {
-			if (await detectInstalledViaNpm(tool)) {
-				found.push(`${PKG[tool]} (${CLI[tool]})`);
-			}
+		// Resolve the global root ONCE. `detectInstalledViaNpm` looks it up per
+		// call, so a loop over four agents spawned `npm root -g` four times, in
+		// series, for an answer that cannot differ between them — about a second
+		// of pure waste in a command people run while already frustrated.
+		const root = await npmGlobalRoot();
+		if (!root) {
+			return {
+				status: "skip",
+				detail: "Could not resolve npm's global directory.",
+			};
 		}
+		const found = NPM_TOOLS.filter((tool) =>
+			existsSync(join(root, ...PKG[tool].split("/"))),
+		).map((tool) => `${PKG[tool]} (${CLI[tool]})`);
 		return found.length > 0
 			? { status: "pass", detail: found.join(", ") }
 			: {
