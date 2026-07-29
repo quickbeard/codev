@@ -107,30 +107,29 @@ export function maskProxyCredentials(url: string): string {
 	return url.replace(/(:\/\/[^:/@\s]+):[^@\s]*@/, "$1:***@");
 }
 
-/**
- * Every proxy/TLS-relevant environment variable that is actually set, in the
- * user's own spelling.
- *
- * `readProxyEnv` deliberately normalizes to a fixed set of fields, which is
- * what the logic needs — but it hides everything else, including
- * `NODE_EXTRA_CA_CERTS` (the remedy our own TLS guidance hands out) and npm's
- * `npm_config_*` overrides. On a machine where the network misbehaves, the
- * variable nobody thought to look at is usually the one causing it, so report
- * whatever is there rather than only what we modelled.
- */
-const REPORTED_ENV_VARS = [
+// Always reported, set or not. "unset" is an answer in its own right — most of
+// the failures this command exists for are a *missing* variable, and a reader
+// scanning for HTTP_PROXY should find it stated rather than have to infer its
+// absence from a list that only shows what happens to be present.
+const ALWAYS_REPORTED_ENV_VARS = [
 	"HTTP_PROXY",
-	"http_proxy",
 	"HTTPS_PROXY",
-	"https_proxy",
-	"ALL_PROXY",
-	"all_proxy",
 	"NO_PROXY",
-	"no_proxy",
 	"NODE_USE_ENV_PROXY",
 	"NODE_USE_SYSTEM_CA",
 	"NODE_EXTRA_CA_CERTS",
 	"NODE_TLS_REJECT_UNAUTHORIZED",
+] as const;
+
+// Reported only when set. Listing these as "unset" too would put eleven more
+// entries on the row for the overwhelming majority of users, and the lowercase
+// spellings would read as duplicates of the uppercase ones above.
+const WHEN_SET_ENV_VARS = [
+	"http_proxy",
+	"https_proxy",
+	"ALL_PROXY",
+	"all_proxy",
+	"no_proxy",
 	"NODE_OPTIONS",
 	"npm_config_proxy",
 	"npm_config_https_proxy",
@@ -139,11 +138,31 @@ const REPORTED_ENV_VARS = [
 	"npm_config_cafile",
 ] as const;
 
-export function setProxyEnvVars(
+export interface ProxyEnvVar {
+	name: string;
+	/** null when the variable is unset (or set to whitespace). */
+	value: string | null;
+}
+
+/**
+ * The proxy/TLS environment as shown to the user.
+ *
+ * `readProxyEnv` normalizes to a fixed set of fields, which is what the logic
+ * needs — but it hides everything else, including `NODE_EXTRA_CA_CERTS` (the
+ * remedy our own TLS guidance hands out) and npm's `npm_config_*` overrides.
+ * This reports the core variables always (with null for unset) plus anything
+ * else the user has set, in their own spelling.
+ */
+export function proxyEnvSummary(
 	env: NodeJS.ProcessEnv = process.env,
-): Array<{ name: string; value: string }> {
-	const out: Array<{ name: string; value: string }> = [];
-	for (const name of REPORTED_ENV_VARS) {
+): ProxyEnvVar[] {
+	const mask = (v: string | null) =>
+		v === null ? null : maskProxyCredentials(v);
+	const out: ProxyEnvVar[] = ALWAYS_REPORTED_ENV_VARS.map((name) => ({
+		name,
+		value: mask(nonEmpty(env[name])),
+	}));
+	for (const name of WHEN_SET_ENV_VARS) {
 		const value = nonEmpty(env[name]);
 		if (value !== null) out.push({ name, value: maskProxyCredentials(value) });
 	}

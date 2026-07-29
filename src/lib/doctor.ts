@@ -59,10 +59,11 @@ import {
 	maskProxyCredentials,
 	matchingNoProxyEntry,
 	type ProxyEnv,
+	type ProxyEnvVar,
 	proxyAutoEnabled,
+	proxyEnvSummary,
 	proxyForUrl,
 	readProxyEnv,
-	setProxyEnvVars,
 	stripNoProxyFor,
 } from "@/lib/proxy.js";
 import { spawner } from "@/lib/reexec.js";
@@ -1008,15 +1009,15 @@ const proxyEnvCheck: Check = {
 	run: async () => {
 		const env = readProxyEnv();
 		const host = backendHost();
-		// Report what is actually set, verbatim and in the user's own spelling —
-		// including variables we do not model (NODE_EXTRA_CA_CERTS, NODE_OPTIONS,
-		// npm's npm_config_*). On a machine where the network misbehaves, the
-		// variable nobody thought to look at is usually the culprit.
-		const set = setProxyEnvVars();
-		const detail =
-			set.length > 0
-				? set.map((v) => `${v.name}=${v.value}`).join(" · ")
-				: "No proxy or TLS environment variables are set.";
+		// The core variables are always listed, set or not: most of the failures
+		// this command exists for are a *missing* variable, so "unset" is an
+		// answer rather than an omission. Anything else the user has set is
+		// appended — including variables we do not model (NODE_OPTIONS, npm's
+		// npm_config_*), because on a misbehaving machine the one nobody thought
+		// to look at is usually the culprit.
+		const detail = proxyEnvSummary()
+			.map((v) => `${v.name}=${v.value ?? "unset"}`)
+			.join(" · ");
 
 		const problems: string[] = [];
 		if (hasProxyConfigured(env) && proxyAutoEnabled()) {
@@ -1701,8 +1702,11 @@ export interface DoctorReport {
 	node: { version: string; platform: string; arch: string };
 	proxy: ProxyEnv & {
 		autoEnabledByCodev: boolean;
-		/** Every proxy/TLS variable actually set, in the user's own spelling. */
-		environment: Array<{ name: string; value: string }>;
+		/**
+		 * The proxy/TLS environment as reported to the user: the core variables
+		 * always, with `null` for unset, plus anything else that is set.
+		 */
+		environment: ProxyEnvVar[];
 	};
 	summary: {
 		ok: boolean;
@@ -1811,7 +1815,7 @@ export function buildDoctorReport(
 		proxy: {
 			...maskProxyEnv(readProxyEnv()),
 			autoEnabledByCodev: proxyAutoEnabled(),
-			environment: setProxyEnvVars(),
+			environment: proxyEnvSummary(),
 		},
 		summary: {
 			ok: !hasFailure(outcomes),

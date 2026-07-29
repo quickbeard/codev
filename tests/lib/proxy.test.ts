@@ -10,10 +10,10 @@ import {
 	noProxyEntryMatches,
 	PROXY_APPLIED_ENV,
 	proxyAutoEnabled,
+	proxyEnvSummary,
 	proxyForUrl,
 	readProxyEnv,
 	resetProxyState,
-	setProxyEnvVars,
 	stripNoProxyFor,
 } from "@/lib/proxy.js";
 import { spawner } from "@/lib/reexec.js";
@@ -244,14 +244,36 @@ describe("credential masking", () => {
 	});
 });
 
-describe("setProxyEnvVars", () => {
-	test("reports only what is set, in the user's own spelling", () => {
+describe("proxyEnvSummary", () => {
+	// "unset" is an answer: most failures this command exists for are a
+	// *missing* variable, and a reader scanning for HTTP_PROXY should find it
+	// stated rather than infer its absence.
+	test("always lists the core variables, set or not", () => {
+		// Explicit env, not process.env: the package manager exports
+		// npm_config_registry for its own scripts, which would leak into an
+		// assertion about the exact list.
+		const summary = proxyEnvSummary({});
+		expect(summary.map((v) => v.name)).toEqual([
+			"HTTP_PROXY",
+			"HTTPS_PROXY",
+			"NO_PROXY",
+			"NODE_USE_ENV_PROXY",
+			"NODE_USE_SYSTEM_CA",
+			"NODE_EXTRA_CA_CERTS",
+			"NODE_TLS_REJECT_UNAUTHORIZED",
+		]);
+		for (const v of summary) expect(v.value).toBeNull();
+	});
+
+	test("reports a set variable in the user's own spelling", () => {
 		vi.stubEnv("http_proxy", "http://10.0.0.1:8080");
-		vi.stubEnv("NODE_USE_ENV_PROXY", "1");
-		const names = setProxyEnvVars().map((v) => v.name);
-		expect(names).toContain("http_proxy");
-		expect(names).toContain("NODE_USE_ENV_PROXY");
-		expect(names).not.toContain("HTTPS_PROXY");
+		const summary = proxyEnvSummary();
+		// The lowercase spelling is appended; the uppercase stays listed as unset
+		// rather than silently absorbing the lowercase value.
+		expect(summary.find((v) => v.name === "http_proxy")?.value).toBe(
+			"http://10.0.0.1:8080",
+		);
+		expect(summary.find((v) => v.name === "HTTP_PROXY")?.value).toBeNull();
 	});
 
 	// readProxyEnv models a fixed set of fields; anything outside it was
@@ -260,7 +282,7 @@ describe("setProxyEnvVars", () => {
 		vi.stubEnv("NODE_EXTRA_CA_CERTS", "/etc/ssl/corp.pem");
 		vi.stubEnv("npm_config_registry", "http://mirror.internal/npm");
 		vi.stubEnv("NODE_OPTIONS", "--max-old-space-size=4096");
-		const names = setProxyEnvVars().map((v) => v.name);
+		const names = proxyEnvSummary().map((v) => v.name);
 		expect(names).toEqual(
 			expect.arrayContaining([
 				"NODE_EXTRA_CA_CERTS",
@@ -272,15 +294,17 @@ describe("setProxyEnvVars", () => {
 
 	test("masks credentials in the reported values", () => {
 		vi.stubEnv("HTTPS_PROXY", "http://user:hunter2@10.0.0.1:8080");
-		const value = setProxyEnvVars().find(
+		const value = proxyEnvSummary().find(
 			(v) => v.name === "HTTPS_PROXY",
 		)?.value;
 		expect(value).toBe("http://user:***@10.0.0.1:8080");
 	});
 
-	test("an empty variable counts as unset", () => {
+	test("an empty variable is reported as unset, not as a blank value", () => {
 		vi.stubEnv("HTTP_PROXY", "   ");
-		expect(setProxyEnvVars().map((v) => v.name)).not.toContain("HTTP_PROXY");
+		expect(
+			proxyEnvSummary().find((v) => v.name === "HTTP_PROXY")?.value,
+		).toBeNull();
 	});
 });
 
