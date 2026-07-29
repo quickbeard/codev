@@ -310,6 +310,10 @@ describe("DoctorApp", () => {
 		expect(output).toContain("even though a proxy is configured");
 		expect(output).toContain("http://10.0.0.1:8080");
 		expect(output).toContain("Enter to keep the current one");
+		// The examples belong on BOTH variants — someone correcting a wrong proxy
+		// needs the syntax just as much as someone entering their first one.
+		expect(output).toContain("Examples:");
+		expect(output).toContain("user:pass@");
 	});
 
 	test("offers concrete examples of what to type", async () => {
