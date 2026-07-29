@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { Box, Text, useApp } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityLog } from "@/components/ActivityLog.js";
 import { Banner } from "@/components/Banner.js";
 import { CheckList } from "@/components/CheckList.js";
 import { Frame } from "@/components/Frame.js";
@@ -383,6 +384,18 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 								<CheckList {...groupProps(group)} />
 							</Step>
 						),
+				)}
+
+				{/* Evidence before the verdict, deliberately the reverse of a check
+				    row. Within a row the activity lines come last so they cannot push
+				    the fix off screen; at run level the same reasoning inverts, since
+				    what must survive on screen is the Result step — the summary line,
+				    the numbered next steps and the report path. A list of every
+				    command and endpoint printed after those would scroll them away. */}
+				{phase === "done" && (
+					<Step title={<Text bold>Activity</Text>}>
+						<ActivityLog commands={commands} requests={requests} />
+					</Step>
 				)}
 
 				{phase === "done" && (

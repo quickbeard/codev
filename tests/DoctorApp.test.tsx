@@ -170,6 +170,33 @@ describe("DoctorApp", () => {
 		expect(doctorOutcome.exitCode).toBe(0);
 	});
 
+	// The run-wide inventories, distinct from the per-check activity lines: they
+	// answer "what did this just run on my machine?" and "which hosts do I have
+	// to allow-list?" without the reader correlating a dozen rows. `loggedFetch`
+	// is stubbed here so no request is ever recorded — the endpoints half is
+	// covered in tests/components/ActivityLog.test.tsx.
+	test("the run inventories every command it spawned, above the verdict", async () => {
+		stubHappyPath();
+		const { frames } = render(<DoctorApp />);
+
+		await waitForFrame(frames, "Commands run");
+		// The last frame that still has the section: the app exits ~1s after the
+		// terminal phase, and joining every frame would interleave the growing
+		// check list with the finished one and make ordering meaningless.
+		const frame = frames.filter((f) => f.includes("Commands run")).at(-1) ?? "";
+
+		expect(frame).toContain("Activity");
+		// Every npm probe the run made, whichever check made it. The exact,
+		// ordered inventory is pinned in tests/lib/doctor-commands.test.ts.
+		expect(frame).toContain("✓ npm -v");
+		expect(frame).toContain("✓ npm config get registry");
+		expect(frame).toContain("✓ npm view codev-ai version");
+
+		// Evidence sits above the verdict: the summary line, the numbered next
+		// steps and the report path are what has to survive on screen.
+		expect(frame.indexOf("Commands run")).toBeLessThan(frame.indexOf("Result"));
+	});
+
 	test("a failing LLM completion fails the run and explains itself", async () => {
 		stubHappyPath();
 		vi.spyOn(backend, "smokeTestModel").mockResolvedValue(
