@@ -56,10 +56,13 @@ import { doctorReportPath } from "@/lib/paths.js";
 import {
 	backendHost,
 	hasProxyConfigured,
+	maskProxyCredentials,
 	matchingNoProxyEntry,
 	type ProxyEnv,
 	proxyAutoEnabled,
+	proxyForUrl,
 	readProxyEnv,
+	setProxyEnvVars,
 	stripNoProxyFor,
 } from "@/lib/proxy.js";
 import { spawner } from "@/lib/reexec.js";
@@ -301,8 +304,12 @@ function renderChain(chain: ErrorLink[]): string[] {
 function proxyDescription(proxy: ProxyEnv): string {
 	if (!hasProxyConfigured(proxy)) return "proxy: none";
 	const parts: string[] = [];
-	if (proxy.httpsProxy) parts.push(`HTTPS_PROXY=${proxy.httpsProxy}`);
-	if (proxy.httpProxy) parts.push(`HTTP_PROXY=${proxy.httpProxy}`);
+	if (proxy.httpsProxy) {
+		parts.push(`HTTPS_PROXY=${maskProxyCredentials(proxy.httpsProxy)}`);
+	}
+	if (proxy.httpProxy) {
+		parts.push(`HTTP_PROXY=${maskProxyCredentials(proxy.httpProxy)}`);
+	}
 	return `proxy: ${parts.join(" · ")}`;
 }
 
@@ -1001,17 +1008,15 @@ const proxyEnvCheck: Check = {
 	run: async () => {
 		const env = readProxyEnv();
 		const host = backendHost();
-		const parts = [
-			`HTTP_PROXY: ${env.httpProxy ?? "unset"}`,
-			`HTTPS_PROXY: ${env.httpsProxy ?? "unset"}`,
-			`NO_PROXY: ${env.noProxy ?? "unset"}`,
-			`NODE_USE_ENV_PROXY: ${env.useEnvProxy ? "on" : "unset"}`,
-			`NODE_USE_SYSTEM_CA: ${env.useSystemCa ? "on" : "unset"}`,
-		];
-		if (env.tlsRejectUnauthorized !== null) {
-			parts.push(`NODE_TLS_REJECT_UNAUTHORIZED: ${env.tlsRejectUnauthorized}`);
-		}
-		const detail = parts.join(" · ");
+		// Report what is actually set, verbatim and in the user's own spelling —
+		// including variables we do not model (NODE_EXTRA_CA_CERTS, NODE_OPTIONS,
+		// npm's npm_config_*). On a machine where the network misbehaves, the
+		// variable nobody thought to look at is usually the culprit.
+		const set = setProxyEnvVars();
+		const detail =
+			set.length > 0
+				? set.map((v) => `${v.name}=${v.value}`).join(" · ")
+				: "No proxy or TLS environment variables are set.";
 
 		const problems: string[] = [];
 		if (hasProxyConfigured(env) && proxyAutoEnabled()) {
@@ -1694,7 +1699,11 @@ export interface DoctorReport {
 	generatedAt: string;
 	codevVersion: string;
 	node: { version: string; platform: string; arch: string };
-	proxy: ProxyEnv & { autoEnabledByCodev: boolean };
+	proxy: ProxyEnv & {
+		autoEnabledByCodev: boolean;
+		/** Every proxy/TLS variable actually set, in the user's own spelling. */
+		environment: Array<{ name: string; value: string }>;
+	};
 	summary: {
 		ok: boolean;
 		passed: number;
@@ -1747,13 +1756,22 @@ export function collectActivity(
 			detail: c.command,
 			durationMs: c.durationMs,
 		})),
-		...requestLog.entries.slice(requestsBefore).map((r) => ({
-			kind: "request" as const,
-			// The status belongs on the line: it is what distinguishes "the
-			// endpoint answered no" from "nothing answered at all".
-			detail: `${r.method} ${r.url} → ${r.status ?? "no response"}`,
-			durationMs: r.durationMs,
-		})),
+		...requestLog.entries.slice(requestsBefore).map((r) => {
+			// Naming the proxy the request actually went through is the difference
+			// between "this endpoint is unreachable" and "your proxy could not
+			// reach this endpoint" — and it is the only way to see, per request,
+			// that a NO_PROXY entry quietly sent one of them direct.
+			const via = proxyForUrl(r.url);
+			return {
+				kind: "request" as const,
+				// The status belongs on the line: it is what distinguishes "the
+				// endpoint answered no" from "nothing answered at all".
+				detail: `${r.method} ${r.url} → ${r.status ?? "no response"}${
+					via ? ` via ${via}` : ""
+				}`,
+				durationMs: r.durationMs,
+			};
+		}),
 	];
 	return activity.length > 0 ? activity : undefined;
 }
@@ -1763,6 +1781,14 @@ export function activityMark(): { commands: number; requests: number } {
 	return {
 		commands: commandLog.entries.length,
 		requests: requestLog.entries.length,
+	};
+}
+
+function maskProxyEnv(env: ProxyEnv): ProxyEnv {
+	return {
+		...env,
+		httpProxy: env.httpProxy ? maskProxyCredentials(env.httpProxy) : null,
+		httpsProxy: env.httpsProxy ? maskProxyCredentials(env.httpsProxy) : null,
 	};
 }
 
@@ -1781,7 +1807,12 @@ export function buildDoctorReport(
 			platform: process.platform,
 			arch: process.arch,
 		},
-		proxy: { ...readProxyEnv(), autoEnabledByCodev: proxyAutoEnabled() },
+		// Credentials masked: the report is written to be attached to tickets.
+		proxy: {
+			...maskProxyEnv(readProxyEnv()),
+			autoEnabledByCodev: proxyAutoEnabled(),
+			environment: setProxyEnvVars(),
+		},
 		summary: {
 			ok: !hasFailure(outcomes),
 			passed: count("pass"),

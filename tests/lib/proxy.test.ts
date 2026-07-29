@@ -5,12 +5,15 @@ import {
 	backendHost,
 	hasProxyConfigured,
 	httpApi,
+	maskProxyCredentials,
 	matchingNoProxyEntry,
 	noProxyEntryMatches,
 	PROXY_APPLIED_ENV,
 	proxyAutoEnabled,
+	proxyForUrl,
 	readProxyEnv,
 	resetProxyState,
+	setProxyEnvVars,
 	stripNoProxyFor,
 } from "@/lib/proxy.js";
 import { spawner } from "@/lib/reexec.js";
@@ -218,5 +221,108 @@ describe("applyEnvProxy", () => {
 		const result = applyEnvProxy();
 		expect(result.action).toBe("applied");
 		expect(result.noProxyWarning).toContain("*.viettel.vn");
+	});
+});
+
+// Proxy URLs routinely carry credentials, and every place one is displayed —
+// the check row, the per-request activity lines, the report file — is somewhere
+// a user pastes into a ticket or a chat.
+describe("credential masking", () => {
+	test.each([
+		["http://user:hunter2@10.0.0.1:8080", "http://user:***@10.0.0.1:8080"],
+		["https://svc:p%40ss@proxy.corp:3128", "https://svc:***@proxy.corp:3128"],
+		// Nothing to mask — left byte-identical.
+		["http://10.0.0.1:8080", "http://10.0.0.1:8080"],
+		["http://user@10.0.0.1:8080", "http://user@10.0.0.1:8080"],
+	])("%s → %s", (input, expected) => {
+		expect(maskProxyCredentials(input)).toBe(expected);
+	});
+
+	test("readProxyEnv keeps the real value — the retry child must authenticate", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://user:hunter2@10.0.0.1:8080");
+		expect(readProxyEnv().httpsProxy).toBe("http://user:hunter2@10.0.0.1:8080");
+	});
+});
+
+describe("setProxyEnvVars", () => {
+	test("reports only what is set, in the user's own spelling", () => {
+		vi.stubEnv("http_proxy", "http://10.0.0.1:8080");
+		vi.stubEnv("NODE_USE_ENV_PROXY", "1");
+		const names = setProxyEnvVars().map((v) => v.name);
+		expect(names).toContain("http_proxy");
+		expect(names).toContain("NODE_USE_ENV_PROXY");
+		expect(names).not.toContain("HTTPS_PROXY");
+	});
+
+	// readProxyEnv models a fixed set of fields; anything outside it was
+	// invisible, including the remedy our own TLS guidance hands out.
+	test("includes variables readProxyEnv does not model", () => {
+		vi.stubEnv("NODE_EXTRA_CA_CERTS", "/etc/ssl/corp.pem");
+		vi.stubEnv("npm_config_registry", "http://mirror.internal/npm");
+		vi.stubEnv("NODE_OPTIONS", "--max-old-space-size=4096");
+		const names = setProxyEnvVars().map((v) => v.name);
+		expect(names).toEqual(
+			expect.arrayContaining([
+				"NODE_EXTRA_CA_CERTS",
+				"npm_config_registry",
+				"NODE_OPTIONS",
+			]),
+		);
+	});
+
+	test("masks credentials in the reported values", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://user:hunter2@10.0.0.1:8080");
+		const value = setProxyEnvVars().find(
+			(v) => v.name === "HTTPS_PROXY",
+		)?.value;
+		expect(value).toBe("http://user:***@10.0.0.1:8080");
+	});
+
+	test("an empty variable counts as unset", () => {
+		vi.stubEnv("HTTP_PROXY", "   ");
+		expect(setProxyEnvVars().map((v) => v.name)).not.toContain("HTTP_PROXY");
+	});
+});
+
+describe("proxyForUrl", () => {
+	test("returns null when Node was never told to use the proxy", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://10.0.0.1:8080");
+		// NODE_USE_ENV_PROXY unset — the proxy is configured but ignored, so no
+		// request actually went through it and claiming otherwise would mislead.
+		expect(proxyForUrl("https://api.example.com/x")).toBeNull();
+	});
+
+	test("picks the proxy matching the URL's scheme", () => {
+		vi.stubEnv("HTTP_PROXY", "http://plain:80");
+		vi.stubEnv("HTTPS_PROXY", "http://secure:443");
+		vi.stubEnv("NODE_USE_ENV_PROXY", "1");
+		expect(proxyForUrl("https://api.example.com/x")).toBe("http://secure:443");
+		expect(proxyForUrl("http://api.example.com/x")).toBe("http://plain:80");
+	});
+
+	// The per-request view is the only place a NO_PROXY exemption becomes
+	// visible: one request quietly going direct while the rest are proxied.
+	test("returns null for a host exempted by NO_PROXY", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://10.0.0.1:8080");
+		vi.stubEnv("NODE_USE_ENV_PROXY", "1");
+		vi.stubEnv("NO_PROXY", "*.viettel.vn");
+		expect(proxyForUrl("https://netmind.viettel.vn/x")).toBeNull();
+		expect(proxyForUrl("https://other.example.com/x")).toBe(
+			"http://10.0.0.1:8080",
+		);
+	});
+
+	test("masks credentials", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://user:hunter2@10.0.0.1:8080");
+		vi.stubEnv("NODE_USE_ENV_PROXY", "1");
+		expect(proxyForUrl("https://api.example.com/x")).toBe(
+			"http://user:***@10.0.0.1:8080",
+		);
+	});
+
+	test("an unparseable URL is not attributed to a proxy", () => {
+		vi.stubEnv("HTTPS_PROXY", "http://10.0.0.1:8080");
+		vi.stubEnv("NODE_USE_ENV_PROXY", "1");
+		expect(proxyForUrl("not a url")).toBeNull();
 	});
 });

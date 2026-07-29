@@ -94,6 +94,86 @@ export function hasProxyConfigured(proxy: ProxyEnv): boolean {
 	return proxy.httpProxy !== null || proxy.httpsProxy !== null;
 }
 
+/**
+ * `http://user:hunter2@10.0.0.1:8080` → `http://user:***@10.0.0.1:8080`.
+ *
+ * Proxy URLs routinely carry credentials, and every place we display one — the
+ * check row, the per-request activity lines, the report file — is somewhere a
+ * user pastes into a ticket or a chat. Masking happens at the display boundary
+ * only: `readProxyEnv` keeps the real value, because the child process of the
+ * proxy retry needs to actually authenticate.
+ */
+export function maskProxyCredentials(url: string): string {
+	return url.replace(/(:\/\/[^:/@\s]+):[^@\s]*@/, "$1:***@");
+}
+
+/**
+ * Every proxy/TLS-relevant environment variable that is actually set, in the
+ * user's own spelling.
+ *
+ * `readProxyEnv` deliberately normalizes to a fixed set of fields, which is
+ * what the logic needs — but it hides everything else, including
+ * `NODE_EXTRA_CA_CERTS` (the remedy our own TLS guidance hands out) and npm's
+ * `npm_config_*` overrides. On a machine where the network misbehaves, the
+ * variable nobody thought to look at is usually the one causing it, so report
+ * whatever is there rather than only what we modelled.
+ */
+const REPORTED_ENV_VARS = [
+	"HTTP_PROXY",
+	"http_proxy",
+	"HTTPS_PROXY",
+	"https_proxy",
+	"ALL_PROXY",
+	"all_proxy",
+	"NO_PROXY",
+	"no_proxy",
+	"NODE_USE_ENV_PROXY",
+	"NODE_USE_SYSTEM_CA",
+	"NODE_EXTRA_CA_CERTS",
+	"NODE_TLS_REJECT_UNAUTHORIZED",
+	"NODE_OPTIONS",
+	"npm_config_proxy",
+	"npm_config_https_proxy",
+	"npm_config_registry",
+	"npm_config_strict_ssl",
+	"npm_config_cafile",
+] as const;
+
+export function setProxyEnvVars(
+	env: NodeJS.ProcessEnv = process.env,
+): Array<{ name: string; value: string }> {
+	const out: Array<{ name: string; value: string }> = [];
+	for (const name of REPORTED_ENV_VARS) {
+		const value = nonEmpty(env[name]);
+		if (value !== null) out.push({ name, value: maskProxyCredentials(value) });
+	}
+	return out;
+}
+
+/**
+ * The proxy that applies to a given URL, or null when none does — accounting
+ * for the scheme, for NO_PROXY, and for whether Node was actually told to use
+ * a proxy at all.
+ */
+export function proxyForUrl(
+	url: string,
+	proxy: ProxyEnv = readProxyEnv(),
+): string | null {
+	if (!proxy.useEnvProxy) return null;
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return null;
+	}
+	if (matchingNoProxyEntry(proxy, parsed.hostname)) return null;
+	const chosen =
+		parsed.protocol === "https:"
+			? (proxy.httpsProxy ?? proxy.httpProxy)
+			: (proxy.httpProxy ?? proxy.httpsProxy);
+	return chosen ? maskProxyCredentials(chosen) : null;
+}
+
 /** The host CoDev's backend, SSO wrapper and skill hub all live on. */
 export function backendHost(): string {
 	try {
