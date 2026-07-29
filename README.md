@@ -50,8 +50,13 @@ through a proxy you type in (nothing is written to disk), so you see the fix
 work before it prints the exact `export` / `setx` commands to make it permanent.
 
 Exit code is 0 when nothing failed — warnings do not fail it — and 1 otherwise.
-Every result also lands in the diagnostic log, so `codevhub logs` captures a
-whole run for a support ticket.
+
+Every run also writes a machine-readable report to
+**`~/.codev-hub/doctor-report.json`**, replacing the previous one. It holds the
+full results, diagnoses, your Node and proxy environment, and the suggested next
+steps — attach it to a support ticket rather than pasting screenshots. Secrets
+are scrubbed before it is written. The same results additionally land in the
+diagnostic log, so `codevhub logs` can replay a whole run.
 
 ### Working behind a proxy
 

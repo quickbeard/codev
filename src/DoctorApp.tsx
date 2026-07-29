@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { Box, Text, useApp } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Banner } from "@/components/Banner.js";
@@ -11,6 +12,7 @@ import { SSO_URL } from "@/lib/const.js";
 import {
 	ACCOUNT_CHECKS,
 	alreadyRetriedWithProxy,
+	buildDoctorReport,
 	buildNextSteps,
 	type Check,
 	type CheckGroup,
@@ -24,6 +26,7 @@ import {
 	NETWORK_CHECKS,
 	runChecks,
 	STATE_CHECKS,
+	writeDoctorReport,
 } from "@/lib/doctor.js";
 import { logDebug } from "@/lib/log.js";
 import { readProxyEnv } from "@/lib/proxy.js";
@@ -106,6 +109,9 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 	// summary and the exit code, so it gets an outcome of its own.
 	const [loginOutcome, setLoginOutcome] = useState<CheckOutcome | null>(null);
 	const [proxyUrl, setProxyUrl] = useState<string | null>(null);
+	// Where the machine-readable report landed, so the summary can point at it.
+	// null when the write failed — best-effort, never fatal.
+	const [reportPath, setReportPath] = useState<string | null>(null);
 	const didPrepRef = useRef(false);
 	// Checks mutate the context as they resolve (token → key → gateway URL →
 	// models), so it must be a ref: a state read would see a stale snapshot
@@ -213,8 +219,8 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 		setPhase("account");
 	}, []);
 
-	// Terminal phase: compute the exit code, then hold the frame briefly so Ink
-	// flushes the summary before unmounting.
+	// Terminal phase: write the report, compute the exit code, then hold the
+	// frame briefly so Ink flushes the summary before unmounting.
 	useEffect(() => {
 		if (phase !== "done") return;
 		const all = [
@@ -225,9 +231,20 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 			...outcomes.llm,
 		];
 		doctorOutcome.exitCode = hasFailure(all) ? 1 : 0;
+		// The `state` group is informational, but it belongs in the file — it is
+		// what tells support what was already on the machine.
+		setReportPath(
+			writeDoctorReport(
+				buildDoctorReport(
+					[...all, ...outcomes.state],
+					new Date().toISOString(),
+					proxyUrl ? { http: proxyUrl, https: proxyUrl } : undefined,
+				),
+			),
+		);
 		const timer = setTimeout(() => exit(), 1000);
 		return () => clearTimeout(timer);
-	}, [phase, outcomes, loginOutcome, exit]);
+	}, [phase, outcomes, loginOutcome, proxyUrl, exit]);
 
 	const groupProps = (group: CheckGroup) => {
 		const done = outcomes[group];
@@ -327,7 +344,11 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 
 				{phase === "done" && (
 					<Step title={<Text bold>Result</Text>}>
-						<Summary outcomes={allOutcomes} nextSteps={nextSteps} />
+						<Summary
+							outcomes={allOutcomes}
+							nextSteps={nextSteps}
+							reportPath={reportPath}
+						/>
 					</Step>
 				)}
 			</Frame>
@@ -335,12 +356,24 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 	);
 }
 
+/**
+ * `/Users/minh/.codev-hub/x` → `~/.codev-hub/x`. Shorter (so it does not wrap)
+ * and directly usable in a shell — both zsh/bash and PowerShell expand `~`.
+ * Returns the path untouched when it is not under the home directory.
+ */
+function abbreviateHome(path: string): string {
+	const home = homedir();
+	return home && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
+}
+
 function Summary({
 	outcomes,
 	nextSteps,
+	reportPath,
 }: {
 	outcomes: CheckOutcome[];
 	nextSteps: string[];
+	reportPath: string | null;
 }) {
 	const failed = outcomes.filter((o) => o.status === "fail").length;
 	const warned = outcomes.filter((o) => o.status === "warn").length;
@@ -375,6 +408,18 @@ function Summary({
 							{line}
 						</Text>
 					))}
+				</Box>
+			)}
+			{/* Naming the file is the point of writing it — an artifact nobody
+			    knows about cannot help a support conversation. Abbreviated to `~`
+			    so it stays on one line: a path that wraps picks up the Step's
+			    `│  ` gutter on continuation lines, which corrupts it when copied
+			    (the same trap Login.tsx documents for the sign-in URL). */}
+			{reportPath && (
+				<Box marginTop={1}>
+					<Text dimColor>
+						{`Full report saved to ${abbreviateHome(reportPath)} — attach it to a support ticket.`}
+					</Text>
 				</Box>
 			)}
 		</Box>

@@ -1,9 +1,21 @@
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as backend from "@/lib/backend.js";
+import { VERSION } from "@/lib/const.js";
 import {
+	buildDoctorReport,
 	buildNextSteps,
 	type CheckOutcome,
 	DOCTOR_PROXY_ENV,
+	type DoctorReport,
 	describeFailure,
 	diagnoseError,
 	diagnoseExec,
@@ -20,6 +32,7 @@ import {
 	renderDiagnosisCompact,
 	rerunDoctorWithProxy,
 	runChecks,
+	writeDoctorReport,
 } from "@/lib/doctor.js";
 import * as log from "@/lib/log.js";
 import * as npm from "@/lib/npm.js";
@@ -964,6 +977,126 @@ describe("remediation output", () => {
 		}
 		// npm's proxy config is separate from the shell's, and users miss this.
 		expect(lines).toContain("npm config set https-proxy");
+	});
+});
+
+describe("the doctor report file", () => {
+	let home: string;
+
+	beforeEach(() => {
+		home = mkdtempSync(join(tmpdir(), "codev-report-"));
+		vi.stubEnv("HOME", home);
+		vi.stubEnv("USERPROFILE", home);
+	});
+
+	afterEach(() => {
+		rmSync(home, { recursive: true, force: true });
+	});
+
+	const outcomes: CheckOutcome[] = [
+		{
+			key: "node-version",
+			label: "Node.js version",
+			group: "environment",
+			status: "pass",
+			detail: "Node 24.15.0.",
+		},
+		{
+			key: "backend-reach",
+			label: "Reach the CoDev backend",
+			group: "network",
+			status: "fail",
+			detail: "Timed out.",
+			fix: "Set HTTP_PROXY, HTTPS_PROXY and NODE_USE_ENV_PROXY=1.",
+		},
+	];
+
+	function write(at = "2026-07-29T00:00:00.000Z") {
+		return writeDoctorReport(buildDoctorReport(outcomes, at));
+	}
+
+	test("lands at ~/.codev-hub/doctor-report.json", () => {
+		const path = write();
+		expect(path).toBe(join(home, ".codev-hub", "doctor-report.json"));
+		expect(existsSync(path as string)).toBe(true);
+	});
+
+	test("creates ~/.codev-hub when the machine has never run CoDev", () => {
+		// The audience for `doctor` is precisely someone who has not installed
+		// yet, so the directory usually does not exist.
+		expect(existsSync(join(home, ".codev-hub"))).toBe(false);
+		expect(write()).not.toBeNull();
+	});
+
+	test("records the results, the summary and the environment", () => {
+		const report = JSON.parse(
+			readFileSync(write() as string, "utf-8"),
+		) as DoctorReport;
+		expect(report.summary).toMatchObject({
+			ok: false,
+			passed: 1,
+			failed: 1,
+			warned: 0,
+			skipped: 0,
+		});
+		expect(report.checks).toHaveLength(2);
+		expect(report.checks[1]?.fix).toContain("NODE_USE_ENV_PROXY");
+		expect(report.nextSteps.join("\n")).toContain("codevhub install");
+		expect(report.node.version).toBe(process.version);
+		expect(report.codevVersion).toBe(VERSION);
+		expect(report.generatedAt).toBe("2026-07-29T00:00:00.000Z");
+	});
+
+	// A stale report is worse than none when someone attaches it to a ticket.
+	test("every run replaces the previous report", () => {
+		write("2026-07-29T00:00:00.000Z");
+		const path = write("2026-07-30T11:22:33.000Z") as string;
+		const raw = readFileSync(path, "utf-8");
+		expect(raw).toContain("2026-07-30T11:22:33.000Z");
+		expect(raw).not.toContain("2026-07-29T00:00:00.000Z");
+		// Replaced, not appended — it must still be a single JSON document.
+		expect(() => JSON.parse(raw)).not.toThrow();
+	});
+
+	// This file exists to be attached to tickets, so it is the last place a
+	// credential should survive.
+	test("scrubs credentials before writing", () => {
+		const path = writeDoctorReport(
+			buildDoctorReport(
+				[
+					{
+						key: "api-key",
+						label: "Fetch a gateway API key",
+						group: "account",
+						status: "fail",
+						detail: "rejected: Authorization: Bearer abc123def456ghi",
+						diagnosis: {
+							what: "w",
+							cause: "c",
+							fix: "f",
+							context: [],
+							raw: ["token sk-livesecretvalue123 leaked"],
+						},
+					},
+				],
+				"2026-07-29T00:00:00.000Z",
+			),
+		) as string;
+		const raw = readFileSync(path, "utf-8");
+		expect(raw).not.toContain("abc123def456ghi");
+		expect(raw).not.toContain("sk-livesecretvalue123");
+		expect(raw).toContain("[REDACTED");
+		// Scrubbing must not corrupt the JSON.
+		expect(() => JSON.parse(raw)).not.toThrow();
+	});
+
+	// Matches the discipline in lib/log.ts: a diagnostic that breaks the command
+	// it is diagnosing is worse than no diagnostic.
+	test("an unwritable location is survivable, not fatal", () => {
+		// A plain file where ~/.codev-hub must be a directory: mkdirSync cannot
+		// proceed, which is the realistic shape of "we could not write here".
+		writeFileSync(join(home, ".codev-hub"), "not a directory");
+		expect(write()).toBeNull();
 	});
 });
 

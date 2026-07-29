@@ -1,5 +1,11 @@
-import { accessSync, existsSync, constants as fsConstants } from "node:fs";
-import { delimiter, join } from "node:path";
+import {
+	accessSync,
+	existsSync,
+	constants as fsConstants,
+	mkdirSync,
+	writeFileSync,
+} from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 import { loadApiKey } from "@/lib/auth.js";
 import {
 	fetchApiKey,
@@ -22,6 +28,7 @@ import {
 	nodeVersionMeets,
 	parseNodeVersion,
 	RECOMMENDED_NODE,
+	VERSION,
 } from "@/lib/const.js";
 import {
 	currentTraceId,
@@ -33,6 +40,7 @@ import {
 	redactSecrets,
 } from "@/lib/log.js";
 import { CLI, execAsync, type NpmTool, npmGlobalRoot, PKG } from "@/lib/npm.js";
+import { doctorReportPath } from "@/lib/paths.js";
 import {
 	backendHost,
 	hasProxyConfigured,
@@ -1638,6 +1646,93 @@ export function buildNextSteps(
 		"Re-run `codevhub doctor` to confirm, then run `codevhub install`.",
 	);
 	return lines;
+}
+
+// ---------------------------------------------------------------------------
+// Report file
+// ---------------------------------------------------------------------------
+
+export interface DoctorReport {
+	generatedAt: string;
+	codevVersion: string;
+	node: { version: string; platform: string; arch: string };
+	proxy: ProxyEnv & { autoEnabledByCodev: boolean };
+	summary: {
+		ok: boolean;
+		passed: number;
+		warned: number;
+		failed: number;
+		skipped: number;
+	};
+	checks: CheckOutcome[];
+	nextSteps: string[];
+}
+
+export function buildDoctorReport(
+	outcomes: CheckOutcome[],
+	generatedAt: string,
+	proxyUsed?: { http?: string; https?: string },
+): DoctorReport {
+	const count = (s: CheckStatus) =>
+		outcomes.filter((o) => o.status === s).length;
+	return {
+		generatedAt,
+		codevVersion: VERSION,
+		node: {
+			version: process.version,
+			platform: process.platform,
+			arch: process.arch,
+		},
+		proxy: { ...readProxyEnv(), autoEnabledByCodev: proxyAutoEnabled() },
+		summary: {
+			ok: !hasFailure(outcomes),
+			passed: count("pass"),
+			warned: count("warn"),
+			failed: count("fail"),
+			skipped: count("skip"),
+		},
+		checks: outcomes,
+		nextSteps: buildNextSteps(outcomes, proxyUsed),
+	};
+}
+
+/**
+ * Write the machine-readable report to ~/.codev-hub/doctor-report.json,
+ * replacing any previous one.
+ *
+ * Best-effort by construction, matching the logging discipline in lib/log.ts:
+ * a diagnostic that breaks the command it is diagnosing is worse than no
+ * diagnostic. Returns the path on success, null if anything went wrong.
+ *
+ * The serialized JSON goes through the same secret scrubbing as the terminal
+ * output and the NDJSON log — this file exists to be attached to tickets, so
+ * it is the *last* place a token should survive. Scrubbing after
+ * stringification is safe: every replacement is plain text and none of the
+ * patterns can match across a JSON quote or escape.
+ */
+export function writeDoctorReport(report: DoctorReport): string | null {
+	try {
+		const path = doctorReportPath();
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(
+			path,
+			`${redactSecrets(JSON.stringify(report, null, 2))}\n`,
+			"utf-8",
+		);
+		logInfo("wrote doctor report", {
+			action: "doctor.report",
+			outcome: "success",
+			extra: { checks: report.checks.length, ok: report.summary.ok },
+		});
+		return path;
+	} catch (err) {
+		logWarn("could not write the doctor report", {
+			action: "doctor.report",
+			outcome: "failure",
+			err,
+		});
+		return null;
+	}
 }
 
 // ---------------------------------------------------------------------------
