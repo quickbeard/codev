@@ -107,6 +107,18 @@ function CheckRow({ outcome }: { outcome: CheckOutcome }) {
 					))}
 				</Box>
 			)}
+			{/* What this check actually ran, under the check that ran it —
+			    "what is this doing on my machine?" answered in place rather
+			    than in a separate list the reader has to correlate.
+			    Last, deliberately: status, then what, then what to do, then the
+			    evidence. Putting it above the fix pushed the one actionable line
+			    down the screen. No status icon either — the row's own icon is the
+			    verdict, and marking an expected 401 red here would contradict it. */}
+			{outcome.activity?.map((a, i) => (
+				<Box key={`act-${outcome.key}-${i.toString()}`} paddingLeft={2}>
+					<Text dimColor>{`↳ ${a.detail}  (${a.durationMs}ms)`}</Text>
+				</Box>
+			))}
 		</Box>
 	);
 }

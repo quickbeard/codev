@@ -11,12 +11,14 @@ import { type AuthData, logout } from "@/lib/auth.js";
 import { SSO_URL } from "@/lib/const.js";
 import {
 	ACCOUNT_CHECKS,
+	activityMark,
 	alreadyRetriedWithProxy,
 	buildDoctorReport,
 	buildNextSteps,
 	type Check,
 	type CheckGroup,
 	type CheckOutcome,
+	collectActivity,
 	type DoctorContext,
 	diagnoseError,
 	doctorOutcome,
@@ -134,10 +136,27 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 		});
 	}, [phase]);
 
-	// Start recording before any check runs, so the "Commands run" section can
-	// show the user exactly what was executed on their machine.
+	// Start recording before any check runs, so each row can show exactly what
+	// it executed on the user's machine.
 	useEffect(() => {
 		startCommandRecording();
+	}, []);
+
+	// Sign-in is the one step not run through runChecks — <Login> owns it — so
+	// its requests need marking by hand or they would be the only work in the
+	// run with no row to sit under.
+	const loginMarkRef = useRef<{ commands: number; requests: number } | null>(
+		null,
+	);
+	useEffect(() => {
+		if (phase === "login" && !loginMarkRef.current) {
+			loginMarkRef.current = activityMark();
+		}
+	}, [phase]);
+
+	const loginActivity = useCallback(() => {
+		const mark = loginMarkRef.current;
+		return mark ? collectActivity(mark.commands, mark.requests) : undefined;
 	}, []);
 
 	// --force wipes the cached session first, so `sso-login` measures a real
@@ -205,33 +224,41 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 		[exit],
 	);
 
-	const handleLoginDone = useCallback((auth: AuthData) => {
-		ctxRef.current.accessToken = auth.access_token;
-		setLoginOutcome({
-			key: "sso-login",
-			label: "Sign in to SSO",
-			group: "account",
-			status: "pass",
-			detail: `Signed in as ${auth.user.email}.`,
-		});
-		setPhase("account");
-	}, []);
+	const handleLoginDone = useCallback(
+		(auth: AuthData) => {
+			ctxRef.current.accessToken = auth.access_token;
+			setLoginOutcome({
+				key: "sso-login",
+				label: "Sign in to SSO",
+				group: "account",
+				status: "pass",
+				detail: `Signed in as ${auth.user.email}.`,
+				activity: loginActivity(),
+			});
+			setPhase("account");
+		},
+		[loginActivity],
+	);
 
-	const handleLoginError = useCallback((err: unknown) => {
-		const diagnosis = diagnoseError(err, { url: SSO_URL, method: "GET" });
-		setLoginOutcome({
-			key: "sso-login",
-			label: "Sign in to SSO",
-			group: "account",
-			status: "fail",
-			detail: diagnosis.what,
-			fix: diagnosis.fix,
-			diagnosis,
-		});
-		// Keep going. The account/LLM checks report themselves as skipped without
-		// a token, which tells the reader exactly how far the flow got.
-		setPhase("account");
-	}, []);
+	const handleLoginError = useCallback(
+		(err: unknown) => {
+			const diagnosis = diagnoseError(err, { url: SSO_URL, method: "GET" });
+			setLoginOutcome({
+				key: "sso-login",
+				label: "Sign in to SSO",
+				group: "account",
+				status: "fail",
+				detail: diagnosis.what,
+				fix: diagnosis.fix,
+				diagnosis,
+				activity: loginActivity(),
+			});
+			// Keep going. The account/LLM checks report themselves as skipped without
+			// a token, which tells the reader exactly how far the flow got.
+			setPhase("account");
+		},
+		[loginActivity],
+	);
 
 	// Terminal phase: write the report, compute the exit code, then hold the
 	// frame briefly so Ink flushes the summary before unmounting.
@@ -358,64 +385,6 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 						),
 				)}
 
-				{/* `doctor` runs things on someone else's machine, often a
-				    locked-down one. What it ran should be answerable from the
-				    output, not from the source. Both halves matter: the
-				    subprocesses, and — on a corporate network, more usefully —
-				    the endpoints, which are what IT needs to allow-list. */}
-				{phase === "done" && commands.length > 0 && (
-					<Step title={<Text bold>Commands run</Text>}>
-						<Box flexDirection="column">
-							{/* One Text per row for the same reason as the endpoints
-							    below: a wrapped row must not shift the status column. */}
-							{commands.map((c, i) => (
-								<Text
-									key={`cmd-${i.toString()}`}
-									color={c.ok ? undefined : "red"}
-								>
-									{`${c.ok ? "✓" : "✗"} ${c.command}  (${c.durationMs}ms)`}
-								</Text>
-							))}
-							<Text dimColor>
-								{
-									"All read-only — doctor never installs, uninstalls or changes configuration."
-								}
-							</Text>
-						</Box>
-					</Step>
-				)}
-				{phase === "done" && requests.length > 0 && (
-					<Step title={<Text bold>Endpoints contacted</Text>}>
-						<Box flexDirection="column">
-							{requests.map((r, i) => {
-								// This section answers "was the endpoint reachable?", so ANY
-								// response counts — a 401 means we got there and were told
-								// no, which is a success at this layer. Scoring on `ok`
-								// (2xx) marked the expected 401s red and contradicted the
-								// check rows above, which correctly call them a pass. Only
-								// "no response at all" is a failure here.
-								const reached = r.status !== null;
-								// One Text, not three: a long URL wrapping across separate
-								// flex children knocks the status icon out of its column.
-								return (
-									<Text
-										key={`req-${i.toString()}`}
-										color={reached ? undefined : "red"}
-									>
-										{`${reached ? "✓" : "✗"} ${r.method} ${r.url}  (${
-											r.status ?? "no response"
-										}, ${r.durationMs}ms)`}
-									</Text>
-								);
-							})}
-							<Text dimColor>
-								{
-									"Reachability only — a 401 here means the endpoint answered. Query strings are omitted; they can carry tokens."
-								}
-							</Text>
-						</Box>
-					</Step>
-				)}
 				{phase === "done" && (
 					<Step title={<Text bold>Result</Text>}>
 						<Summary

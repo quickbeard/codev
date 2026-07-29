@@ -130,10 +130,27 @@ export interface Check {
 	run: (ctx: DoctorContext) => Promise<CheckResult>;
 }
 
+/**
+ * One thing a check actually did — a subprocess it spawned or a request it
+ * made — shown under that check's row.
+ *
+ * Deliberately carries no pass/fail marker of its own. An earlier revision
+ * listed requests separately with their own icons, and scoring a 401 as a
+ * failure contradicted the check above it that (correctly) called the same 401
+ * a pass. The check's icon is the verdict; these lines are evidence.
+ */
+export interface CheckActivity {
+	kind: "command" | "request";
+	detail: string;
+	durationMs: number;
+}
+
 export interface CheckOutcome extends CheckResult {
 	key: string;
 	label: string;
 	group: CheckGroup;
+	/** What this check ran, in order. */
+	activity?: CheckActivity[];
 }
 
 // ---------------------------------------------------------------------------
@@ -1507,6 +1524,14 @@ export async function runChecks(
 ): Promise<CheckOutcome[]> {
 	const outcomes: CheckOutcome[] = [];
 	for (const check of checks) {
+		// Checks run strictly in sequence, so anything the recorders gain while
+		// one is running belongs to it. That makes attribution exact without
+		// threading a context through every call site — and it still works for a
+		// check that fans out internally (npm-registry runs five `npm config get`
+		// concurrently; all five land on its row).
+		const commandsBefore = commandLog.entries.length;
+		const requestsBefore = requestLog.entries.length;
+
 		let result: CheckResult;
 		try {
 			result = await check.run(ctx);
@@ -1524,6 +1549,7 @@ export async function runChecks(
 			key: check.key,
 			label: check.label,
 			group: check.group,
+			activity: collectActivity(commandsBefore, requestsBefore),
 		};
 		logCheck(outcome);
 		outcomes.push(outcome);
@@ -1702,6 +1728,42 @@ export function recordedCommands(): CommandRecord[] {
 
 export function recordedRequests(): RequestRecord[] {
 	return [...requestLog.entries];
+}
+
+/**
+ * Everything the recorders gained since the given offsets, as display lines.
+ *
+ * Returns undefined rather than an empty array when a check ran nothing, so
+ * the renderer has one falsy thing to test and the report file stays free of
+ * empty `activity: []` noise on the many checks that are pure logic.
+ */
+export function collectActivity(
+	commandsBefore: number,
+	requestsBefore: number,
+): CheckActivity[] | undefined {
+	const activity: CheckActivity[] = [
+		...commandLog.entries.slice(commandsBefore).map((c) => ({
+			kind: "command" as const,
+			detail: c.command,
+			durationMs: c.durationMs,
+		})),
+		...requestLog.entries.slice(requestsBefore).map((r) => ({
+			kind: "request" as const,
+			// The status belongs on the line: it is what distinguishes "the
+			// endpoint answered no" from "nothing answered at all".
+			detail: `${r.method} ${r.url} → ${r.status ?? "no response"}`,
+			durationMs: r.durationMs,
+		})),
+	];
+	return activity.length > 0 ? activity : undefined;
+}
+
+/** Snapshot of the recorders, for callers attributing work done outside runChecks. */
+export function activityMark(): { commands: number; requests: number } {
+	return {
+		commands: commandLog.entries.length,
+		requests: requestLog.entries.length,
+	};
 }
 
 export function buildDoctorReport(

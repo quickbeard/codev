@@ -373,3 +373,51 @@ describe("the endpoints doctor contacted", () => {
 		]);
 	});
 });
+
+/**
+ * Attribution: each check shows what it ran, under its own row, rather than in
+ * a separate list the reader has to correlate back to a step.
+ */
+describe("each check reports what it ran", () => {
+	test("a check that shells out lists its commands", async () => {
+		startCommandRecording();
+		const check = ENVIRONMENT_CHECKS.find((c) => c.key === "npm-available");
+		const [o] = await runChecks([check as Check], {});
+		expect(o?.activity?.map((a) => a.detail)).toEqual(["npm -v"]);
+		expect(o?.activity?.[0]?.kind).toBe("command");
+	});
+
+	// npm-registry fans out five `npm config get` concurrently; all five belong
+	// to it, which is what the before/after slice around a sequential run buys.
+	test("a check that fans out keeps all of its work on one row", async () => {
+		startCommandRecording();
+		const check = ENVIRONMENT_CHECKS.find((c) => c.key === "npm-registry");
+		const [o] = await runChecks([check as Check], {});
+		expect(o?.activity).toHaveLength(5);
+		for (const a of o?.activity ?? []) {
+			expect(a.detail).toMatch(/^npm config get /);
+		}
+	});
+
+	test("work is never attributed to the wrong check", async () => {
+		startCommandRecording();
+		const outcomes = await runChecks(
+			[
+				ENVIRONMENT_CHECKS.find((c) => c.key === "node-version") as Check,
+				ENVIRONMENT_CHECKS.find((c) => c.key === "npm-available") as Check,
+			],
+			{},
+		);
+		// node-version is pure logic and must claim nothing.
+		expect(outcomes[0]?.activity).toBeUndefined();
+		expect(outcomes[1]?.activity?.map((a) => a.detail)).toEqual(["npm -v"]);
+	});
+
+	test("a pure-logic check carries no activity at all", async () => {
+		startCommandRecording();
+		const outcomes = await runChecks(PREFLIGHT_CHECKS, {});
+		// undefined rather than [], so the renderer has one falsy thing to test
+		// and the report file stays free of empty arrays.
+		for (const o of outcomes) expect(o.activity).toBeUndefined();
+	});
+});
