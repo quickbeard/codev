@@ -39,7 +39,16 @@ import {
 	logWarn,
 	redactSecrets,
 } from "@/lib/log.js";
-import { CLI, execAsync, type NpmTool, npmGlobalRoot, PKG } from "@/lib/npm.js";
+import {
+	CLI,
+	type CommandRecord,
+	commandLog,
+	execAsync,
+	type NpmTool,
+	npmGlobalRoot,
+	PKG,
+	recordCommands,
+} from "@/lib/npm.js";
 import { doctorReportPath } from "@/lib/paths.js";
 import {
 	backendHost,
@@ -1665,7 +1674,24 @@ export interface DoctorReport {
 		skipped: number;
 	};
 	checks: CheckOutcome[];
+	/** Every child process this run spawned, in order. */
+	commands: CommandRecord[];
 	nextSteps: string[];
+}
+
+/**
+ * Start recording the commands this run spawns.
+ *
+ * Called once at the top of the run: `doctor` executes things on someone
+ * else's machine, often a locked-down one, and "what did it just run?" should
+ * be answerable from the output rather than from the source.
+ */
+export function startCommandRecording(): void {
+	recordCommands();
+}
+
+export function recordedCommands(): CommandRecord[] {
+	return [...commandLog.entries];
 }
 
 export function buildDoctorReport(
@@ -1692,6 +1718,7 @@ export function buildDoctorReport(
 			skipped: count("skip"),
 		},
 		checks: outcomes,
+		commands: recordedCommands(),
 		nextSteps: buildNextSteps(outcomes, proxyUsed),
 	};
 }

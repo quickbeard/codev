@@ -24,11 +24,14 @@ import {
 	hasFailure,
 	LLM_CHECKS,
 	NETWORK_CHECKS,
+	recordedCommands,
 	runChecks,
 	STATE_CHECKS,
+	startCommandRecording,
 	writeDoctorReport,
 } from "@/lib/doctor.js";
 import { logDebug } from "@/lib/log.js";
+import type { CommandRecord } from "@/lib/npm.js";
 import { readProxyEnv } from "@/lib/proxy.js";
 
 type Phase =
@@ -112,6 +115,9 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 	// Where the machine-readable report landed, so the summary can point at it.
 	// null when the write failed — best-effort, never fatal.
 	const [reportPath, setReportPath] = useState<string | null>(null);
+	// Snapshotted at the terminal phase — the recorder is a mutable buffer, so
+	// reading it during render would tear as checks are still finishing.
+	const [commands, setCommands] = useState<CommandRecord[]>([]);
 	const didPrepRef = useRef(false);
 	// Checks mutate the context as they resolve (token → key → gateway URL →
 	// models), so it must be a ref: a state read would see a stale snapshot
@@ -125,6 +131,12 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 			extra: { step: phase, command: "doctor" },
 		});
 	}, [phase]);
+
+	// Start recording before any check runs, so the "Commands run" section can
+	// show the user exactly what was executed on their machine.
+	useEffect(() => {
+		startCommandRecording();
+	}, []);
 
 	// --force wipes the cached session first, so `sso-login` measures a real
 	// round trip rather than reporting the cache. Same approach as LoginApp.
@@ -233,6 +245,7 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 		doctorOutcome.exitCode = hasFailure(all) ? 1 : 0;
 		// The `state` group is informational, but it belongs in the file — it is
 		// what tells support what was already on the machine.
+		setCommands(recordedCommands());
 		setReportPath(
 			writeDoctorReport(
 				buildDoctorReport(
@@ -342,6 +355,27 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 						),
 				)}
 
+				{/* `doctor` runs things on someone else's machine, often a
+				    locked-down one. What it ran should be answerable from the
+				    output, not from the source. */}
+				{phase === "done" && commands.length > 0 && (
+					<Step title={<Text bold>Commands run</Text>}>
+						<Box flexDirection="column">
+							{commands.map((c, i) => (
+								<Box key={`cmd-${i.toString()}`}>
+									<Text color={c.ok ? "green" : "red"}>{c.ok ? "✓" : "✗"}</Text>
+									<Text>{` ${c.command}`}</Text>
+									<Text dimColor>{`  (${c.durationMs}ms)`}</Text>
+								</Box>
+							))}
+							<Text dimColor>
+								{
+									"All read-only — doctor never installs, uninstalls or changes configuration."
+								}
+							</Text>
+						</Box>
+					</Step>
+				)}
 				{phase === "done" && (
 					<Step title={<Text bold>Result</Text>}>
 						<Summary

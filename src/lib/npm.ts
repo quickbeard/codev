@@ -61,6 +61,34 @@ export interface ExecResult {
 	error: NodeJS.ErrnoException | null;
 }
 
+export interface CommandRecord {
+	command: string;
+	durationMs: number;
+	ok: boolean;
+}
+
+/**
+ * Opt-in record of every child process this module spawns.
+ *
+ * `codevhub doctor` turns it on so it can show the user exactly what it ran on
+ * their machine — a fair question for a diagnostic tool, and one that should
+ * not require reading the source. Off by default: no other command needs it,
+ * and an always-on buffer would grow unbounded in the upload daemon.
+ *
+ * It lives inside `execAsync` rather than wrapping it from doctor.ts because
+ * helpers in this module (`npmGlobalRoot`, `verifyInstall`, …) call `execAsync`
+ * through their module-local binding, which no external wrapper can intercept.
+ */
+export const commandLog: { enabled: boolean; entries: CommandRecord[] } = {
+	enabled: false,
+	entries: [],
+};
+
+export function recordCommands(): void {
+	commandLog.enabled = true;
+	commandLog.entries = [];
+}
+
 export function execAsync(file: string, args: string[]): Promise<ExecResult> {
 	// Every child process codev shells out to funnels through here (npm, the
 	// agent --version probes, `code --install-extension`, JetBrains CLIs,
@@ -80,6 +108,13 @@ export function execAsync(file: string, args: string[]): Promise<ExecResult> {
 			stderr: string,
 		) => {
 			const durationMs = Date.now() - startedAt;
+			if (commandLog.enabled) {
+				commandLog.entries.push({
+					command: `${file} ${args.join(" ")}`.trim(),
+					durationMs,
+					ok: !error,
+				});
+			}
 			if (error) {
 				logWarn(`exec failed: ${file} ${args.join(" ")}`, {
 					action: "process.exit",

@@ -2,16 +2,20 @@ import * as child_process from "node:child_process";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	ACCOUNT_CHECKS,
+	buildDoctorReport,
 	type Check,
 	ENVIRONMENT_CHECKS,
 	LLM_CHECKS,
 	NETWORK_CHECKS,
 	PREFLIGHT_CHECKS,
+	recordedCommands,
 	rerunDoctorWithProxy,
 	runChecks,
 	STATE_CHECKS,
+	startCommandRecording,
 } from "@/lib/doctor.js";
 import * as log from "@/lib/log.js";
+import { commandLog } from "@/lib/npm.js";
 import * as proxy from "@/lib/proxy.js";
 import * as reexec from "@/lib/reexec.js";
 import * as tls from "@/lib/tls.js";
@@ -52,6 +56,8 @@ let spawned: string[];
 
 beforeEach(() => {
 	spawned = [];
+	commandLog.enabled = false;
+	commandLog.entries = [];
 	for (const name of PROXY_VARS) vi.stubEnv(name, "");
 	proxy.resetProxyState();
 
@@ -161,6 +167,82 @@ describe("every command `codevhub doctor` runs", () => {
 			);
 			expect(command).not.toMatch(/config set/);
 		}
+	});
+});
+
+// Knowing the list is only useful if the user is shown it. The inventory above
+// is the contract; this is the part that gets it in front of them.
+describe("the commands are recorded and reported back", () => {
+	test("recording is off until doctor asks for it", async () => {
+		commandLog.enabled = false;
+		commandLog.entries = [];
+		await commandsFor(ENVIRONMENT_CHECKS);
+		// Other commands (`update`, the upload daemon) share execAsync and must
+		// not accumulate an unbounded buffer.
+		expect(commandLog.entries).toEqual([]);
+	});
+
+	test("captures every command, in order, with timing and outcome", async () => {
+		startCommandRecording();
+		await commandsFor(NETWORK_CHECKS);
+		const recorded = recordedCommands();
+		expect(recorded.map((c) => c.command)).toEqual([
+			"npm ping",
+			"npm view codev-ai version",
+		]);
+		for (const c of recorded) {
+			expect(c.ok).toBe(true);
+			expect(typeof c.durationMs).toBe("number");
+		}
+	});
+
+	// It catches `npm root -g`, which is spawned by a helper *inside* npm.ts —
+	// the case an external wrapper around execAsync cannot see.
+	test("captures commands spawned from inside npm.ts itself", async () => {
+		startCommandRecording();
+		await commandsFor(STATE_CHECKS);
+		expect(recordedCommands().map((c) => c.command)).toEqual(["npm root -g"]);
+	});
+
+	test("a failing command is recorded as failed, not dropped", async () => {
+		vi.mocked(child_process.execFile).mockImplementation(((
+			...callArgs: unknown[]
+		) => {
+			const cb = callArgs[callArgs.length - 1] as (
+				e: Error | null,
+				o: string,
+				s: string,
+			) => void;
+			setImmediate(() => cb(new Error("boom"), "", "npm ERR!"));
+			return {} as unknown as child_process.ChildProcess;
+		}) as unknown as typeof child_process.execFile);
+
+		startCommandRecording();
+		await commandsFor(NETWORK_CHECKS);
+		expect(recordedCommands()[0]?.ok).toBe(false);
+	});
+
+	test("a new run starts from an empty list", async () => {
+		startCommandRecording();
+		await commandsFor(NETWORK_CHECKS);
+		expect(recordedCommands()).toHaveLength(2);
+		startCommandRecording();
+		expect(recordedCommands()).toEqual([]);
+	});
+
+	test("the report file carries them too", async () => {
+		startCommandRecording();
+		await commandsFor(ENVIRONMENT_CHECKS);
+		const report = buildDoctorReport([], "2026-07-29T00:00:00.000Z");
+		expect(report.commands.map((c) => c.command)).toEqual([
+			"npm -v",
+			"npm config get prefix",
+			"npm config get registry",
+			"npm config get proxy",
+			"npm config get https-proxy",
+			"npm config get strict-ssl",
+			"npm config get cafile",
+		]);
 	});
 });
 
