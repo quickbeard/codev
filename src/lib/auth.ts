@@ -78,9 +78,9 @@ export interface ApiKeyCreds {
 
 // auth.json holds three independent blocks: SSO tokens (issued by the IdP),
 // the gateway API key (issued by /auth/exchange or entered manually), and the
-// CoDev runtime config (Supabase coordinates, fetched from the backend's
-// /config endpoint on every successful SSO login). They share a file because
-// they're written together on a fresh install, but each is updated in
+// CoDev runtime config (analysis backend coordinates, fetched from the
+// backend's /config endpoint on every successful SSO login). They share a file
+// because they're written together on a fresh install, but each is updated in
 // isolation — saving SSO must not clobber the api_key or codev-config blocks,
 // and `codevhub logout` strips SSO while preserving the rest for reuse.
 interface AuthFileContents {
@@ -94,6 +94,8 @@ interface AuthFileContents {
 	model?: string;
 	provider_id?: string;
 	provider_name?: string;
+	// Analysis backend coordinates. The keys keep their historical `supabase_*`
+	// names — they're what /config returns and what installed machines cache.
 	supabase_url?: string;
 	supabase_anon_key?: string;
 	gateway_url?: string;
@@ -104,8 +106,8 @@ interface AuthFileContents {
 }
 
 export interface CodevConfig {
-	supabaseUrl: string;
-	supabaseAnonKey: string;
+	analysisBackendUrl: string;
+	analysisBackendAnonKey: string;
 	gatewayUrl: string;
 }
 
@@ -225,8 +227,8 @@ export function saveCodevConfig(config: CodevConfig): void {
 	const existing = readAuthFile() ?? {};
 	writeAuthFile({
 		...existing,
-		supabase_url: config.supabaseUrl,
-		supabase_anon_key: config.supabaseAnonKey,
+		supabase_url: config.analysisBackendUrl,
+		supabase_anon_key: config.analysisBackendAnonKey,
 		gateway_url: config.gatewayUrl,
 	});
 }
@@ -518,9 +520,9 @@ export async function silentSso(): Promise<AuthData | null> {
 	}
 }
 
-// Best-effort: pull the latest Supabase coordinates from the backend and
-// persist them next to the SSO session. Failure is logged but not thrown —
-// downstream accessors (SUPABASE_URL/ANON_KEY in const.ts) will hard-fail
+// Best-effort: pull the latest analysis backend coordinates from the backend
+// and persist them next to the SSO session. Failure is logged but not thrown —
+// downstream accessors (ANALYSIS_BACKEND_URL/ANON_KEY in const.ts) will hard-fail
 // later if no values were ever fetched, with a "run codevhub install" message
 // that's actionable for the user.
 //
@@ -529,8 +531,8 @@ export async function silentSso(): Promise<AuthData | null> {
 //     Step — the call blocks the transition to `validating-existing`/
 //     `key-choice` but doesn't render a spinner of its own).
 //   - upload.ts's ensureAuth runs it on the fresh-login branch, and again
-//     in the retry path after a 401/403 from Supabase (config may have
-//     rotated since the last login).
+//     in the retry path after a 401/403 from the analysis backend (config may
+//     have rotated since the last login).
 export async function refreshCodevConfig(
 	accessToken: string,
 	onLog: (msg: string) => void,

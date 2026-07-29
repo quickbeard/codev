@@ -8,10 +8,10 @@ import {
 import { delimiter, dirname, join } from "node:path";
 import { loadApiKey } from "@/lib/auth.js";
 import {
+	fetchAnalysisBackendSession,
 	fetchApiKey,
 	fetchCodevConfig,
 	fetchModels,
-	fetchSupabaseSession,
 	smokeTestModel,
 	validateApiKey,
 } from "@/lib/backend.js";
@@ -125,8 +125,8 @@ export interface DoctorContext {
 	gatewayUrl?: string;
 	/** Model ids, set by the models check. */
 	models?: string[];
-	/** Supabase project URL, set by the codev-config check. */
-	supabaseUrl?: string;
+	/** Analysis backend URL, set by the codev-config check. */
+	analysisBackendUrl?: string;
 }
 
 export interface Check {
@@ -1220,7 +1220,7 @@ const configCheck: Check = {
 		return guard(attempt, async () => {
 			const config = await fetchCodevConfig(ctx.accessToken as string);
 			ctx.gatewayUrl = config.gatewayUrl;
-			ctx.supabaseUrl = config.supabaseUrl;
+			ctx.analysisBackendUrl = config.analysisBackendUrl;
 			return {
 				status: "pass",
 				detail: `Gateway ${config.gatewayUrl}.`,
@@ -1229,9 +1229,9 @@ const configCheck: Check = {
 	},
 };
 
-const supabaseCheck: Check = {
-	key: "supabase-reach",
-	label: "Reach Supabase (log upload)",
+const analysisBackendCheck: Check = {
+	key: "analysis-backend-reach",
+	label: "Reach the analysis backend (log upload)",
 	group: "account",
 	run: async (ctx) => {
 		if (!ctx.accessToken) {
@@ -1242,16 +1242,17 @@ const supabaseCheck: Check = {
 			method: "POST",
 		};
 		return guard(attempt, async () => {
-			await fetchSupabaseSession(ctx.accessToken as string);
-			// Supabase is a different host from the backend and the gateway, so it
-			// can be blocked independently. `codevhub upload` depends on it.
-			if (ctx.supabaseUrl) {
-				const r = await reach(ctx.supabaseUrl, "Supabase");
+			await fetchAnalysisBackendSession(ctx.accessToken as string);
+			// The analysis backend is a different host from the backend and the
+			// gateway, so it can be blocked independently. `codevhub upload`
+			// depends on it.
+			if (ctx.analysisBackendUrl) {
+				const r = await reach(ctx.analysisBackendUrl, "the analysis backend");
 				if (r.status !== "pass") return r;
 			}
 			return {
 				status: "pass",
-				detail: "Supabase session issued and reachable.",
+				detail: "Analysis backend session issued and reachable.",
 			};
 		});
 	},
@@ -1260,7 +1261,7 @@ const supabaseCheck: Check = {
 export const ACCOUNT_CHECKS: Check[] = [
 	apiKeyCheck,
 	configCheck,
-	supabaseCheck,
+	analysisBackendCheck,
 ];
 
 // ---------------------------------------------------------------------------

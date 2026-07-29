@@ -48,7 +48,7 @@ function writeAuth() {
 			id_token: "token",
 			expires_at: Date.now() + 3600000,
 			user: { sub: "u", email: "u@example.com", displayName: "User" },
-			supabase_url: "https://test.supabase.co",
+			supabase_url: "https://test.analysis.example.com",
 			supabase_anon_key: "anon",
 		}),
 	);
@@ -136,7 +136,7 @@ describe("upload helpers", () => {
 
 describe("runUpload", () => {
 	test("signals onLoginDone after a fresh login completes", async () => {
-		// auth.json has Supabase coords but no SSO session, so loadAuth() returns
+		// auth.json has analysis backend coords but no SSO session, so loadAuth() returns
 		// null and ensureAuth() must log in. Mock login() to resolve immediately
 		// (no browser), then assert onLoginDone fired so the caller can dismiss
 		// the login prompt before the upload proceeds.
@@ -144,7 +144,7 @@ describe("runUpload", () => {
 		writeFileSync(
 			join(tempHome, ".codev-hub", "auth.json"),
 			JSON.stringify({
-				supabase_url: "https://test.supabase.co",
+				supabase_url: "https://test.analysis.example.com",
 				supabase_anon_key: "anon",
 			}),
 		);
@@ -167,7 +167,7 @@ describe("runUpload", () => {
 			if (url.includes("/codev-backend/config")) {
 				return new Response(
 					JSON.stringify({
-						supabaseUrl: "https://test.supabase.co",
+						supabaseUrl: "https://test.analysis.example.com",
 						supabaseAnonKey: "anon",
 						gatewayUrl: "https://gw.test/gateway",
 					}),
@@ -177,7 +177,7 @@ describe("runUpload", () => {
 			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
-						access_token: "supabase-upload-token",
+						access_token: "analysis-upload-token",
 						user: { id: "u", email: "u@example.com" },
 					}),
 					{ headers: { "Content-Type": "application/json" } },
@@ -234,7 +234,7 @@ describe("runUpload", () => {
 			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
-						access_token: "supabase-upload-token",
+						access_token: "analysis-upload-token",
 						user: { id: "u", email: "u@example.com" },
 					}),
 					{ headers: { "Content-Type": "application/json" } },
@@ -242,7 +242,7 @@ describe("runUpload", () => {
 			}
 			if (url.includes("/rest/v1/conversations")) {
 				expect((init?.headers as Record<string, string>).Authorization).toBe(
-					"Bearer supabase-upload-token",
+					"Bearer analysis-upload-token",
 				);
 				// Regression guard for the per-page timeout: the conversations
 				// fetch must carry an abort signal like every other call here.
@@ -306,7 +306,7 @@ describe("runUpload", () => {
 			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
-						access_token: "supabase-upload-token",
+						access_token: "analysis-upload-token",
 						user: { id: "u", email: "u@example.com" },
 					}),
 					{ headers: { "Content-Type": "application/json" } },
@@ -360,7 +360,7 @@ describe("runUpload", () => {
 		}
 	});
 
-	test("refreshes config and retries when Supabase returns 401", async () => {
+	test("refreshes config and retries when the analysis backend returns 401", async () => {
 		writeAuth();
 		writeLog("retry.md", "hello");
 
@@ -374,12 +374,12 @@ describe("runUpload", () => {
 					? String(input)
 					: input.url;
 
-			// backend /config: hand back fresh Supabase coords on refresh.
+			// backend /config: hand back fresh analysis backend coords on refresh.
 			if (url.includes("/codev-backend/config")) {
 				configCalls++;
 				return new Response(
 					JSON.stringify({
-						supabaseUrl: "https://test.supabase.co",
+						supabaseUrl: "https://test.analysis.example.com",
 						supabaseAnonKey: "anon",
 						gatewayUrl: "https://gw.test/gateway",
 					}),
@@ -389,7 +389,7 @@ describe("runUpload", () => {
 			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
-						access_token: "supabase-upload-token",
+						access_token: "analysis-upload-token",
 						user: { id: "u", email: "u@example.com" },
 					}),
 					{ headers: { "Content-Type": "application/json" } },
@@ -434,7 +434,7 @@ describe("runUpload", () => {
 		}
 	});
 
-	test("does not retry on Supabase 5xx errors", async () => {
+	test("does not retry on analysis backend 5xx errors", async () => {
 		writeAuth();
 		writeLog("nope.md", "hello");
 
@@ -456,7 +456,7 @@ describe("runUpload", () => {
 			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
-						access_token: "supabase-upload-token",
+						access_token: "analysis-upload-token",
 						user: { id: "u", email: "u@example.com" },
 					}),
 					{ headers: { "Content-Type": "application/json" } },
@@ -478,7 +478,7 @@ describe("runUpload", () => {
 		}
 	});
 
-	test("refreshes config when Supabase coords are missing from cache", async () => {
+	test("refreshes config when analysis backend coords are missing from cache", async () => {
 		// Auth file with SSO tokens but no supabase_* fields.
 		mkdirSync(join(tempHome, ".codev-hub"), { recursive: true });
 		writeFileSync(
@@ -505,7 +505,7 @@ describe("runUpload", () => {
 				configCalls++;
 				return new Response(
 					JSON.stringify({
-						supabaseUrl: "https://fresh.supabase.co",
+						supabaseUrl: "https://fresh.analysis.example.com",
 						supabaseAnonKey: "fresh-anon",
 						gatewayUrl: "https://fresh.example.com/gateway",
 					}),
@@ -515,7 +515,7 @@ describe("runUpload", () => {
 			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
-						access_token: "supabase-upload-token",
+						access_token: "analysis-upload-token",
 						user: { id: "u", email: "u@example.com" },
 					}),
 					{ headers: { "Content-Type": "application/json" } },
@@ -579,7 +579,7 @@ describe("runUpload", () => {
 			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
-						access_token: "supabase-upload-token",
+						access_token: "analysis-upload-token",
 						user: { id: "u", email: "u@example.com" },
 					}),
 					{ headers: { "Content-Type": "application/json" } },
@@ -633,7 +633,7 @@ describe("runUpload", () => {
 			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
-						access_token: "supabase-upload-token",
+						access_token: "analysis-upload-token",
 						user: { id: "u", email: "u@example.com" },
 					}),
 					{ headers: { "Content-Type": "application/json" } },
@@ -702,7 +702,7 @@ describe("runUpload", () => {
 				configCalls++;
 				return new Response(
 					JSON.stringify({
-						supabaseUrl: "https://test.supabase.co",
+						supabaseUrl: "https://test.analysis.example.com",
 						supabaseAnonKey: "anon",
 						gatewayUrl: "https://gw.test/gateway",
 					}),
@@ -712,7 +712,7 @@ describe("runUpload", () => {
 			if (url.includes("/codev-backend/supabase/exchange")) {
 				return new Response(
 					JSON.stringify({
-						access_token: "supabase-upload-token",
+						access_token: "analysis-upload-token",
 						user: { id: "u", email: "u@example.com" },
 					}),
 					{ headers: { "Content-Type": "application/json" } },
@@ -736,7 +736,7 @@ describe("runUpload", () => {
 });
 
 describe("isRefreshableError", () => {
-	test("true when supabase coords are missing from auth.json", () => {
+	test("true when analysis backend coords are missing from auth.json", () => {
 		expect(
 			isRefreshableError(
 				new Error(
