@@ -88,11 +88,14 @@ function readField(field: keyof CodevAuthFile, label: string): string {
 	return value;
 }
 
-export function SUPABASE_URL(): string {
+// The analysis backend's coordinates. The on-disk keys keep their historical
+// `supabase_*` names — they're the shape the CoDev backend hands back from
+// /config and what every already-installed machine has cached.
+export function ANALYSIS_BACKEND_URL(): string {
 	return readField("supabase_url", "supabase_url");
 }
 
-export function SUPABASE_ANON_KEY(): string {
+export function ANALYSIS_BACKEND_ANON_KEY(): string {
 	return readField("supabase_anon_key", "supabase_anon_key");
 }
 

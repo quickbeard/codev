@@ -282,9 +282,10 @@ async function errorBody(res: Response): Promise<string> {
 	}
 }
 
-// Instrumented fetch for codev's direct network calls (SSO, backend,
-// gateway, Supabase). `endpoint` is a stable label (e.g. "backend.config",
-// "supabase.presign") persisted as codev.endpoint so failures group cleanly.
+// Instrumented fetch for codev's direct network calls (SSO, backend, gateway,
+// analysis backend). `endpoint` is a stable label (e.g. "backend.config",
+// "analysis-backend.presign") persisted as codev.endpoint so failures group
+// cleanly.
 //
 // Writes a start document (the evidence trail when a request hangs and never
 // completes), then a completion document with status + duration — success at
@@ -535,7 +536,7 @@ function redactByKey(extra: Record<string, unknown>): Record<string, unknown> {
 
 // Second redaction layer, applied to the fully serialized line: VALUE shapes
 // that must never reach disk regardless of which field carried them. Bearer
-// credentials, JWT-shaped tokens (SSO/Supabase), LiteLLM gateway keys, and
+// credentials, JWT-shaped tokens (SSO/analysis backend), LiteLLM gateway keys, and
 // sensitive query params (OAuth code/state, signed-URL signatures).
 const SCRUB_PATTERNS: [RegExp, string][] = [
 	[/Bearer\s+[A-Za-z0-9._~+/=-]+/g, "Bearer [REDACTED]"],

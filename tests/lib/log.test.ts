@@ -212,11 +212,13 @@ describe("field mapping", () => {
 
 	test("extra fields land under codev.*", () => {
 		initLogging("upload", [], { installProcessHooks: false });
-		logInfo("ctx", { extra: { endpoint: "supabase.presign", attempt: 2 } });
+		logInfo("ctx", {
+			extra: { endpoint: "analysis-backend.presign", attempt: 2 },
+		});
 		const doc = readDocs().at(-1) as {
 			codev?: { endpoint?: string; attempt?: number };
 		};
-		expect(doc.codev?.endpoint).toBe("supabase.presign");
+		expect(doc.codev?.endpoint).toBe("analysis-backend.presign");
 		expect(doc.codev?.attempt).toBe(2);
 	});
 });
@@ -482,7 +484,7 @@ describe("loggedFetch", () => {
 			.mockResolvedValue(new Response(body, { status: 401 }));
 		try {
 			const res = await loggedFetch(
-				"supabase.presign",
+				"analysis-backend.presign",
 				"https://s.example.com/functions/v1/presign-upload",
 			);
 			expect(res.status).toBe(401);

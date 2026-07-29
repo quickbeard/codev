@@ -46,7 +46,7 @@ describe("LoginApp", () => {
 		expect(history).toContain("✓ Signed in as test@example.com");
 	});
 
-	test("refreshes the Supabase config with the new access token", async () => {
+	test("refreshes the analysis backend config with the new access token", async () => {
 		const authData = fakeAuth();
 		vi.spyOn(auth, "login").mockResolvedValue(authData);
 

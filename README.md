@@ -35,8 +35,8 @@ It is read-only (it installs and configures nothing) and checks, in order:
   writable), the npm registry/proxy configuration, your proxy and TLS
   environment variables, and whether the OS certificate store is readable.
 - **Network** — the CoDev backend and the npm registry are actually reachable.
-- **Account** — sign-in, gateway API key, CoDev configuration, and Supabase
-  (used by `codevhub upload`).
+- **Account** — sign-in, gateway API key, CoDev configuration, and the analysis
+  backend (used by `codevhub upload`).
 - **LLM access** — the key is valid, models are listable, and a real one-token
   completion succeeds. Only the last of these proves inference is permitted;
   `/key/info` and `/v1/models` both pass for a key that is then 403'd on every

@@ -116,16 +116,16 @@ function fakeAuth(): auth.AuthData {
 	};
 }
 
-/** Stub the whole happy path: sign-in, key, config, supabase, gateway, LLM. */
+/** Stub the whole happy path: sign-in, key, config, analysis backend, gateway, LLM. */
 function stubHappyPath() {
 	vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
 	vi.spyOn(backend, "fetchApiKey").mockResolvedValue("sk-doctor-123");
 	vi.spyOn(backend, "fetchCodevConfig").mockResolvedValue({
-		supabaseUrl: "https://supabase.example.com",
-		supabaseAnonKey: "anon",
+		analysisBackendUrl: "https://analysis.example.com",
+		analysisBackendAnonKey: "anon",
 		gatewayUrl: "https://gateway.example.com",
 	});
-	vi.spyOn(backend, "fetchSupabaseSession").mockResolvedValue({
+	vi.spyOn(backend, "fetchAnalysisBackendSession").mockResolvedValue({
 		access_token: "sb",
 		user: { id: "u", email: "test@example.com" },
 	});

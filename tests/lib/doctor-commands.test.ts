@@ -281,7 +281,7 @@ describe("the one non-npm command: the proxy retry", () => {
 
 /**
  * The npm list alone was only half the answer. `doctor`'s connection tests —
- * backend, Supabase, the gateway — are HTTP, never touch `execAsync`, and so
+ * backend, the analysis backend, the gateway — are HTTP, never touch `execAsync`, and so
  * appeared nowhere. On a corporate network they are the *more* useful half:
  * the endpoints are what IT needs in order to allow-list them.
  *

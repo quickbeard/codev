@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+	fetchAnalysisBackendSession,
 	fetchApiKey,
 	fetchCodevConfig,
 	fetchModels,
-	fetchSupabaseSession,
 	isInvalidKeyError,
 	smokeTestModel,
 	validateApiKey,
@@ -336,30 +336,30 @@ describe("smokeTestModel", () => {
 	});
 });
 
-describe("fetchSupabaseSession", () => {
+describe("fetchAnalysisBackendSession", () => {
 	test("posts to the backend /supabase/exchange endpoint", async () => {
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
-				access_token: "supabase-token",
+				access_token: "analysis-backend-token",
 				user: { id: "uid", email: "x@y.z" },
 			}),
 		);
-		await fetchSupabaseSession("sso-token");
+		await fetchAnalysisBackendSession("sso-token");
 		const [url] = fetchSpy.mock.calls[0] as [string];
 		expect(url).toBe(`${BACKEND_URL}/supabase/exchange`);
 	});
 
-	test("returns the Supabase session on a 2xx response", async () => {
+	test("returns the analysis backend session on a 2xx response", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
-				access_token: "supabase-token",
+				access_token: "analysis-backend-token",
 				refresh_token: "refresh",
 				expires_at: 123,
 				user: { id: "uid", email: "x@y.z" },
 			}),
 		);
-		expect(await fetchSupabaseSession("sso-token")).toEqual({
-			access_token: "supabase-token",
+		expect(await fetchAnalysisBackendSession("sso-token")).toEqual({
+			access_token: "analysis-backend-token",
 			refresh_token: "refresh",
 			expires_at: 123,
 			user: { id: "uid", email: "x@y.z" },
@@ -370,24 +370,25 @@ describe("fetchSupabaseSession", () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(401, { error: "invalid sso token" }),
 		);
-		await expect(fetchSupabaseSession("bad-token")).rejects.toThrow(
+		await expect(fetchAnalysisBackendSession("bad-token")).rejects.toThrow(
 			"Backend /supabase/exchange failed (401): invalid sso token",
 		);
 	});
 });
 
 describe("fetchCodevConfig", () => {
-	test("returns the Supabase coordinates and gateway URL on a 2xx response", async () => {
+	test("returns the analysis backend coordinates and gateway URL on a 2xx response", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
-				supabaseUrl: "https://x.supabase.co",
+				supabaseUrl: "https://x.analysis.example.com",
 				supabaseAnonKey: "anon",
 				gatewayUrl: "https://gw.example.com/gateway",
 			}),
 		);
+		// The backend's wire keys are still `supabase*`; CodevConfig renames them.
 		expect(await fetchCodevConfig("sso-token")).toEqual({
-			supabaseUrl: "https://x.supabase.co",
-			supabaseAnonKey: "anon",
+			analysisBackendUrl: "https://x.analysis.example.com",
+			analysisBackendAnonKey: "anon",
 			gatewayUrl: "https://gw.example.com/gateway",
 		});
 	});

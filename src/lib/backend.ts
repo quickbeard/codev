@@ -15,6 +15,9 @@ interface ExchangeResponse {
 	};
 }
 
+// Wire shape of the backend's /config payload. The `supabase*` keys are the
+// backend's own field names — renaming them here would silently stop parsing a
+// live response — so they're mapped onto CodevConfig's names below.
 interface ConfigResponse {
 	supabaseUrl: string;
 	supabaseAnonKey: string;
@@ -30,11 +33,11 @@ const MODELS_TIMEOUT_MS = 10_000;
 // A real (1-token) completion can be slower than listing models — it actually
 // hits inference — so give the smoke test more headroom.
 const SMOKE_TIMEOUT_MS = 15_000;
-// Backend endpoints are quick: token exchange, a tiny config blob, a Supabase
-// session exchange. Cap so a stalled gateway doesn't hang the CLI.
+// Backend endpoints are quick: token exchange, a tiny config blob, an analysis
+// backend session exchange. Cap so a stalled gateway doesn't hang the CLI.
 const BACKEND_TIMEOUT_MS = 10_000;
 
-export interface SupabaseSession {
+export interface AnalysisBackendSession {
 	access_token: string;
 	refresh_token?: string;
 	expires_at?: number;
@@ -68,8 +71,8 @@ export async function fetchApiKey(accessToken: string): Promise<string> {
 }
 
 // Pulls the runtime coordinates the CLI doesn't bake into its source — the
-// Supabase URL/anon key and the public gateway base URL. Called from auth.ts on
-// every successful SSO login (fresh + refresh) and persisted into
+// analysis backend URL/anon key and the public gateway base URL. Called from
+// auth.ts on every successful SSO login (fresh + refresh) and persisted into
 // ~/.codev-hub/auth.json by saveCodevConfig.
 export async function fetchCodevConfig(
 	accessToken: string,
@@ -93,8 +96,8 @@ export async function fetchCodevConfig(
 		);
 	}
 	return {
-		supabaseUrl: data.supabaseUrl,
-		supabaseAnonKey: data.supabaseAnonKey,
+		analysisBackendUrl: data.supabaseUrl,
+		analysisBackendAnonKey: data.supabaseAnonKey,
 		gatewayUrl: data.gatewayUrl,
 	};
 }
@@ -229,11 +232,14 @@ export async function smokeTestModel(
 	}
 }
 
-export async function fetchSupabaseSession(
+// The `/supabase/exchange` path and the endpoint's error text keep the
+// backend's own route name — it's the literal URL a reader has to grep the
+// backend for when this fails.
+export async function fetchAnalysisBackendSession(
 	accessToken: string,
-): Promise<SupabaseSession> {
+): Promise<AnalysisBackendSession> {
 	const res = await loggedFetch(
-		"backend.supabase-exchange",
+		"backend.analysis-exchange",
 		`${BACKEND_URL}/supabase/exchange`,
 		{
 			method: "POST",
@@ -250,5 +256,5 @@ export async function fetchSupabaseSession(
 		);
 	}
 
-	return (await res.json()) as SupabaseSession;
+	return (await res.json()) as AnalysisBackendSession;
 }

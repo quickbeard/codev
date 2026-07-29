@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	AI_GATEWAY_OPENAI_URL,
 	AI_GATEWAY_URL,
+	ANALYSIS_BACKEND_ANON_KEY,
+	ANALYSIS_BACKEND_URL,
 	FALLBACK_MODEL,
 	GATEWAY_COMPACT_RESERVED,
 	GATEWAY_COMPACT_TRIGGER,
@@ -13,8 +15,6 @@ import {
 	MIN_NODE_STRING,
 	nodeVersionMeets,
 	parseNodeVersion,
-	SUPABASE_ANON_KEY,
-	SUPABASE_URL,
 } from "@/lib/const.js";
 
 let tempDir: string;
@@ -40,20 +40,24 @@ function writeAuthJson(data: Record<string, unknown>) {
 const ACCESSORS: ReadonlyArray<
 	readonly [name: string, fn: () => string, field: string]
 > = [
-	["SUPABASE_URL", () => SUPABASE_URL(), "supabase_url"],
-	["SUPABASE_ANON_KEY", () => SUPABASE_ANON_KEY(), "supabase_anon_key"],
+	["ANALYSIS_BACKEND_URL", () => ANALYSIS_BACKEND_URL(), "supabase_url"],
+	[
+		"ANALYSIS_BACKEND_ANON_KEY",
+		() => ANALYSIS_BACKEND_ANON_KEY(),
+		"supabase_anon_key",
+	],
 	["AI_GATEWAY_URL", () => AI_GATEWAY_URL(), "gateway_url"],
 	["AI_GATEWAY_OPENAI_URL", () => AI_GATEWAY_OPENAI_URL(), "gateway_url"],
 ];
 
-describe("Supabase const accessors", () => {
+describe("analysis backend const accessors", () => {
 	test("each returns its field from auth.json", () => {
 		writeAuthJson({
-			supabase_url: "https://x.supabase.co",
+			supabase_url: "https://x.analysis.example.com",
 			supabase_anon_key: "anon-x",
 		});
-		expect(SUPABASE_URL()).toBe("https://x.supabase.co");
-		expect(SUPABASE_ANON_KEY()).toBe("anon-x");
+		expect(ANALYSIS_BACKEND_URL()).toBe("https://x.analysis.example.com");
+		expect(ANALYSIS_BACKEND_ANON_KEY()).toBe("anon-x");
 	});
 
 	for (const [name, fn, field] of ACCESSORS) {
@@ -83,16 +87,16 @@ describe("Supabase const accessors", () => {
 
 	test("each accessor reads the live file (no module-load caching)", () => {
 		writeAuthJson({
-			supabase_url: "https://first.supabase.co",
+			supabase_url: "https://first.analysis.example.com",
 			supabase_anon_key: "a1",
 		});
-		expect(SUPABASE_URL()).toBe("https://first.supabase.co");
+		expect(ANALYSIS_BACKEND_URL()).toBe("https://first.analysis.example.com");
 
 		writeAuthJson({
-			supabase_url: "https://second.supabase.co",
+			supabase_url: "https://second.analysis.example.com",
 			supabase_anon_key: "a2",
 		});
-		expect(SUPABASE_URL()).toBe("https://second.supabase.co");
+		expect(ANALYSIS_BACKEND_URL()).toBe("https://second.analysis.example.com");
 	});
 });
 
