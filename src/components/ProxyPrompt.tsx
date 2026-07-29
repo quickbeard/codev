@@ -36,8 +36,13 @@ export function ProxyPrompt({ onSubmit, readOnly = false }: ProxyPromptProps) {
 				}
 				const url = normalizeProxyInput(trimmed);
 				if (!url) {
+					// Name the likely mistake. A bare number is both the most probable
+					// slip against a "host:port" prompt and the one with the worst
+					// silent failure, so it gets its own message.
 					setError(
-						"That doesn't look like a proxy address. Use host:port, e.g. 10.0.0.1:8080",
+						/^\d+$/.test(trimmed)
+							? `"${trimmed}" looks like just the port. Enter the host too, e.g. 10.0.0.1:${trimmed}`
+							: "That doesn't look like a proxy address. Use host:port, e.g. 10.0.0.1:8080",
 					);
 					return;
 				}

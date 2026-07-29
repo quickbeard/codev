@@ -1654,10 +1654,22 @@ export function resetDoctorOutcome(): void {
 	doctorOutcome.retryWithProxy = null;
 }
 
-/** Normalize a user-typed `host:port` into a proxy URL. */
+/**
+ * Normalize a user-typed `host:port` into a proxy URL.
+ *
+ * Accepts an IPv4 address, a hostname, or a bracketed IPv6 literal, with or
+ * without a scheme and with optional `user:pass@` credentials. Returns null for
+ * anything unusable, which the prompt turns into an inline error.
+ */
 export function normalizeProxyInput(input: string): string | null {
 	const trimmed = input.trim();
 	if (!trimmed) return null;
+	// A bare number is the likely mistake when the prompt asks for "host:port" —
+	// and it is the dangerous one, because WHATWG URL parses integers as 32-bit
+	// IPv4 addresses: `8080` becomes `http://0.0.31.144`. That is accepted
+	// silently and then fails much later as an unexplained connection timeout to
+	// an address the user never typed. Reject it here, where we can still say why.
+	if (/^\d+$/.test(trimmed.replace(/^https?:\/\//i, ""))) return null;
 	const withScheme = /^https?:\/\//i.test(trimmed)
 		? trimmed
 		: `http://${trimmed}`;

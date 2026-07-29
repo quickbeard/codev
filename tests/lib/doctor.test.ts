@@ -960,7 +960,36 @@ describe("normalizeProxyInput", () => {
 		expect(normalizeProxyInput(input)).toBe(expected);
 	});
 
-	test.each(["", "   ", "::::"])("rejects %s", (input) => {
+	test.each([
+		["proxy.corp:3128", "http://proxy.corp:3128"],
+		// Bracketed IPv6, per normal URL syntax.
+		["[::1]:8080", "http://[::1]:8080"],
+		// Credentials survive, for proxies that require auth.
+		["user:pass@10.0.0.1:8080", "http://user:pass@10.0.0.1:8080"],
+	])("%s → %s", (input, expected) => {
+		expect(normalizeProxyInput(input)).toBe(expected);
+	});
+
+	test.each([
+		"",
+		"   ",
+		"::::",
+		"10.0.0.1 8080",
+		"10.0.0.1:8080:9",
+	])("rejects %s", (input) => {
+		expect(normalizeProxyInput(input)).toBeNull();
+	});
+
+	// WHATWG URL parses bare integers as 32-bit IPv4 addresses, so `8080`
+	// silently became `http://0.0.31.144` — accepted, then failing much later as
+	// a timeout to an address the user never typed. Typing only the port is a
+	// very plausible slip against a prompt that asks for "host:port".
+	test.each([
+		"8080",
+		"3128",
+		"0",
+		"http://8080",
+	])("rejects the bare port %s instead of coercing it to an IP", (input) => {
 		expect(normalizeProxyInput(input)).toBeNull();
 	});
 });
