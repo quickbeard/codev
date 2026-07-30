@@ -924,9 +924,16 @@ function configureOpenCodeKind(
 	const provider = resolveProvider(creds);
 	// Fall back to [defaultModel] when `models` is unset so callers that don't
 	// know about the list (e.g. older fixtures, the fallback path with no
-	// fetched list) still produce a valid one-entry map.
-	const allModels =
-		creds.models && creds.models.length > 0 ? creds.models : [defaultModel];
+	// fetched list) still produce a valid one-entry map. The chosen model leads
+	// the map: with no top-level pin (see below) a first launch with no saved
+	// selection falls through to the provider's first model, so ordering is
+	// what carries the choice.
+	const allModels = [
+		...new Set([
+			defaultModel,
+			...(creds.models && creds.models.length > 0 ? creds.models : []),
+		]),
+	];
 
 	// A custom-provider model with no `limit` defaults to context 0, which both
 	// mis-sizes the window and disables OpenCode's auto-compaction entirely.
@@ -959,9 +966,15 @@ function configureOpenCodeKind(
 	writeJson(sourcePath, {
 		[OPENCODE_K.schema]: OPENCODE_SCHEMA_URL,
 		...(mcp !== undefined ? { [OPENCODE_K.mcp]: mcp } : {}),
-		// Top-level `model` pins the initial active model OpenCode uses on
-		// launch. Format is `<provider>/<modelId>` per OpenCode's schema.
-		[OPENCODE_K.model]: `${provider.id}/${defaultModel}`,
+		// No top-level `model`. The install-time model choice exists for Claude
+		// Code and Codex, which can only run one model at a time; OpenCode and
+		// CoDev Code switch freely in-CLI (docs/hub/installation). A pin there
+		// outranks their saved selection on every launch — it beats the recent
+		// models in their state dir — so each in-CLI switch reverted on restart
+		// and only hand-editing the config undid it. The chosen model leads the
+		// models map instead, which decides the first launch and yields to any
+		// later selection. This is why `codevhub model` steers only Claude Code
+		// and Codex.
 		// OpenCode has no percentage trigger; it compacts at `context − reserved`.
 		// Reserve the headroom that lands the trigger at ~85% of the window, to
 		// match Claude Code and Codex.

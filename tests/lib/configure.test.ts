@@ -398,8 +398,9 @@ describe("configureOpenCode", () => {
 		expect(config.provider.netgate.models["chosen-model"].name).toBe(
 			"chosen-model",
 		);
-		// Top-level `model` pins the active default in <provider>/<modelId> form.
-		expect(config.model).toBe("netgate/chosen-model");
+		// No top-level `model`: OpenCode and CoDev Code switch models in-CLI, and
+		// a pin would outrank that selection on every launch.
+		expect(config.model).toBeUndefined();
 		// Declares the gateway window so OpenCode sizes context correctly and its
 		// auto-compaction fires (a model with no `limit` defaults to context 0,
 		// which disables compaction). `output` is required alongside `context`.
@@ -443,8 +444,10 @@ describe("configureOpenCode", () => {
 				output: ["text"],
 			});
 		}
-		// Top-level default still points at the chosen one.
-		expect(config.model).toBe("netgate/model-a");
+		// With no pin, the map order carries the choice: a launch with nothing
+		// selected yet takes the provider's first model.
+		expect(config.model).toBeUndefined();
+		expect(Object.keys(map)[0]).toBe("model-a");
 	});
 
 	test("falls back to [model] when `models` is absent (older call sites)", async () => {
@@ -596,8 +599,9 @@ describe("configureCodevCode", () => {
 		expect(config.provider.netgate.models["chosen-model"].name).toBe(
 			"chosen-model",
 		);
-		// Top-level `model` pins the active default in <provider>/<modelId> form.
-		expect(config.model).toBe("netgate/chosen-model");
+		// No top-level `model`: OpenCode and CoDev Code switch models in-CLI, and
+		// a pin would outrank that selection on every launch.
+		expect(config.model).toBeUndefined();
 		// The fork shares OpenCode's window/compaction handling, so the same
 		// limit + compaction blocks must land in its config.
 		expect(config.provider.netgate.models["chosen-model"].limit).toEqual({
@@ -1652,7 +1656,7 @@ describe("custom provider identity", () => {
 		expect(config.model_providers.netgate).toBeUndefined();
 	});
 
-	test("opencode writes the custom id in both the provider map and `model`", async () => {
+	test("opencode writes the custom id in the provider map", async () => {
 		const { configureOpenCode } = await import("@/lib/configure.js");
 		configureOpenCode(custom);
 
@@ -1662,7 +1666,7 @@ describe("custom provider identity", () => {
 				"utf-8",
 			),
 		);
-		expect(config.model).toBe("acme-ai/m");
+		expect(config.provider["acme-ai"].models.m).toBeDefined();
 		expect(config.provider["acme-ai"].name).toBe("Acme AI");
 		expect(config.provider["acme-ai"].options.apiKey).toBe("sk-user");
 		expect(config.provider.netgate).toBeUndefined();
@@ -1675,7 +1679,7 @@ describe("custom provider identity", () => {
 		const config = JSON.parse(
 			readFileSync(join(tempDir, ".config", "codev", "codev.json"), "utf-8"),
 		);
-		expect(config.model).toBe("acme-ai/m");
+		expect(config.provider["acme-ai"].models.m).toBeDefined();
 		expect(config.provider["acme-ai"].name).toBe("Acme AI");
 	});
 
