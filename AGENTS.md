@@ -249,6 +249,32 @@ The reader side is `src/lib/logs.ts` (`codevhub logs`): bare mode prints the mos
 
 Testing: logging is a silent no-op until `initLogging` runs, so ordinary tests need no setup and never write files. Tests that assert documents stub `CODEV_LOG_DIR`, call `initLogging(cmd, [], { installProcessHooks: false })` (so vitest's process stays free of our exit/crash listeners), and `resetLogging()` in `afterEach`. Related: `login()`'s force-login probe is keyed off `~/.codev-hub/auth.json` — not the `~/.codev-hub` dir — precisely because the logger creates `~/.codev-hub/logs` at the entry of every command.
 
+## Where skills go (`codevhub skill pull`)
+
+`src/lib/skill-dirs.ts` owns the one fact this feature turns on: **which directory each agent reads.** Establish it from the agents' own source, never from their docs — the table baked into the CoDev Code bundle lists only the `~/…` paths and omits the project-scope walk, which is the opposite of what the code does.
+
+The authority is `packages/opencode/src/skill/index.ts#discoverSkills` (CoDev Code / OpenCode — same module): `externalDirs = [".claude", ".agents"]`, scanned under `global.home` **and** walked from cwd up to the worktree root. Codex reads `.agents/skills` at both scopes (and `$HOME`); Claude Code reads `.claude/skills` at both. So:
+
+| | `.agents/skills` | `.claude/skills` |
+|---|---|---|
+| Codex | yes | no |
+| CoDev Code / OpenCode | yes | yes |
+| Claude Code | no | yes |
+
+Neither directory alone covers all four; together they do, with the **same rule at both scopes** — scope only chooses the root (`process.cwd()` vs `homedir()`). No agent needs a directory of its own, and in particular there is no `.codev/skills` or `.opencode/skills` link to write.
+
+`resolveTargets` therefore extracts **once** into whichever directory covers the most selected agents and links the other only if some selected agent can't reach it. When Codex isn't selected, `.claude/skills` alone serves everyone and only one directory is created. Adding Codex is what forces the second into existence. A hub skill can run to thousands of files (one is ~11k), so fanning out a copy per agent is not free.
+
+**Links are relative symlinks.** This repo's own skill is wired exactly that way — `.claude/skills/vercel-react-best-practices -> ../../.agents/skills/vercel-react-best-practices`, committed as git mode 120000 — and relative is what survives `git clone`; an absolute link breaks in every other checkout. `linkOrCopy` degrades in order: relative symlink → Windows **junction** (absolute, but needs neither Developer Mode nor admin, unlike a Windows symlink) → recursive copy. The mode is reported verbatim in `InstallResult.placements`, so a fallback copy is never described as a link.
+
+**Claude Code follows a symlinked skill directory only from v2.1.203.** Below that the link reads as a file with no SKILL.md and the skill is simply invisible, so `claudeFollowsSymlinks()` probes `claude --version` and forces a copy for that one link. Tests must stub `npm.execAsync` or they depend on whatever Claude Code the machine happens to have.
+
+**The duplicate-name warning is expected, not a bug.** When both directories exist, CoDev Code and OpenCode scan both, reach the same skill twice, and log `duplicate skill name` (`index.ts:125`); the last scan wins and the skill resolves to a single entry. It is log-only — warnings are not published as session events, unlike the parse errors just above them — and it already happens for any user whose skill sits in both directories, independent of CoDev. Users have `CODEV_DISABLE_CLAUDE_CODE_SKILLS` / `CODEV_DISABLE_EXTERNAL_SKILLS` (`packages/opencode/src/effect/runtime-flags.ts`); **CoDev must not set those on their behalf.**
+
+**Verifying against CoDev Code: query `/skill`, not `/api/skill`.** They are two different services. `/api/skill` is v2 (`packages/core/src/skill.ts` + `config/plugin/skill.ts`), which registers only `<configdir>/skill{,s}` plus `skills.paths` and so reports **nothing** from `.claude`/`.agents` — querying it will look exactly like a broken install. `/skill` is v1, the service `session/system.ts` uses to build the actual prompt. If CoDev Code ever migrates the prompt to v2, `.agents/skills` will need a `skills.paths` entry and this design changes.
+
+CoDev Code is the flagship: `ALWAYS_AGENT` is in every target set, the picker renders it locked, and `--agent` folds it in whether or not it was named.
+
 ## CodeGraph integration
 
 `src/lib/codegraph.ts` integrates the external [CodeGraph](https://www.npmjs.com/package/@colbymchenry/codegraph) tool (a CLI + MCP server). Two surfaces:

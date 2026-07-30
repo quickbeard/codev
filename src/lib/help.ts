@@ -41,9 +41,10 @@ Skill hub:
   skill search <query>   Search the public skill hub
                          (--json for machine-readable output,
                          --limit <n> to cap results, default 20)
-  skill pull <name>      Download and install a skill by name or id
-                         (prompts for location; --here or --global to skip the
-                         prompt, --dir <path> for an exact path, --force to
+  skill pull <name>      Download and install a skill for your agents
+                         (prompts for location and agents; --here or --global to
+                         set the scope, --agent <list> or --all-agents to set the
+                         agents, --dir <path> for an exact path, --force to
                          overwrite; --json for machine-readable output)
   skill push <path>      Publish a skill (a directory with SKILL.md, or a .zip)
                          (previews and confirms before upload; --draft-only to stop
