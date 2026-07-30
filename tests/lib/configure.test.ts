@@ -407,6 +407,16 @@ describe("configureOpenCode", () => {
 			context: 196608,
 			output: 65536,
 		});
+		// Declares image input so OpenCode doesn't strip attached images
+		// client-side before the request (a custom-provider model defaults to
+		// text-only capabilities).
+		expect(config.provider.netgate.models["chosen-model"].attachment).toBe(
+			true,
+		);
+		expect(config.provider.netgate.models["chosen-model"].modalities).toEqual({
+			input: ["text", "image"],
+			output: ["text"],
+		});
 		// Reserve lands the compaction trigger at ~85% of the window (196608 −
 		// 29491 ≈ 167K), matching Claude Code and Codex.
 		expect(config.compaction).toEqual({ auto: true, reserved: 29491 });
@@ -427,6 +437,11 @@ describe("configureOpenCode", () => {
 		for (const id of ["model-a", "model-b", "model-c"]) {
 			expect(map[id].name).toBe(id);
 			expect(map[id].limit).toEqual({ context: 196608, output: 65536 });
+			expect(map[id].attachment).toBe(true);
+			expect(map[id].modalities).toEqual({
+				input: ["text", "image"],
+				output: ["text"],
+			});
 		}
 		// Top-level default still points at the chosen one.
 		expect(config.model).toBe("netgate/model-a");
@@ -588,6 +603,14 @@ describe("configureCodevCode", () => {
 		expect(config.provider.netgate.models["chosen-model"].limit).toEqual({
 			context: 196608,
 			output: 65536,
+		});
+		// Same image-input declaration as OpenCode (shared writer).
+		expect(config.provider.netgate.models["chosen-model"].attachment).toBe(
+			true,
+		);
+		expect(config.provider.netgate.models["chosen-model"].modalities).toEqual({
+			input: ["text", "image"],
+			output: ["text"],
 		});
 		expect(config.compaction).toEqual({ auto: true, reserved: 29491 });
 	});
