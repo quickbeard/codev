@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -208,6 +209,22 @@ describe.skipIf(process.platform === "win32")("installShims (Unix)", () => {
 		}
 	});
 
+	test("guards every rc alias on the shim file existing", async () => {
+		// A live shell can hold the alias after the shim is gone (`codevhub
+		// unhook` in another terminal). An unguarded alias to the absolute shim
+		// path then breaks the command with "no such file or directory"; the
+		// guard lets the shell fall back to the real binary on PATH instead.
+		const { installShims } = await import("@/lib/shims.js");
+		installShims();
+
+		const zshrc = readFileSync(join(tempDir, ".zshrc"), "utf-8");
+		for (const agent of ["claude", "codev", "codex", "opencode"]) {
+			expect(zshrc).toContain(
+				`[ -x "$HOME/.codev-hub/bin/${agent}" ] && alias ${agent}="$HOME/.codev-hub/bin/${agent}"`,
+			);
+		}
+	});
+
 	test("preserves user content in existing rc files", async () => {
 		const zshrc = join(tempDir, ".zshrc");
 		writeFileSync(zshrc, "export FOO=bar\nalias ll='ls -la'\n");
@@ -249,7 +266,9 @@ describe.skipIf(process.platform === "win32")("installShims (Unix)", () => {
 		expect(withFish.rcFilesUpdated).toContain(fishPath);
 		const contents = readFileSync(fishPath, "utf-8");
 		expect(contents).toContain("fish_add_path -p $HOME/.codev-hub/bin");
-		expect(contents).toContain('alias claude "$HOME/.codev-hub/bin/claude"');
+		expect(contents).toContain(
+			'test -x "$HOME/.codev-hub/bin/claude"; and alias claude "$HOME/.codev-hub/bin/claude"',
+		);
 	});
 
 	test("does not touch the Windows PowerShell profile path on Unix", async () => {
@@ -287,6 +306,45 @@ describe.skipIf(process.platform === "win32")("installShims (Unix)", () => {
 		const execIdx = shim.indexOf("exec codevhub");
 		expect(exportIdx).toBeGreaterThan(-1);
 		expect(execIdx).toBeGreaterThan(exportIdx);
+	});
+
+	test("shim routes through codevhub when the hub is on PATH", async () => {
+		const { installShims, shimDir } = await import("@/lib/shims.js");
+		installShims();
+		const fakeBin = join(tempDir, "fake-bin");
+		mkdirSync(fakeBin, { recursive: true });
+		writeFileSync(join(fakeBin, "codevhub"), '#!/bin/sh\necho hub "$@"\n', {
+			mode: 0o755,
+		});
+		writeFileSync(join(fakeBin, "codev"), '#!/bin/sh\necho agent "$@"\n', {
+			mode: 0o755,
+		});
+
+		const result = spawnSync("/bin/sh", [join(shimDir(), "codev"), "--auto"], {
+			encoding: "utf-8",
+			env: { HOME: tempDir, PATH: `${shimDir()}:${fakeBin}` },
+		});
+		expect(result.status).toBe(0);
+		expect(result.stdout.trim()).toBe("hub codev --auto");
+	});
+
+	test("shim falls back to the real agent when codevhub is missing", async () => {
+		// The hub can be npm-uninstalled without `codevhub unhook` — the shim
+		// must then run the agent itself rather than dying on the missing hub.
+		const { installShims, shimDir } = await import("@/lib/shims.js");
+		installShims();
+		const fakeBin = join(tempDir, "fake-bin");
+		mkdirSync(fakeBin, { recursive: true });
+		writeFileSync(join(fakeBin, "codev"), '#!/bin/sh\necho agent "$@"\n', {
+			mode: 0o755,
+		});
+
+		const result = spawnSync("/bin/sh", [join(shimDir(), "codev"), "--auto"], {
+			encoding: "utf-8",
+			env: { HOME: tempDir, PATH: `${shimDir()}:${fakeBin}` },
+		});
+		expect(result.status).toBe(0);
+		expect(result.stdout.trim()).toBe("agent --auto");
 	});
 
 	test("rerun does not duplicate aliases inside the sentinel block", async () => {
@@ -442,13 +500,30 @@ describe.skipIf(process.platform === "win32")("repairShims (Unix)", () => {
 		expect(repairShims()).toBe(false);
 	});
 
-	test("is a no-op when shims already route through codevhub", async () => {
+	test("is a no-op when shims already match the current template", async () => {
 		const { installShims, repairShims } = await import("@/lib/shims.js");
 		installShims(["claude"]);
 		const path = join(tempDir, ".codev-hub", "bin", "claude");
 		const before = readFileSync(path, "utf-8");
 		expect(repairShims()).toBe(false);
 		expect(readFileSync(path, "utf-8")).toBe(before);
+	});
+
+	test("rewrites pre-fallback shims that die when the hub is uninstalled", async () => {
+		const { repairShims } = await import("@/lib/shims.js");
+		const dir = join(tempDir, ".codev-hub", "bin");
+		mkdirSync(dir, { recursive: true });
+		// A current-generation-minus-one shim: routes through codevhub but has
+		// no missing-hub fallback.
+		writeFileSync(
+			join(dir, "claude"),
+			'#!/bin/sh\nexec codevhub claude "$@"\n',
+			{ mode: 0o755 },
+		);
+		expect(repairShims()).toBe(true);
+		const body = readFileSync(join(dir, "claude"), "utf-8");
+		expect(body).toContain("command -v codevhub");
+		expect(body).toContain('exec claude "$@"');
 	});
 
 	test("rewrites pre-0.4 shims that exec the old `codev` hub command", async () => {
@@ -517,7 +592,7 @@ describe.skipIf(process.platform === "win32")(
 			const profile = readFileSync(psProfile(), "utf-8");
 			expect(profile).toContain("# >>> codev shims (managed) >>>");
 			expect(profile).toContain(
-				'function claude { & "$HOME\\.codev-hub\\bin\\claude.cmd" @args }',
+				'if (Test-Path "$HOME\\.codev-hub\\bin\\claude.cmd") { function claude { & "$HOME\\.codev-hub\\bin\\claude.cmd" @args } }',
 			);
 			expect(profile).not.toContain("function codex");
 			expect(profile).not.toContain("function opencode");
