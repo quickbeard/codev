@@ -129,7 +129,7 @@ function AdminLoginApp({
 	}
 
 	return (
-		<Box flexDirection="column" padding={1}>
+		<Box flexDirection="column" paddingX={1} paddingBottom={1}>
 			<Banner />
 			<Frame tag="CoDev">
 				<Step active title={adminLoginTitle()}>
@@ -168,7 +168,7 @@ function SsoLoginApp({ force = false }: { force?: boolean }) {
 	);
 
 	return (
-		<Box flexDirection="column" padding={1}>
+		<Box flexDirection="column" paddingX={1} paddingBottom={1}>
 			<Banner />
 			<Frame tag="CoDev">
 				{phase === "preparing" && (

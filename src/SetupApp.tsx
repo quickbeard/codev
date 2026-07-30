@@ -623,7 +623,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 	const inPreflight = step === "preflight";
 
 	return (
-		<Box flexDirection="column" padding={1}>
+		<Box flexDirection="column" paddingX={1} paddingBottom={1}>
 			<Banner />
 			<Frame tag="CoDev">
 				{preflight.length > 0 && (
