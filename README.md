@@ -59,24 +59,6 @@ steps — attach it to a support ticket rather than pasting screenshots. Secrets
 are scrubbed before it is written. The same results additionally land in the
 diagnostic log, so `codevhub logs` can replay a whole run.
 
-### On Windows: don't use Git Bash
-
-`codevhub install`, `config`, `model` and `remove` ask you questions, and Git
-Bash (MINGW64) cannot deliver keystrokes to a Node program — it pipes stdin
-through its own terminal emulation instead of a Windows console. CoDev detects
-this and tells you rather than failing with a stack trace, but the fix is yours
-to make. Either:
-
-- run CoDev from **Windows Terminal, PowerShell, or `cmd.exe`** (recommended), or
-- stay in Git Bash and allocate a real console:
-  `winpty cmd //c codevhub install`
-
-`codevhub doctor`, `codevhub update` and `codevhub logs` need no keyboard and
-run in Git Bash as-is — `doctor` in particular, so you can still check the rest
-of your setup from there. The agent launchers (`codev`, `claude`, `codex`,
-`opencode`) just hand your terminal to the agent, which may have a keyboard
-requirement of its own.
-
 ### Working behind a proxy
 
 Node does **not** honor `HTTP_PROXY`/`HTTPS_PROXY` on its own — it needs
