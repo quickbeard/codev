@@ -126,6 +126,11 @@ describe("ModelApp", () => {
 		expect(history).toContain(
 			"Default model updated to new-alpha for Claude Code and OpenCode.",
 		);
+		// OpenCode's config carries no model pin (it switches in-CLI), so the
+		// line above must not read as authoritative for it.
+		expect(history).toContain(
+			"In OpenCode, switch models anytime with /models.",
+		);
 		expect(configureClaude).toHaveBeenCalledWith({
 			apiKey: "sk-existing",
 			baseUrl: undefined,

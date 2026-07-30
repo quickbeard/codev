@@ -347,13 +347,29 @@ export function ModelApp() {
 							</Box>
 						)}
 						{phase === "done" && chosenModel && (
-							<Text>
-								{"Default model updated to "}
-								<Text color="cyan">{chosenModel}</Text>
-								{" for "}
-								{formatToolList(tools.map((t) => TOOL_LABEL[t]))}
-								{"."}
-							</Text>
+							<Box flexDirection="column">
+								<Text>
+									{"Default model updated to "}
+									<Text color="cyan">{chosenModel}</Text>
+									{" for "}
+									{formatToolList(tools.map((t) => TOOL_LABEL[t]))}
+									{"."}
+								</Text>
+								{/* Their configs carry no model pin (see configureOpenCodeKind),
+								    so a model already selected in-CLI keeps winning there —
+								    say so rather than let the line above imply otherwise. */}
+								{tools.some((t) => t === "opencode" || t === "codev-code") && (
+									<Text dimColor>
+										{"In "}
+										{formatToolList(
+											tools
+												.filter((t) => t === "opencode" || t === "codev-code")
+												.map((t) => TOOL_LABEL[t]),
+										)}
+										{", switch models anytime with /models."}
+									</Text>
+								)}
+							</Box>
 						)}
 					</Step>
 				)}
