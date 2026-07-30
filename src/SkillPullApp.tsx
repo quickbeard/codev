@@ -223,7 +223,7 @@ export function SkillPullApp({
 										color={i === agentIndex ? "cyan" : undefined}
 										dimColor={locked}
 									>
-										{`${i === agentIndex ? "❯ " : "  "}[${checked ? "x" : " "}] ${AGENT_LABELS[agent]}`}
+										{`${i === agentIndex ? "❯ " : "  "}[${checked ? "✓" : " "}] ${AGENT_LABELS[agent]}`}
 									</Text>
 								);
 							})}

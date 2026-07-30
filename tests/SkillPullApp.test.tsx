@@ -190,8 +190,8 @@ describe("SkillPullApp", () => {
 			});
 
 			const frame = frameText(lastFrame);
-			expect(frame).toContain("[x] Claude Code");
-			expect(frame).toContain("[x] CoDev Code");
+			expect(frame).toContain("[✓] Claude Code");
+			expect(frame).toContain("[✓] CoDev Code");
 			// Not configured on this machine, so not pre-checked.
 			expect(frame).toContain("[ ] Codex");
 			expect(frame).toContain("[ ] OpenCode");
@@ -211,7 +211,7 @@ describe("SkillPullApp", () => {
 			});
 			// Cursor starts on Claude Code; move to Codex and check it.
 			await waitFor(() => {
-				if (frameText(lastFrame).includes("[x] Codex")) return true;
+				if (frameText(lastFrame).includes("[✓] Codex")) return true;
 				if (frameText(lastFrame).includes("❯ [ ] Codex")) stdin.write(" ");
 				else stdin.write(DOWN);
 				return false;
@@ -242,13 +242,13 @@ describe("SkillPullApp", () => {
 			});
 			// Walk to CoDev Code and press space repeatedly — it stays checked.
 			await waitFor(() => {
-				if (frameText(lastFrame).includes("❯ [x] CoDev Code")) return true;
+				if (frameText(lastFrame).includes("❯ [✓] CoDev Code")) return true;
 				stdin.write(DOWN);
 				return false;
 			});
 			stdin.write(" ");
 			stdin.write(" ");
-			expect(frameText(lastFrame)).toContain("[x] CoDev Code");
+			expect(frameText(lastFrame)).toContain("[✓] CoDev Code");
 
 			await waitFor(() => {
 				if (spy.mock.calls.length > 0) return true;
