@@ -222,7 +222,7 @@ export function SkillPushApp({
 	const started = Object.values(stepState).some((s) => s !== "pending");
 
 	return (
-		<Box flexDirection="column" padding={1}>
+		<Box flexDirection="column" paddingX={1} paddingBottom={1}>
 			<Banner />
 			<Frame tag="CoDev">
 				{/* Step 1 — archive preview + confirm. Stays visible (dimmed) through

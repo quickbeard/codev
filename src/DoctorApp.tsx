@@ -342,7 +342,7 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 			: [];
 
 	return (
-		<Box flexDirection="column" padding={1}>
+		<Box flexDirection="column" paddingX={1} paddingBottom={1}>
 			<Banner />
 			<Frame tag="CoDev">
 				{phase === "preparing" && (
