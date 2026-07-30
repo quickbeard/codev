@@ -137,7 +137,6 @@ export const OPENCODE_SCHEMA_URL = atob(
 const OPENCODE_K = {
 	schema: atob("JHNjaGVtYQ=="),
 	mcp: atob("bWNw"),
-	model: atob("bW9kZWw="),
 	provider: atob("cHJvdmlkZXI="),
 	npm: atob("bnBt"),
 	npmPkg: atob("QGFpLXNkay9vcGVuYWktY29tcGF0aWJsZQ=="),
