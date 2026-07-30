@@ -7,11 +7,17 @@ import { Step } from "@/components/Step.js";
 import { useCanType } from "@/components/useCanType.js";
 import { stripControlChars } from "@/lib/sanitize.js";
 import {
+	AGENT_LABELS,
+	ALWAYS_AGENT,
+	SKILL_AGENTS,
+	type SkillAgent,
+} from "@/lib/skill-dirs.js";
+import {
+	defaultAgents,
 	formatInstallResult,
 	type InstallLocation,
 	type InstallResult,
 	installResolvedSkill,
-	skillsDirFor,
 } from "@/lib/skill-install.js";
 import { getSkillMeta, type SkillMeta } from "@/lib/skillhub.js";
 
@@ -19,12 +25,21 @@ interface SkillPullAppProps {
 	target: string;
 	force: boolean;
 	json: boolean;
+	// Agent set from --agent/--all-agents. Absent ⇒ prompt for it, pre-checked
+	// with defaultAgents().
+	agents?: SkillAgent[];
 	// Reports success/failure so the caller can set the process exit code, then
 	// the app exits on its own. Optional so tests can omit it.
 	onDone?: (ok: boolean) => void;
 }
 
-type Phase = "resolving" | "select" | "installing" | "done" | "error";
+type Phase =
+	| "resolving"
+	| "select"
+	| "agents"
+	| "installing"
+	| "done"
+	| "error";
 
 const LOCATIONS: { key: InstallLocation; label: string }[] = [
 	{ key: "current", label: "Current directory" },
@@ -35,6 +50,7 @@ export function SkillPullApp({
 	target,
 	force,
 	json,
+	agents,
 	onDone,
 }: SkillPullAppProps) {
 	const { exit } = useApp();
@@ -44,6 +60,13 @@ export function SkillPullApp({
 	const [index, setIndex] = useState(0);
 	const [result, setResult] = useState<InstallResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [scope, setScope] = useState<InstallLocation>("current");
+	const [agentIndex, setAgentIndex] = useState(0);
+	// Pre-check: whatever CoDev has configured, plus the always-on flagship.
+	// Computed once — detectCodevTools() hits the filesystem.
+	const [picked, setPicked] = useState<Set<SkillAgent>>(
+		() => new Set(agents ?? defaultAgents()),
+	);
 
 	// Signal the outcome, then unmount. exit() takes no error — the exit code is
 	// carried by onDone — so waitUntilExit resolves cleanly either way.
@@ -78,12 +101,12 @@ export function SkillPullApp({
 	}, [target, finish]);
 
 	const start = useCallback(
-		async (location: InstallLocation) => {
+		async (location: InstallLocation, chosen: readonly SkillAgent[]) => {
 			if (!meta) return;
 			setPhase("installing");
 			try {
 				const r = await installResolvedSkill(meta, {
-					rootDir: skillsDirFor(location),
+					target: { kind: "agents", agents: [...chosen], scope: location },
 					force,
 				});
 				setResult(r);
@@ -99,14 +122,14 @@ export function SkillPullApp({
 	);
 
 	// The dispatcher already routes a keyboard-less terminal to the plain runner,
-	// so reaching "select" without one means Ink's stdin isn't the process's own.
+	// so reaching a prompt without one means Ink's stdin isn't the process's own.
 	// Say so and exit rather than mounting a picker that can never be answered:
 	// unlike the ungated case this is a silent hang, not a throw.
 	useEffect(() => {
-		if (phase !== "select" || canType) return;
+		if ((phase !== "select" && phase !== "agents") || canType) return;
 		setError(
-			"This terminal cannot supply keystrokes, so the location prompt cannot be shown.\n" +
-				"Pass --here, --global, or --dir <path> to choose a location without it.",
+			"This terminal cannot supply keystrokes, so the install prompts cannot be shown.\n" +
+				"Pass --here, --global, or --dir <path> to choose a location without them.",
 		);
 		setPhase("error");
 		finish(false);
@@ -120,10 +143,45 @@ export function SkillPullApp({
 			} else if (key.downArrow) {
 				setIndex((i) => (i + 1) % LOCATIONS.length);
 			} else if (key.return) {
-				void start(LOCATIONS[index]?.key ?? "current");
+				const location = LOCATIONS[index]?.key ?? "current";
+				setScope(location);
+				// An explicit --agent/--all-agents already answered the second
+				// question; don't ask it again.
+				if (agents) {
+					void start(location, agents);
+					return;
+				}
+				setPhase("agents");
 			}
 		},
 		{ isActive: canType && phase === "select" },
+	);
+
+	useInput(
+		(input, key) => {
+			if (phase !== "agents") return;
+			if (key.upArrow) {
+				setAgentIndex((i) => (i === 0 ? SKILL_AGENTS.length - 1 : i - 1));
+			} else if (key.downArrow) {
+				setAgentIndex((i) => (i + 1) % SKILL_AGENTS.length);
+			} else if (input === " ") {
+				const agent = SKILL_AGENTS[agentIndex];
+				// CoDev Code is the flagship and is never opted out of.
+				if (!agent || agent === ALWAYS_AGENT) return;
+				setPicked((prev) => {
+					const next = new Set(prev);
+					if (next.has(agent)) next.delete(agent);
+					else next.add(agent);
+					return next;
+				});
+			} else if (key.return) {
+				void start(
+					scope,
+					SKILL_AGENTS.filter((a) => picked.has(a)),
+				);
+			}
+		},
+		{ isActive: canType && phase === "agents" },
 	);
 
 	// Sanitize the hub-sourced name before rendering it to the terminal.
@@ -151,6 +209,25 @@ export function SkillPullApp({
 									{`${i === index ? "❯ " : "  "}${loc.label}`}
 								</Text>
 							))}
+						</Box>
+					)}
+					{phase === "agents" && (
+						<Box flexDirection="column">
+							<Text dimColor>For which agents?</Text>
+							{SKILL_AGENTS.map((agent, i) => {
+								const locked = agent === ALWAYS_AGENT;
+								const checked = locked || picked.has(agent);
+								return (
+									<Text
+										key={agent}
+										color={i === agentIndex ? "cyan" : undefined}
+										dimColor={locked}
+									>
+										{`${i === agentIndex ? "❯ " : "  "}[${checked ? "x" : " "}] ${AGENT_LABELS[agent]}`}
+									</Text>
+								);
+							})}
+							<Text dimColor>space toggles · enter confirms</Text>
 						</Box>
 					)}
 					{phase === "installing" && (

@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import type { SkillAgent } from "@/lib/skill-dirs.js";
 import * as install from "@/lib/skill-install.js";
 import * as skillhub from "@/lib/skillhub.js";
 import { SkillPullApp } from "@/SkillPullApp.js";
@@ -54,14 +55,21 @@ async function confirm(
 }
 
 function okResult(dir: string): install.InstallResult {
+	const path = join(dir, "pg-tuner");
 	return {
 		name: "pg-tuner",
 		version: "1.2.0",
 		id: ID,
-		dir: join(dir, "pg-tuner"),
+		dir: path,
 		strippedRoot: "pg-tuner",
+		placements: [{ path, mode: "store", agents: ["codev"] }],
 	};
 }
+
+// Most tests here are about the location step, so they pass `agents` explicitly:
+// that skips the agent picker AND keeps them off detectCodevTools(), which reads
+// the real machine. The picker has its own tests below.
+const CODEV_ONLY: SkillAgent[] = ["codev"];
 
 function mockResolve(meta: skillhub.SkillMeta = META) {
 	return vi.spyOn(skillhub, "getSkillMeta").mockResolvedValue(meta);
@@ -97,12 +105,17 @@ describe("SkillPullApp", () => {
 			.mockResolvedValue(okResult(currentRoot));
 
 		const { stdin, lastFrame } = render(
-			<SkillPullApp target={ID} force={false} json={false} />,
+			<SkillPullApp
+				target={ID}
+				force={false}
+				json={false}
+				agents={CODEV_ONLY}
+			/>,
 		);
 
 		await confirm(stdin, lastFrame, () => spy.mock.calls.length > 0);
 		expect(spy).toHaveBeenCalledWith(META, {
-			rootDir: currentRoot,
+			target: { kind: "agents", agents: CODEV_ONLY, scope: "current" },
 			force: false,
 		});
 		await waitFor(() =>
@@ -118,13 +131,18 @@ describe("SkillPullApp", () => {
 			.mockResolvedValue(okResult(globalRoot));
 
 		const { stdin, lastFrame } = render(
-			<SkillPullApp target={ID} force={false} json={false} />,
+			<SkillPullApp
+				target={ID}
+				force={false}
+				json={false}
+				agents={CODEV_ONLY}
+			/>,
 		);
 
 		await moveToGlobal(stdin, lastFrame);
 		await confirm(stdin, lastFrame, () => spy.mock.calls.length > 0);
 		expect(spy).toHaveBeenCalledWith(META, {
-			rootDir: globalRoot,
+			target: { kind: "agents", agents: CODEV_ONLY, scope: "global" },
 			force: false,
 		});
 	});
@@ -136,10 +154,111 @@ describe("SkillPullApp", () => {
 			.mockResolvedValue(okResult(join(process.cwd(), ".claude", "skills")));
 
 		const { stdin, lastFrame } = render(
-			<SkillPullApp target={ID} force={true} json={false} />,
+			<SkillPullApp
+				target={ID}
+				force={true}
+				json={false}
+				agents={CODEV_ONLY}
+			/>,
 		);
 		await confirm(stdin, lastFrame, () => spy.mock.calls.length > 0);
 		expect(spy.mock.calls[0]?.[1]).toMatchObject({ force: true });
+	});
+
+	// The agent picker. `agents` is left off so the second prompt appears;
+	// detectCodevTools is stubbed so the pre-check doesn't depend on the machine.
+	describe("agent picker", () => {
+		function renderPicker(detected: SkillAgent[] = []) {
+			vi.spyOn(install, "defaultAgents").mockReturnValue([
+				...detected,
+				"codev",
+			]);
+			return render(<SkillPullApp target={ID} force={false} json={false} />);
+		}
+
+		test("appears after the location choice, pre-checked with detected agents", async () => {
+			mockResolve();
+			vi.spyOn(install, "installResolvedSkill").mockResolvedValue(
+				okResult(join(process.cwd(), ".claude", "skills")),
+			);
+			const { stdin, lastFrame } = renderPicker(["claude"]);
+
+			await waitFor(() => {
+				if (frameText(lastFrame).includes("For which agents?")) return true;
+				if (inSelect(lastFrame)) stdin.write("\r");
+				return false;
+			});
+
+			const frame = frameText(lastFrame);
+			expect(frame).toContain("[x] Claude Code");
+			expect(frame).toContain("[x] CoDev Code");
+			// Not configured on this machine, so not pre-checked.
+			expect(frame).toContain("[ ] Codex");
+			expect(frame).toContain("[ ] OpenCode");
+		});
+
+		test("space toggles an agent, and enter installs the checked set", async () => {
+			mockResolve();
+			const spy = vi
+				.spyOn(install, "installResolvedSkill")
+				.mockResolvedValue(okResult(join(process.cwd(), ".agents", "skills")));
+			const { stdin, lastFrame } = renderPicker();
+
+			await waitFor(() => {
+				if (frameText(lastFrame).includes("For which agents?")) return true;
+				if (inSelect(lastFrame)) stdin.write("\r");
+				return false;
+			});
+			// Cursor starts on Claude Code; move to Codex and check it.
+			await waitFor(() => {
+				if (frameText(lastFrame).includes("[x] Codex")) return true;
+				if (frameText(lastFrame).includes("❯ [ ] Codex")) stdin.write(" ");
+				else stdin.write(DOWN);
+				return false;
+			});
+			await waitFor(() => {
+				if (spy.mock.calls.length > 0) return true;
+				stdin.write("\r");
+				return false;
+			});
+
+			expect(spy.mock.calls[0]?.[1]).toMatchObject({
+				target: { kind: "agents", agents: ["codex", "codev"] },
+			});
+		});
+
+		// CoDev Code is the flagship: the picker must not let it be turned off.
+		test("CoDev Code cannot be unchecked", async () => {
+			mockResolve();
+			const spy = vi
+				.spyOn(install, "installResolvedSkill")
+				.mockResolvedValue(okResult(join(process.cwd(), ".claude", "skills")));
+			const { stdin, lastFrame } = renderPicker();
+
+			await waitFor(() => {
+				if (frameText(lastFrame).includes("For which agents?")) return true;
+				if (inSelect(lastFrame)) stdin.write("\r");
+				return false;
+			});
+			// Walk to CoDev Code and press space repeatedly — it stays checked.
+			await waitFor(() => {
+				if (frameText(lastFrame).includes("❯ [x] CoDev Code")) return true;
+				stdin.write(DOWN);
+				return false;
+			});
+			stdin.write(" ");
+			stdin.write(" ");
+			expect(frameText(lastFrame)).toContain("[x] CoDev Code");
+
+			await waitFor(() => {
+				if (spy.mock.calls.length > 0) return true;
+				stdin.write("\r");
+				return false;
+			});
+			expect(spy.mock.calls[0]?.[1]).toMatchObject({
+				target: { agents: ["codev"] },
+			});
+		});
 	});
 
 	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts). The

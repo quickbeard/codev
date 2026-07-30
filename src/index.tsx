@@ -448,6 +448,7 @@ switch (command) {
 						target={parsed.target}
 						force={parsed.force}
 						json={parsed.json}
+						agents={parsed.agents}
 						onDone={(v) => {
 							ok = v;
 						}}
