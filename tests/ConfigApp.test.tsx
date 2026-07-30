@@ -16,6 +16,7 @@ import * as auth from "@/lib/auth.js";
 import * as backend from "@/lib/backend.js";
 import * as codegraph from "@/lib/codegraph.js";
 import * as configure from "@/lib/configure.js";
+import * as shims from "@/lib/shims.js";
 
 // ConfigApp shares its state machine with InstallApp (both render <SetupApp />).
 // These tests cover only the config-specific deltas:
@@ -81,6 +82,17 @@ beforeEach(() => {
 			created: true,
 		},
 	]);
+	// The finalize Phase calls installShims(), and on Windows that shells out to
+	// a real `powershell -Command` (execFileSync — NOT the mocked execFile) to
+	// rewrite the user-scope PATH in the registry: a synchronous spawn that
+	// blocks the event loop long enough to starve waitForFrame, and that mutates
+	// the PATH of whatever machine runs the suite. See InstallApp.test.tsx.
+	vi.spyOn(shims, "installShims").mockReturnValue({
+		shimDir: join(configAppTempHome, ".codev-hub", "bin"),
+		shimsWritten: [],
+		rcFilesUpdated: [],
+		windowsUserPathUpdated: false,
+	});
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
