@@ -152,6 +152,15 @@ function fakeAuth(): auth.AuthData {
 // works locally is a Heisenbug. Resolves silently when `maxMs` elapses —
 // downstream assertions surface the real failure message.
 //
+// `maxMs` is a *polling* budget, not the per-test timeout (30 s, in
+// vitest.config.ts). The old 3 s cap was well under that budget yet still gave
+// up mid-flow on a loaded Windows runner: the poll returned empty, and the
+// next assertion failed with "expected … to contain 'Happy coding'" — a
+// misleading message for what was really a too-short wait. It is 15 s so a
+// slow render has real slack, while staying below the 30 s test timeout so a
+// genuine hang still surfaces through the named assertion rather than a bare
+// "Test timed out".
+//
 // Includes a small settle after the match so the component's useInput handler
 // has time to register on the render that contained `needle` — without this,
 // an immediate stdin.write can land before the handler is active and get
@@ -159,7 +168,7 @@ function fakeAuth(): auth.AuthData {
 async function waitForFrame(
 	frames: string[],
 	needle: string,
-	maxMs = 3_000,
+	maxMs = 15_000,
 ): Promise<void> {
 	const start = Date.now();
 	while (Date.now() - start < maxMs) {

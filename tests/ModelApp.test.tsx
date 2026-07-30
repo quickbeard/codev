@@ -37,10 +37,13 @@ function allFrames(frames: string[]): string {
 // Poll `frames` for a substring with a 30ms settle after match so the
 // just-mounted component's useInput is active before the next keypress.
 // Avoids the fixed-time `tick(150)` waits which are too tight on Windows CI.
+// `maxMs` is a polling budget, well under the 30 s per-test timeout: 15 s, not
+// 3 s, so a slow render on a loaded Windows runner does not make the poll give
+// up mid-flow and fail the next assertion with a misleading message.
 async function waitForFrame(
 	frames: string[],
 	needle: string,
-	maxMs = 3_000,
+	maxMs = 15_000,
 ): Promise<void> {
 	const start = Date.now();
 	while (Date.now() - start < maxMs) {

@@ -135,11 +135,13 @@ function stubHappyPath() {
 }
 
 // Poll rather than sleep — the flow is a chain of async phases and a fixed
-// sleep that passes locally is a Heisenbug on slower CI.
+// sleep that passes locally is a Heisenbug on slower CI. `maxMs` is a polling
+// budget, well under the 30 s per-test timeout: 15 s so a slow render on a
+// loaded Windows runner does not make the poll give up mid-flow.
 async function waitForFrame(
 	frames: string[],
 	needle: string,
-	maxMs = 5_000,
+	maxMs = 15_000,
 ): Promise<void> {
 	const start = Date.now();
 	while (Date.now() - start < maxMs) {

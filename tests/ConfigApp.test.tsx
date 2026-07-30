@@ -122,10 +122,14 @@ function fakeAuth(): auth.AuthData {
 	};
 }
 
+// `maxMs` is a polling budget, well under the 30 s per-test timeout
+// (vitest.config.ts). 15 s, not 3 s: the shorter cap gave up mid-flow on a
+// loaded Windows runner and the next assertion failed with a misleading
+// "expected … to contain" instead of the real too-slow-render cause.
 async function waitForFrame(
 	frames: string[],
 	needle: string,
-	maxMs = 3_000,
+	maxMs = 15_000,
 ): Promise<void> {
 	const start = Date.now();
 	while (Date.now() - start < maxMs) {
