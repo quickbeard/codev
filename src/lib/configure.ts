@@ -146,6 +146,11 @@ const OPENCODE_K = {
 	baseURL: atob("YmFzZVVSTA=="),
 	apiKey: atob("YXBpS2V5"),
 	models: atob("bW9kZWxz"),
+	attachment: atob("YXR0YWNobWVudA=="),
+	modalities: atob("bW9kYWxpdGllcw=="),
+	input: atob("aW5wdXQ="),
+	text: atob("dGV4dA=="),
+	image: atob("aW1hZ2U="),
 	limit: atob("bGltaXQ="),
 	context: atob("Y29udGV4dA=="),
 	output: atob("b3V0cHV0"),
@@ -927,11 +932,22 @@ function configureOpenCodeKind(
 	// mis-sizes the window and disables OpenCode's auto-compaction entirely.
 	// Declare the gateway's real window so compaction works; `output` is required
 	// whenever a `limit` object is present.
+	//
+	// Image input defaults to off for custom-provider models, which makes
+	// OpenCode strip attached images before the request and the model reply
+	// that it can't see them. Declare image support so attachments pass
+	// through; for a text-only model the gateway/model then decides (reject or
+	// ignore) instead of the client silently dropping the image.
 	const modelsMap = Object.fromEntries(
 		allModels.map((id) => [
 			id,
 			{
 				[OPENCODE_K.name]: id,
+				[OPENCODE_K.attachment]: true,
+				[OPENCODE_K.modalities]: {
+					[OPENCODE_K.input]: [OPENCODE_K.text, OPENCODE_K.image],
+					[OPENCODE_K.output]: [OPENCODE_K.text],
+				},
 				[OPENCODE_K.limit]: {
 					[OPENCODE_K.context]: GATEWAY_CONTEXT_WINDOW,
 					[OPENCODE_K.output]: GATEWAY_MAX_OUTPUT_TOKENS,
