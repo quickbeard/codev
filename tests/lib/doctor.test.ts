@@ -60,10 +60,25 @@ const PROXY_VARS = [
 	PROXY_APPLIED_ENV,
 ];
 
+// The terminal check consults these, and CI is graded ahead of Git Bash — so
+// the very GitHub Actions run that executes this suite (CI=1, GITHUB_ACTIONS=1)
+// would otherwise mask the msys signal and turn the Git Bash `fail` into a CI
+// `warn`. Cleared so the assertions describe the classifier, not the runner.
+const TERMINAL_ENV_VARS = [
+	"CI",
+	"GITHUB_ACTIONS",
+	"GITLAB_CI",
+	"JENKINS_URL",
+	"TF_BUILD",
+	"MSYSTEM",
+	"TERM_PROGRAM",
+];
+
 beforeEach(() => {
 	// A maintainer's own proxy settings would otherwise change which branch of
 	// every diagnosis is taken.
 	for (const name of PROXY_VARS) vi.stubEnv(name, "");
+	for (const name of TERMINAL_ENV_VARS) vi.stubEnv(name, "");
 	proxy.resetProxyState();
 });
 
