@@ -39,10 +39,18 @@ import {
 	type ShimAgent,
 	uninstallShims,
 } from "@/lib/shims.js";
-import { parsePullArgs, runSkillInstall } from "@/lib/skill-install.js";
+import {
+	PULL_USAGE,
+	parsePullArgs,
+	runSkillInstall,
+} from "@/lib/skill-install.js";
 import { parsePublishArgs, runSkillPublish } from "@/lib/skill-publish.js";
 import { runSkillSearch } from "@/lib/skill-search.js";
-import { interactiveTerminalBlocker, stdinKind } from "@/lib/tty.js";
+import {
+	interactiveTerminalBlocker,
+	rawModeSupported,
+	stdinKind,
+} from "@/lib/tty.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
 import { ModelApp } from "@/ModelApp.js";
 import { RemoveApp } from "@/RemoveApp.js";
@@ -92,6 +100,19 @@ function flagValue(argv: string[], name: string): string | undefined {
 		if (arg?.startsWith(eq)) return arg.slice(eq.length);
 	}
 	return undefined;
+}
+
+// Whether a skill subcommand should mount its Ink prompt rather than fall back
+// to its non-interactive runner. Two independent conditions:
+//
+//   - the keyboard, asked via `rawModeSupported()` — Ink gates raw mode on
+//     `stdin.isTTY` alone, and lib/tty.ts exists so that gate is stated in one
+//     place; re-deriving it here is how the two silently drift apart.
+//   - stdout being a terminal, which is not about the keyboard at all: it keeps
+//     `codevhub skill pull … | tee log` on the plain runner instead of piping a
+//     rendered Ink frame full of ANSI into a file.
+function skillPromptUsable(): boolean {
+	return rawModeSupported() && Boolean(process.stdout.isTTY);
 }
 
 // Refuse, with an explanation, when a command is about to mount a keyboard
@@ -382,7 +403,7 @@ switch (command) {
 			}
 			// Interactive TTY (and not --json): preview + confirm before uploading
 			// (Ink). Otherwise (piped/CI, or --json) go the plain runner.
-			const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+			const interactive = skillPromptUsable();
 			if (interactive && !parsed.json) {
 				let ok = true;
 				const { waitUntilExit } = render(
@@ -412,15 +433,15 @@ switch (command) {
 				process.exit(1);
 			}
 			if (!parsed.target) {
-				console.error(
-					"Usage: codevhub skill pull <name|id> [--dir <path>] [--force] [--json]",
-				);
+				console.error(PULL_USAGE);
 				process.exit(1);
 			}
-			// Interactive + no explicit --dir: prompt for the location (Ink).
-			// Otherwise (--dir given, or piped/CI) go the plain non-interactive path.
-			const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-			if (parsed.dir === undefined && interactive) {
+			// Interactive + no explicit location: prompt for one (Ink). Otherwise
+			// (--here/--global/--dir given, or piped/CI) go the plain
+			// non-interactive path.
+			const interactive = skillPromptUsable();
+			const located = parsed.dir !== undefined || parsed.location !== undefined;
+			if (!located && interactive) {
 				let ok = true;
 				const { waitUntilExit } = render(
 					<SkillPullApp

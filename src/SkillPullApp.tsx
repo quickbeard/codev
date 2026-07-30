@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Banner } from "@/components/Banner.js";
 import { Frame } from "@/components/Frame.js";
 import { Step } from "@/components/Step.js";
+import { useCanType } from "@/components/useCanType.js";
 import { stripControlChars } from "@/lib/sanitize.js";
 import {
 	formatInstallResult,
@@ -37,6 +38,7 @@ export function SkillPullApp({
 	onDone,
 }: SkillPullAppProps) {
 	const { exit } = useApp();
+	const canType = useCanType();
 	const [phase, setPhase] = useState<Phase>("resolving");
 	const [meta, setMeta] = useState<SkillMeta | null>(null);
 	const [index, setIndex] = useState(0);
@@ -96,6 +98,20 @@ export function SkillPullApp({
 		[meta, force, finish],
 	);
 
+	// The dispatcher already routes a keyboard-less terminal to the plain runner,
+	// so reaching "select" without one means Ink's stdin isn't the process's own.
+	// Say so and exit rather than mounting a picker that can never be answered:
+	// unlike the ungated case this is a silent hang, not a throw.
+	useEffect(() => {
+		if (phase !== "select" || canType) return;
+		setError(
+			"This terminal cannot supply keystrokes, so the location prompt cannot be shown.\n" +
+				"Pass --here, --global, or --dir <path> to choose a location without it.",
+		);
+		setPhase("error");
+		finish(false);
+	}, [phase, canType, finish]);
+
 	useInput(
 		(_input, key) => {
 			if (phase !== "select") return;
@@ -107,7 +123,7 @@ export function SkillPullApp({
 				void start(LOCATIONS[index]?.key ?? "current");
 			}
 		},
-		{ isActive: phase === "select" },
+		{ isActive: canType && phase === "select" },
 	);
 
 	// Sanitize the hub-sourced name before rendering it to the terminal.

@@ -42,8 +42,9 @@ Skill hub:
                          (--json for machine-readable output,
                          --limit <n> to cap results, default 20)
   skill pull <name>      Download and install a skill by name or id
-                         (prompts for location; --dir <path> to set it explicitly,
-                         --force to overwrite; --json for machine-readable output)
+                         (prompts for location; --here or --global to skip the
+                         prompt, --dir <path> for an exact path, --force to
+                         overwrite; --json for machine-readable output)
   skill push <path>      Publish a skill (a directory with SKILL.md, or a .zip)
                          (previews and confirms before upload; --draft-only to stop
                          at DRAFT, --auto-approve for admins, --json for output)

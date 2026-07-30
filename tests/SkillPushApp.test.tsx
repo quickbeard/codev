@@ -188,4 +188,40 @@ describe("SkillPushApp login gate", () => {
 		expect(authSpy).not.toHaveBeenCalled();
 		expect(pub).not.toHaveBeenCalled();
 	});
+
+	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts). The
+	// confirm step is the last thing between the user and an upload, so silence
+	// must never be read as consent. ink-testing-library's stdin reports isTTY
+	// true and takes no options, so the flag is flipped and the tree re-rendered
+	// — Ink recomputes `isRawModeSupported` every render.
+	test("without raw mode: refuses rather than publishing unconfirmed", async () => {
+		const authSpy = vi
+			.spyOn(skillhub, "hasSkillhubAuth")
+			.mockResolvedValue(true);
+		const pub = vi.spyOn(publish, "publishSkill").mockResolvedValue(RESULT);
+		vi.spyOn(publish, "preparePublishArchive").mockResolvedValue(ARCHIVE);
+		const onDone = vi.fn();
+
+		const node = (
+			<SkillPushApp
+				path="./pg-tuner"
+				json={false}
+				draftOnly={false}
+				autoApprove={false}
+				onDone={onDone}
+			/>
+		);
+		const instance = render(node);
+		instance.stdin.isTTY = false;
+		instance.rerender(node);
+
+		await waitFor(() =>
+			frameText(instance.lastFrame).includes("cannot supply keystrokes"),
+		);
+		expect(frameText(instance.lastFrame)).toContain("--json");
+		expect(authSpy).not.toHaveBeenCalled();
+		expect(pub).not.toHaveBeenCalled();
+		await waitFor(() => onDone.mock.calls.length > 0);
+		expect(onDone).toHaveBeenCalledWith(false);
+	});
 });
