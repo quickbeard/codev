@@ -492,4 +492,69 @@ describe("Login", () => {
 		const joined = stripAnsi(lastFrame() ?? "").replace(/\n/g, "");
 		expect(joined).toContain(url);
 	});
+
+	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts). Ink
+	// throws from `useInput`'s mount effect there, which used to take down
+	// `codevhub doctor` — the one command that can still explain the problem.
+	// ink-testing-library's stdin reports isTTY true and takes no options, so the
+	// flag is flipped and the tree re-rendered: Ink recomputes
+	// `isRawModeSupported` on every render, so the second pass mounts the
+	// component exactly as it would in that terminal.
+	describe("without raw mode", () => {
+		function renderNoRawMode(node: React.ReactElement) {
+			const instance = render(node);
+			instance.stdin.isTTY = false;
+			instance.rerender(node);
+			return instance;
+		}
+
+		test("still shows the sign-in URL, since the browser completes login", async () => {
+			const url = "https://sso.test/authorize?x=1";
+			vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+				onReady(
+					() => {},
+					url,
+					() => null,
+				);
+				return new Promise(() => {});
+			});
+
+			const onDone = vi.fn();
+			const { lastFrame } = renderNoRawMode(
+				<Box padding={1}>
+					<Frame tag="CoDev">
+						<Step active title={loginTitle()}>
+							<Login onDone={onDone} fallbackDelayMs={0} />
+						</Step>
+					</Frame>
+				</Box>,
+			);
+
+			await waitFor(() => (lastFrame() ?? "").includes("Browser didn't open?"));
+			const output = lastFrame() ?? "";
+			// The URL is the whole point: the loopback callback still finishes the
+			// sign-in without a single keystroke.
+			expect(stripAnsi(output).replace(/\n/g, "")).toContain(url);
+			// What genuinely needs a keyboard is replaced by an explanation, not
+			// rendered as a field the user can type into with no effect.
+			expect(output).not.toContain("Press Enter to submit");
+			expect(output).toContain("can't accept keyboard input");
+			// The copy shortcut is a keystroke too.
+			expect(output).not.toContain("press C to copy");
+		});
+
+		test("drops the Enter-to-retry hint it cannot honor", async () => {
+			vi.spyOn(auth, "login").mockImplementation(() =>
+				Promise.reject(new Error("Connection refused")),
+			);
+
+			const onDone = vi.fn();
+			const { lastFrame } = renderNoRawMode(<Login onDone={onDone} />);
+
+			await waitFor(() =>
+				(lastFrame() ?? "").includes("Login failed: Connection refused"),
+			);
+			expect(lastFrame() ?? "").not.toContain("Press Enter to retry");
+		});
+	});
 });

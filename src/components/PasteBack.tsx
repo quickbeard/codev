@@ -6,6 +6,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { useCanType } from "@/components/useCanType.js";
 
 // Shared no-browser paste-back affordance for the SSO login flow. A remote or
 // headless user finishes login in a browser on another device and lands on the
@@ -36,7 +37,15 @@ export interface PasteBack {
 // on screen" condition (browser opened, no fatal error, login still pending).
 // The hook additionally suspends input while a submitted paste is completing,
 // so the two never need to be combined at the call site.
+//
+// It also refuses to claim the keyboard when the terminal has none (Git Bash on
+// Windows — see lib/tty.ts). That guard lives here, in the shared hook, rather
+// than at each call site: both <Login> and <UploadApp> would otherwise crash the
+// whole command inside a mount effect the moment a fresh sign-in put the field
+// on screen. Callers should still hide <PasteBackPrompt> in that case, so no
+// dead input field is offered.
 export function usePasteBack(active: boolean): PasteBack {
+	const canType = useCanType();
 	const [pasteValue, setPasteValue] = useState("");
 	const [pasteError, setPasteError] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
@@ -88,7 +97,7 @@ export function usePasteBack(active: boolean): PasteBack {
 			setPasteValue((prev) => prev + cleaned);
 			setPasteError(null);
 		},
-		{ isActive: active && !submitting },
+		{ isActive: active && !submitting && canType },
 	);
 
 	return { pasteValue, pasteError, submitting, submitRef, reset, clearValue };

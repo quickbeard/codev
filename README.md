@@ -31,9 +31,10 @@ codevhub doctor --force    # also force a real sign-in instead of reusing the ca
 
 It is read-only (it installs and configures nothing) and checks, in order:
 
-- **Environment** — Node version, npm, the global npm prefix (on `PATH` and
-  writable), the npm registry/proxy configuration, your proxy and TLS
-  environment variables, and whether the OS certificate store is readable.
+- **Environment** — Node version, whether your terminal can accept keyboard
+  input, npm, the global npm prefix (on `PATH` and writable), the npm
+  registry/proxy configuration, your proxy and TLS environment variables, and
+  whether the OS certificate store is readable.
 - **Network** — the CoDev backend and the npm registry are actually reachable.
 - **Account** — sign-in, gateway API key, CoDev configuration, and the analysis
   backend (used by `codevhub upload`).

@@ -250,6 +250,39 @@ describe("DoctorApp", () => {
 		expect(frames.join("\n")).toContain("Configure a proxy");
 	});
 
+	// The whole reason `doctor` is exempt from index.tsx's interactive-terminal
+	// gate: in Git Bash it is the only command left that can explain the problem,
+	// so it must not mount a text field it cannot read (Ink throws from that
+	// mount effect) and must still reach its summary and report file.
+	test("a keyboard-less terminal skips the proxy prompt and still finishes", async () => {
+		vi.spyOn(log, "loggedFetch").mockRejectedValue(
+			Object.assign(new TypeError("fetch failed"), {
+				cause: Object.assign(new Error("connect ECONNREFUSED 1.2.3.4:443"), {
+					code: "ECONNREFUSED",
+				}),
+			}),
+		);
+		stubHappyPath();
+
+		// ink-testing-library's stdin always reports isTTY true and takes no
+		// options; Ink recomputes isRawModeSupported every render, so flipping the
+		// flag and re-rendering reproduces that terminal. This lands before the
+		// async environment group resolves, so the network phase reads the new
+		// value.
+		const instance = render(<DoctorApp />);
+		instance.stdin.isTTY = false;
+		instance.rerender(<DoctorApp />);
+
+		await waitForFrame(instance.frames, "check(s) failed");
+		const output = instance.frames.join("\n");
+		expect(output).not.toContain("Configure a proxy");
+		expect(output).not.toContain("Proxy (host:port)");
+		// The verdict, the numbered fixes and the report path all still arrive.
+		expect(output).toContain("Next steps");
+		expect(doctorOutcome.retryWithProxy).toBeNull();
+		expect(doctorOutcome.exitCode).toBe(1);
+	});
+
 	test("submitting a proxy records the retry for index.tsx to run", async () => {
 		vi.spyOn(log, "loggedFetch").mockRejectedValue(
 			Object.assign(new TypeError("fetch failed"), {
