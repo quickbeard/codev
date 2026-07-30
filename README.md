@@ -31,9 +31,10 @@ codevhub doctor --force    # also force a real sign-in instead of reusing the ca
 
 It is read-only (it installs and configures nothing) and checks, in order:
 
-- **Environment** — Node version, npm, the global npm prefix (on `PATH` and
-  writable), the npm registry/proxy configuration, your proxy and TLS
-  environment variables, and whether the OS certificate store is readable.
+- **Environment** — Node version, whether your terminal can accept keyboard
+  input, npm, the global npm prefix (on `PATH` and writable), the npm
+  registry/proxy configuration, your proxy and TLS environment variables, and
+  whether the OS certificate store is readable.
 - **Network** — the CoDev backend and the npm registry are actually reachable.
 - **Account** — sign-in, gateway API key, CoDev configuration, and the analysis
   backend (used by `codevhub upload`).
@@ -57,6 +58,24 @@ full results, diagnoses, your Node and proxy environment, and the suggested next
 steps — attach it to a support ticket rather than pasting screenshots. Secrets
 are scrubbed before it is written. The same results additionally land in the
 diagnostic log, so `codevhub logs` can replay a whole run.
+
+### On Windows: don't use Git Bash
+
+`codevhub install`, `config`, `model` and `remove` ask you questions, and Git
+Bash (MINGW64) cannot deliver keystrokes to a Node program — it pipes stdin
+through its own terminal emulation instead of a Windows console. CoDev detects
+this and tells you rather than failing with a stack trace, but the fix is yours
+to make. Either:
+
+- run CoDev from **Windows Terminal, PowerShell, or `cmd.exe`** (recommended), or
+- stay in Git Bash and allocate a real console:
+  `winpty cmd //c codevhub install`
+
+`codevhub doctor`, `codevhub update` and `codevhub logs` need no keyboard and
+run in Git Bash as-is — `doctor` in particular, so you can still check the rest
+of your setup from there. The agent launchers (`codev`, `claude`, `codex`,
+`opencode`) just hand your terminal to the agent, which may have a keyboard
+requirement of its own.
 
 ### Working behind a proxy
 

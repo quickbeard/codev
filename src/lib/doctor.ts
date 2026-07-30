@@ -72,6 +72,14 @@ import { spawner } from "@/lib/reexec.js";
 import { agentOnPath } from "@/lib/run.js";
 import { detectInstalledShims } from "@/lib/shims.js";
 import { isCertError, tlsApi } from "@/lib/tls.js";
+import {
+	describeStdin,
+	rawModeSupported,
+	stdinKind,
+	terminalCause,
+	terminalEvidence,
+	terminalFix,
+} from "@/lib/tty.js";
 
 // ---------------------------------------------------------------------------
 // Requirements
@@ -1058,6 +1066,50 @@ const proxyEnvCheck: Check = {
 	},
 };
 
+// Ink gates every keyboard prompt on `stdin.isTTY` alone, so a terminal that
+// isn't a Win32 console makes `install`, `config` and `model` impossible — the
+// dispatcher now refuses them outright. This check is what tells the user why,
+// and it is the reason `doctor` deliberately stays runnable without a keyboard.
+const terminalCheck: Check = {
+	key: "terminal",
+	label: "Interactive terminal",
+	group: "environment",
+	run: async () => {
+		const detail = describeStdin();
+		if (rawModeSupported()) return { status: "pass", detail };
+
+		const kind = stdinKind();
+		// Git Bash is graded a failure, the other two a warning, and the split is
+		// about intent rather than severity: a piped stdin or a CI runner is
+		// non-interactive because someone chose that, and failing the run over it
+		// would make `doctor` red in every pipeline. Git Bash, by contrast, is a
+		// user sitting at a keyboard who will be stopped dead by `codevhub install`
+		// — exactly the pre-flight failure this command exists to surface.
+		if (kind !== "msys") {
+			return {
+				status: "warn",
+				detail,
+				fix: terminalFix("install"),
+			};
+		}
+		return {
+			status: "fail",
+			detail,
+			fix: terminalFix("install"),
+			diagnosis: {
+				what: "This terminal cannot provide the keyboard input that `codevhub install` needs.",
+				cause: terminalCause(),
+				fix: terminalFix("install"),
+				context: [
+					`${process.platform} ${process.arch} · node ${process.version}`,
+					"Ink enables raw mode only when process.stdin is a TTY",
+				],
+				raw: terminalEvidence(),
+			},
+		};
+	},
+};
+
 const systemCaCheck: Check = {
 	key: "system-ca",
 	label: "System certificate store",
@@ -1103,6 +1155,11 @@ const systemCaCheck: Check = {
  *     on Windows where it BLOCKS THE EVENT LOOP. lib/tls.ts documents exactly
  *     this: an earlier revision paid that cost eagerly and stalled Ink's render
  *     timers badly enough to fail timing-sensitive tests that never fetch.
+ *   - `terminal` is pure and would qualify on cost, but it can never fail here:
+ *     index.tsx refuses `install`/`config` before Ink is even rendered, so by
+ *     the time this list runs the answer is always "pass". It belongs to
+ *     `doctor`, which is reachable without a keyboard precisely so it can
+ *     report that verdict.
  *
  * `codevhub doctor` runs the full set, where a second of latency is the point.
  */
@@ -1110,6 +1167,7 @@ export const PREFLIGHT_CHECKS: Check[] = [nodeVersionCheck, proxyEnvCheck];
 
 export const ENVIRONMENT_CHECKS: Check[] = [
 	nodeVersionCheck,
+	terminalCheck,
 	npmAvailableCheck,
 	npmPrefixCheck,
 	npmRegistryCheck,

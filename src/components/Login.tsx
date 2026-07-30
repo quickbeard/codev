@@ -2,6 +2,7 @@ import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
 import { useCallback, useEffect, useState } from "react";
 import { PasteBackPrompt, usePasteBack } from "@/components/PasteBack.js";
+import { useCanType } from "@/components/useCanType.js";
 import { type AuthData, login } from "@/lib/auth.js";
 import { clipboard } from "@/lib/clipboard.js";
 import { SSO_URL } from "@/lib/const.js";
@@ -40,10 +41,18 @@ export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 	const [completed, setCompleted] = useState(false);
 	const [doneAuth, setDoneAuth] = useState<AuthData | null>(null);
 
+	// Whether this terminal can supply keystrokes at all. Everything interactive
+	// below is gated on it, because Ink throws from a mount effect the moment a
+	// component asks for raw mode without a TTY (see lib/tty.ts) — and this
+	// component is mounted by `codevhub doctor`, which must stay runnable in
+	// exactly that situation to be able to diagnose it. Sign-in itself does not
+	// need the keyboard: the browser and the loopback callback carry it.
+	const canType = useCanType();
+
 	// The paste field goes live with the fallback. Until then keystrokes are
 	// ignored, so the lone-"c" copy shortcut and the paste input never compete
 	// with the spinner-only waiting state.
-	const fallbackReady = authUrl !== null && showFallback && !error;
+	const fallbackReady = authUrl !== null && showFallback && !error && canType;
 	const paste = usePasteBack(fallbackReady);
 
 	const addLog = useCallback((msg: string) => {
@@ -111,12 +120,15 @@ export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 		return () => clearTimeout(timer);
 	}, [fallbackReady, authUrl, paste.pasteValue, paste.clearValue]);
 
-	useInput((_input, key) => {
-		// A fatal failure takes over the screen: Enter restarts the attempt.
-		// When the parent handles errors (doctor), it decides what happens next
-		// and this key would fight with its own flow.
-		if (!onError && error && key.return) setAttempt((n) => n + 1);
-	});
+	useInput(
+		(_input, key) => {
+			// A fatal failure takes over the screen: Enter restarts the attempt.
+			// When the parent handles errors (doctor), it decides what happens next
+			// and this key would fight with its own flow.
+			if (!onError && error && key.return) setAttempt((n) => n + 1);
+		},
+		{ isActive: canType },
+	);
 
 	if (error) {
 		// A plain one-line reason stays inline ("Login failed: <reason>"); a
@@ -132,7 +144,7 @@ export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 						{line}
 					</Text>
 				))}
-				{!onError && (
+				{!onError && canType && (
 					<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
 				)}
 			</Box>
@@ -208,22 +220,37 @@ export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 							{copied ? (
 								<Text color="green">{"(copied!)"}</Text>
 							) : (
-								<Text dimColor>{"(press C to copy)"}</Text>
+								canType && <Text dimColor>{"(press C to copy)"}</Text>
 							)}
 							<Text dimColor>{":"}</Text>
 						</Box>
 						<Text>{authUrl}</Text>
 					</Box>
-					<PasteBackPrompt
-						pasteValue={paste.pasteValue}
-						pasteError={paste.pasteError}
-						submitting={paste.submitting}
-						caption={
+					{/* The URL above still works without a keyboard — the browser
+					    redirects to the loopback callback and sign-in completes on its
+					    own. Only the paste-back fallback genuinely needs raw mode, so
+					    it is replaced with a note rather than rendered as a dead field
+					    a user could type into with no effect. */}
+					{canType ? (
+						<PasteBackPrompt
+							pasteValue={paste.pasteValue}
+							pasteError={paste.pasteError}
+							submitting={paste.submitting}
+							caption={
+								<Text dimColor>
+									{"After signing in, copy the code shown and paste it here:"}
+								</Text>
+							}
+						/>
+					) : (
+						<Box marginTop={1}>
 							<Text dimColor>
-								{"After signing in, copy the code shown and paste it here:"}
+								{
+									"This terminal can't accept keyboard input, so the paste-back fallback is unavailable — finish sign-in in the browser."
+								}
 							</Text>
-						}
-					/>
+						</Box>
+					)}
 				</Box>
 			)}
 		</Box>

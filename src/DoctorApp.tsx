@@ -8,6 +8,7 @@ import { Frame } from "@/components/Frame.js";
 import { Login, loginTitle } from "@/components/Login.js";
 import { ProxyPrompt, proxyPromptTitle } from "@/components/ProxyPrompt.js";
 import { Step } from "@/components/Step.js";
+import { useCanType } from "@/components/useCanType.js";
 import { type AuthData, logout } from "@/lib/auth.js";
 import { SSO_URL } from "@/lib/const.js";
 import {
@@ -107,6 +108,10 @@ interface DoctorAppProps {
 
 export function DoctorApp({ force = false }: DoctorAppProps) {
 	const { exit } = useApp();
+	// Doctor is the one command that must survive a terminal with no keyboard —
+	// it is what explains that terminal to the user. So it asks before mounting
+	// anything that would claim raw mode.
+	const canType = useCanType();
 	const [phase, setPhase] = useState<Phase>(
 		force ? "preparing" : "environment",
 	);
@@ -168,35 +173,46 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 		logout().finally(() => setPhase("environment"));
 	}, [force]);
 
-	const runGroup = useCallback((group: CheckGroup, next: Phase) => {
-		if (startedRef.current.has(group)) return;
-		startedRef.current.add(group);
-		runChecks(GROUP_CHECKS[group], ctxRef.current, (outcome) => {
-			setOutcomes((prev) => ({
-				...prev,
-				[group]: [...prev[group], outcome],
-			}));
-		}).then((results) => {
-			// The network group is the proxy gate: a hard failure there is the
-			// signal that this machine may need a different proxy than it has.
-			// Offered whether or not one is already configured — an earlier
-			// revision suppressed it when a proxy was active, on the reasoning
-			// that "it's set up, so something else is wrong". That was backwards:
-			// a wrong proxy address is among the likeliest reasons the checks
-			// failed, and suppressing the prompt left exactly that user with no
-			// way to try another one. The only guard is the retry sentinel, so a
-			// child that still fails prints its summary instead of asking again.
-			if (
-				group === "network" &&
-				hasFailure(results) &&
-				!alreadyRetriedWithProxy()
-			) {
-				setPhase("proxy-prompt");
-				return;
-			}
-			setPhase(next);
-		});
-	}, []);
+	const runGroup = useCallback(
+		(group: CheckGroup, next: Phase) => {
+			if (startedRef.current.has(group)) return;
+			startedRef.current.add(group);
+			runChecks(GROUP_CHECKS[group], ctxRef.current, (outcome) => {
+				setOutcomes((prev) => ({
+					...prev,
+					[group]: [...prev[group], outcome],
+				}));
+			}).then((results) => {
+				// The network group is the proxy gate: a hard failure there is the
+				// signal that this machine may need a different proxy than it has.
+				// Offered whether or not one is already configured — an earlier
+				// revision suppressed it when a proxy was active, on the reasoning
+				// that "it's set up, so something else is wrong". That was backwards:
+				// a wrong proxy address is among the likeliest reasons the checks
+				// failed, and suppressing the prompt left exactly that user with no
+				// way to try another one. The only guard is the retry sentinel, so a
+				// child that still fails prints its summary instead of asking again.
+				//
+				// The one other condition is a keyboard: the prompt is a text field, and
+				// mounting it without raw mode throws from its own mount effect, taking
+				// the whole run down — precisely in the terminal where `doctor` is the
+				// last command that still works. The `terminal` check has already
+				// reported why, and the summary still prints the proxy setup
+				// instructions, so nothing is lost but the interactive retry.
+				if (
+					group === "network" &&
+					hasFailure(results) &&
+					!alreadyRetriedWithProxy() &&
+					canType
+				) {
+					setPhase("proxy-prompt");
+					return;
+				}
+				setPhase(next);
+			});
+		},
+		[canType],
+	);
 
 	useEffect(() => {
 		if (phase === "environment") runGroup("environment", "network");

@@ -17,7 +17,7 @@ import {
 } from "@/lib/const.js";
 import { doctorOutcome, rerunDoctorWithProxy } from "@/lib/doctor.js";
 import { printHelp, printVersion } from "@/lib/help.js";
-import { initLogging } from "@/lib/log.js";
+import { initLogging, logWarn } from "@/lib/log.js";
 import { runLogs } from "@/lib/logs.js";
 import { applyEnvProxy } from "@/lib/proxy.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
@@ -42,6 +42,7 @@ import {
 import { parsePullArgs, runSkillInstall } from "@/lib/skill-install.js";
 import { parsePublishArgs, runSkillPublish } from "@/lib/skill-publish.js";
 import { runSkillSearch } from "@/lib/skill-search.js";
+import { interactiveTerminalBlocker, stdinKind } from "@/lib/tty.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
 import { ModelApp } from "@/ModelApp.js";
 import { RemoveApp } from "@/RemoveApp.js";
@@ -91,6 +92,30 @@ function flagValue(argv: string[], name: string): string | undefined {
 		if (arg?.startsWith(eq)) return arg.slice(eq.length);
 	}
 	return undefined;
+}
+
+// Refuse, with an explanation, when a command is about to mount a keyboard
+// prompt in a terminal that cannot supply one. Ink gates raw mode on
+// `stdin.isTTY` alone, so in Git Bash (an MSYS pipe, not a Windows console)
+// every prompt-bearing command otherwise dies inside a React mount effect with
+// a stack trace through the bundle and no hint of the cause.
+//
+// Only commands that mount an input component *unconditionally* are gated —
+// `update`, `logs`, the skill subcommands (which already fall back to their
+// non-interactive runners) and the agent passthroughs work in Git Bash today
+// and must keep working. `doctor` is deliberately never gated: it degrades to
+// skipping its own prompts, and it is the one command this user needs most.
+// `login` with both credentials and `remove --yes` are likewise non-interactive
+// and gated by their callers, not here.
+function requireInteractiveTerminal(name: string): void {
+	const blocker = interactiveTerminalBlocker(name);
+	if (!blocker) return;
+	logWarn(`${name} requires an interactive terminal`, {
+		action: "terminal.unsupported",
+		extra: { command: name, stdinKind: stdinKind() },
+	});
+	console.error(blocker);
+	process.exit(1);
 }
 
 // Diagnostic logging (~/.codev-hub/logs/codev-YYYYMMDD.ndjson, ECS NDJSON) starts
@@ -151,6 +176,7 @@ switch (command) {
 		process.exit(0);
 		break;
 	case "install": {
+		requireInteractiveTerminal("install");
 		const { waitUntilExit } = render(<InstallApp />);
 		try {
 			await waitUntilExit();
@@ -161,6 +187,7 @@ switch (command) {
 		break;
 	}
 	case "config": {
+		requireInteractiveTerminal("config");
 		const { waitUntilExit } = render(<ConfigApp />);
 		try {
 			await waitUntilExit();
@@ -218,6 +245,10 @@ switch (command) {
 			);
 			process.exit(1);
 		}
+		// Only the admin *form* needs the keyboard. SSO sign-in completes through
+		// the browser and the loopback callback, so it stays available in Git Bash
+		// — <Login> just hides its paste-back fallback there.
+		if (admin && username === undefined) requireInteractiveTerminal("login");
 		const { waitUntilExit } = render(
 			<LoginApp
 				force={force}
@@ -247,6 +278,9 @@ switch (command) {
 		// Undocumented (see `restore` below). Long form only — no `-f` alias, so a
 		// reflex `-f` borrowed from `upload` can't unconditionally delete configs.
 		const force = args.includes("--force");
+		// The confirmation prompt is the only keyboard use; `--yes` skips straight
+		// to the work and stays usable without a TTY.
+		if (!skipConfirm) requireInteractiveTerminal("remove");
 		const { waitUntilExit } = render(
 			<RemoveApp skipConfirm={skipConfirm} force={force} />,
 		);
@@ -259,6 +293,7 @@ switch (command) {
 		break;
 	}
 	case "model": {
+		requireInteractiveTerminal("model");
 		const { waitUntilExit } = render(<ModelApp />);
 		try {
 			await waitUntilExit();

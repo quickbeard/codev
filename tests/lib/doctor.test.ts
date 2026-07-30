@@ -40,6 +40,12 @@ import * as proxy from "@/lib/proxy.js";
 import { envVarKeys, PROXY_APPLIED_ENV } from "@/lib/proxy.js";
 import * as reexec from "@/lib/reexec.js";
 import * as tls from "@/lib/tls.js";
+import * as tty from "@/lib/tty.js";
+
+// The terminal check's branches turn on the platform, so its tests swap it out.
+// Captured once here and restored after every test: a leaked "win32" would
+// silently change which branch later diagnoses take.
+const REAL_PLATFORM = process.platform;
 
 const PROXY_VARS = [
 	"HTTP_PROXY",
@@ -64,6 +70,10 @@ beforeEach(() => {
 afterEach(() => {
 	vi.unstubAllEnvs();
 	vi.restoreAllMocks();
+	Object.defineProperty(process, "platform", {
+		value: REAL_PLATFORM,
+		configurable: true,
+	});
 });
 
 /**
@@ -621,6 +631,44 @@ describe("environment checks", () => {
 		vi.spyOn(tls.tlsApi, "supported").mockReturnValue(true);
 		vi.spyOn(tls.tlsApi, "getCACertificates").mockReturnValue([]);
 		expect((await runOne("system-ca")).status).toBe("warn");
+	});
+
+	test("terminal passes on a real TTY", async () => {
+		vi.spyOn(tty.stdinApi, "isTty").mockReturnValue(true);
+		const o = await runOne("terminal");
+		expect(o.status).toBe("pass");
+		expect(o.detail).toContain("interactive TTY");
+	});
+
+	test("terminal fails in Git Bash and names both escape routes", async () => {
+		vi.spyOn(tty.stdinApi, "isTty").mockReturnValue(false);
+		Object.defineProperty(process, "platform", {
+			value: "win32",
+			configurable: true,
+		});
+		vi.stubEnv("MSYSTEM", "MINGW64");
+		const o = await runOne("terminal");
+		expect(o.status).toBe("fail");
+		expect(o.fix).toContain("Windows Terminal");
+		expect(o.fix).toContain("winpty");
+		// The raw block is what a support ticket is read from, so the evidence has
+		// to be in it and not just the conclusion.
+		expect(o.diagnosis?.raw.join(" ")).toContain("MSYSTEM=MINGW64");
+		expect(o.diagnosis?.raw.join(" ")).toContain("stdin.isTTY=");
+	});
+
+	// A pipeline is non-interactive on purpose. Failing the run over it would
+	// make `doctor` red in every CI job that ever calls it, so it warns.
+	test("terminal only warns when non-interactive by intent", async () => {
+		vi.spyOn(tty.stdinApi, "isTty").mockReturnValue(false);
+		vi.stubEnv("CI", "true");
+		expect((await runOne("terminal")).status).toBe("warn");
+	});
+
+	// index.tsx refuses install/config before Ink renders, so this check could
+	// only ever report "pass" from inside SetupApp — it belongs to doctor alone.
+	test("terminal is not part of the install pre-flight", () => {
+		expect(PREFLIGHT_CHECKS.some((c) => c.key === "terminal")).toBe(false);
 	});
 });
 

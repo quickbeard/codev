@@ -2,12 +2,14 @@ import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
 import { PasteBackPrompt, usePasteBack } from "@/components/PasteBack.js";
+import { useCanType } from "@/components/useCanType.js";
 import { runUpload, type UploadSummary } from "@/lib/upload.js";
 
 type Phase = "running" | "done" | "error";
 
 export function UploadApp({ force = false }: { force?: boolean }) {
 	const { exit } = useApp();
+	const canType = useCanType();
 	const [phase, setPhase] = useState<Phase>("running");
 	const [status, setStatus] = useState("Uploading logs...");
 	const [loginUrl, setLoginUrl] = useState<string | null>(null);
@@ -66,11 +68,22 @@ export function UploadApp({ force = false }: { force?: boolean }) {
 							{"If the browser didn't open, visit this URL manually:"}
 						</Text>
 						<Text>{loginUrl}</Text>
-						<PasteBackPrompt
-							pasteValue={paste.pasteValue}
-							pasteError={paste.pasteError}
-							submitting={paste.submitting}
-						/>
+						{/* Without raw mode the hook ignores keystrokes (lib/tty.ts), so
+						    the field would be inert. The URL above still completes sign-in
+						    through the browser's loopback callback. */}
+						{canType ? (
+							<PasteBackPrompt
+								pasteValue={paste.pasteValue}
+								pasteError={paste.pasteError}
+								submitting={paste.submitting}
+							/>
+						) : (
+							<Text dimColor>
+								{
+									"This terminal can't accept keyboard input — finish sign-in in the browser."
+								}
+							</Text>
+						)}
 					</Box>
 				)}
 			</Box>
