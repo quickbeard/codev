@@ -139,9 +139,10 @@ initLogging(command ?? "help", args);
 	}
 }
 
-// Rewrite shims left behind by pre-0.4 hub versions (their bodies re-exec the
-// old `codev` hub command, which is now the agent). Best-effort: a filesystem
-// hiccup here must never block the actual command.
+// Rewrite shims left behind by older hub versions (pre-0.4 bodies re-exec the
+// old `codev` hub command, which is now the agent; later ones lack the
+// missing-hub fallback). Best-effort: a filesystem hiccup here must never
+// block the actual command.
 try {
 	repairShims();
 } catch {
