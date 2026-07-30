@@ -18,6 +18,7 @@ import * as codegraph from "@/lib/codegraph.js";
 import * as configure from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
 import * as npm from "@/lib/npm.js";
+import * as shims from "@/lib/shims.js";
 import {
 	vscodeSettingsPath,
 	vscodeUserDataDir,
@@ -97,6 +98,20 @@ beforeEach(() => {
 			created: true,
 		},
 	]);
+	// The finalize Phase calls installShims(), and on Windows that shells out to
+	// a real `powershell -Command` (execFileSync — NOT the mocked execFile) to
+	// rewrite the user-scope PATH in the registry. That's a synchronous spawn
+	// which blocks the event loop for ~10s on its cold start, so the first flow
+	// to reach finalize blows past waitForFrame's budget and never renders the
+	// done screen — and it mutates the PATH of whatever machine runs the suite.
+	// lib/shims.test.ts skips its installShims block on Windows for the same
+	// reason; nothing here asserts shim files, so stub the whole call.
+	vi.spyOn(shims, "installShims").mockReturnValue({
+		shimDir: join(installAppTempHome, ".codev-hub", "bin"),
+		shimsWritten: [],
+		rcFilesUpdated: [],
+		windowsUserPathUpdated: false,
+	});
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
