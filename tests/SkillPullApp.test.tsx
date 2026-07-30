@@ -142,6 +142,37 @@ describe("SkillPullApp", () => {
 		expect(spy.mock.calls[0]?.[1]).toMatchObject({ force: true });
 	});
 
+	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts). The
+	// dispatcher normally routes those to the plain runner, so this covers the
+	// case where Ink's stdin isn't the process's own. Unlike an ungated useInput
+	// (which throws), an unanswerable picker would just hang forever.
+	// ink-testing-library's stdin reports isTTY true and takes no options, so the
+	// flag is flipped and the tree re-rendered — Ink recomputes
+	// `isRawModeSupported` every render.
+	test("without raw mode: explains the missing keyboard instead of prompting", async () => {
+		mockResolve();
+		const spy = vi.spyOn(install, "installResolvedSkill");
+		const onDone = vi.fn();
+		const node = (
+			<SkillPullApp target={ID} force={false} json={false} onDone={onDone} />
+		);
+
+		const instance = render(node);
+		instance.stdin.isTTY = false;
+		instance.rerender(node);
+
+		await waitFor(() =>
+			frameText(instance.lastFrame).includes("cannot supply keystrokes"),
+		);
+		const frame = frameText(instance.lastFrame);
+		expect(frame).toContain("--here, --global, or --dir");
+		// Never falls back to a location the user didn't choose.
+		expect(frame).not.toContain("❯ ");
+		expect(spy).not.toHaveBeenCalled();
+		await waitFor(() => onDone.mock.calls.length > 0);
+		expect(onDone).toHaveBeenCalledWith(false);
+	});
+
 	test("shows an error when the skill can't be resolved", async () => {
 		vi.spyOn(skillhub, "getSkillMeta").mockRejectedValue(
 			new Error('Skill "bad-id" not found or not public.'),

@@ -5,11 +5,15 @@ import {
 	readFileSync,
 	rmSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import AdmZip from "adm-zip";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { runSkillInstall } from "@/lib/skill-install.js";
+import {
+	parsePullArgs,
+	runSkillInstall,
+	skillsDirFor,
+} from "@/lib/skill-install.js";
 import * as skillhub from "@/lib/skillhub.js";
 
 let tempDir: string;
@@ -167,15 +171,100 @@ describe("runSkillInstall", () => {
 		expect(errs.join("\n")).toMatch(/Usage: codevhub skill pull/);
 	});
 
-	test("requires --dir on the non-interactive path (no prompt available)", async () => {
+	test("requires a location flag on the non-interactive path (no prompt available)", async () => {
 		const getMeta = vi.spyOn(skillhub, "getSkillMeta");
 		const errs = captureErr();
 
-		const code = await runSkillInstall(["pg-tuner"]); // no --dir
+		const code = await runSkillInstall(["pg-tuner"]); // no location flag
 
 		expect(code).toBe(1);
 		expect(getMeta).not.toHaveBeenCalled();
-		expect(errs.join("\n")).toMatch(/pass --dir/i);
+		expect(errs.join("\n")).toMatch(/--here, --global, or --dir/i);
+	});
+
+	// --dir is an exact path (`<dir>/<name>`), while --here reproduces the
+	// picker's "Current directory" choice — which is the layout agents read.
+	test("--dir installs verbatim; --here adds the .claude/skills segment", async () => {
+		mockMeta();
+		mockDownload();
+		vi.spyOn(process, "cwd").mockReturnValue(tempDir);
+
+		expect(await runSkillInstall(["pg-tuner", "--dir", tempDir])).toBe(0);
+		expect(existsSync(join(tempDir, "pg-tuner", "SKILL.md"))).toBe(true);
+
+		expect(await runSkillInstall(["pg-tuner", "--here"])).toBe(0);
+		expect(
+			existsSync(join(tempDir, ".claude", "skills", "pg-tuner", "SKILL.md")),
+		).toBe(true);
+	});
+
+	test("--global resolves to the home skills dir", () => {
+		// Asserted through the pure helpers so the test never writes to a real home.
+		expect(parsePullArgs(["pg-tuner", "--global"]).location).toBe("global");
+		expect(skillsDirFor("global")).toBe(join(homedir(), ".claude", "skills"));
+		expect(skillsDirFor("current")).toBe(
+			join(process.cwd(), ".claude", "skills"),
+		);
+	});
+
+	// A mistyped flag must fail loudly. Silently ignoring `--forse` would look
+	// like a successful run that quietly refused to overwrite.
+	test("rejects an unknown flag instead of ignoring it", async () => {
+		const getMeta = vi.spyOn(skillhub, "getSkillMeta");
+		const errs = captureErr();
+
+		const code = await runSkillInstall([
+			"pg-tuner",
+			"--dir",
+			tempDir,
+			"--forse",
+		]);
+
+		expect(code).toBe(1);
+		expect(getMeta).not.toHaveBeenCalled();
+		expect(errs.join("\n")).toContain("Unknown flag: --forse");
+	});
+
+	// No `-f` alias: elsewhere in this CLI `-f` forces a fresh login, which costs
+	// nothing, while here it would rm -rf a skill directory. The reflex must miss.
+	test("does not accept -f as a --force alias", async () => {
+		mockMeta();
+		mockDownload();
+		mkdirSync(join(tempDir, "pg-tuner"), { recursive: true });
+		const errs = captureErr();
+
+		const code = await runSkillInstall(["pg-tuner", "--dir", tempDir, "-f"]);
+
+		expect(code).toBe(1);
+		expect(errs.join("\n")).toContain("Unknown flag: -f");
+		// The pre-existing directory is still there — nothing was overwritten.
+		expect(existsSync(join(tempDir, "pg-tuner"))).toBe(true);
+		expect(existsSync(join(tempDir, "pg-tuner", "SKILL.md"))).toBe(false);
+	});
+
+	test("rejects conflicting location flags", async () => {
+		const errs = captureErr();
+
+		expect(await runSkillInstall(["pg-tuner", "--here", "--global"])).toBe(1);
+		expect(
+			await runSkillInstall(["pg-tuner", "--here", "--dir", tempDir]),
+		).toBe(1);
+		expect(errs.join("\n")).toMatch(/not both/i);
+	});
+
+	test("a --dir value is never read as a flag or a target", () => {
+		// The value is consumed positionally, so even a flag-shaped-looking name
+		// stays the directory, and the target is still the first real positional.
+		const parsed = parsePullArgs(["--dir", "--here", "pg-tuner"]);
+		expect(parsed.error).toBe("Missing value for --dir.");
+
+		const ok = parsePullArgs(["--dir", "build/skills", "pg-tuner", "--force"]);
+		expect(ok).toMatchObject({
+			target: "pg-tuner",
+			dir: "build/skills",
+			force: true,
+		});
+		expect(ok.location).toBeUndefined();
 	});
 
 	test("rejects a server name that escapes the target dir (no download, no write)", async () => {
