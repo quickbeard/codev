@@ -18,6 +18,7 @@ import * as codegraph from "@/lib/codegraph.js";
 import * as configure from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
 import * as npm from "@/lib/npm.js";
+import * as ripgrep from "@/lib/ripgrep.js";
 import * as shims from "@/lib/shims.js";
 import {
 	vscodeSettingsPath,
@@ -80,6 +81,13 @@ beforeEach(() => {
 	vi.spyOn(codegraph, "setupCodegraph").mockResolvedValue({
 		status: "skipped",
 		targets: [],
+	});
+	// The finalize Phase also stages ripgrep into CoDev Code's cache dir (a
+	// real download from the landing page). Default to "present" so full-flow
+	// tests neither hit the network nor write outside the temp home.
+	vi.spyOn(ripgrep, "installRipgrep").mockResolvedValue({
+		status: "present",
+		path: null,
 	});
 	// The post-model gateway smoke test hits the gateway with a real completion;
 	// default it to a pass so full-flow tests don't make a network call. The

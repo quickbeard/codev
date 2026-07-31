@@ -16,6 +16,7 @@ import * as auth from "@/lib/auth.js";
 import * as backend from "@/lib/backend.js";
 import * as codegraph from "@/lib/codegraph.js";
 import * as configure from "@/lib/configure.js";
+import * as ripgrep from "@/lib/ripgrep.js";
 import * as shims from "@/lib/shims.js";
 
 // ConfigApp shares its state machine with InstallApp (both render <SetupApp />).
@@ -63,6 +64,13 @@ beforeEach(() => {
 	vi.spyOn(codegraph, "setupCodegraph").mockResolvedValue({
 		status: "skipped",
 		targets: [],
+	});
+	// The finalize Phase also stages ripgrep into CoDev Code's cache dir (a
+	// real download from the landing page). Default to "present" so full-flow
+	// tests neither hit the network nor write outside the temp home.
+	vi.spyOn(ripgrep, "installRipgrep").mockResolvedValue({
+		status: "present",
+		path: null,
 	});
 	// Default to "no saved API key" so the validating-existing branch doesn't
 	// surface a stale dev-machine key.

@@ -8,6 +8,9 @@ export const BACKEND_URL = `${BASE_URL}/codev-backend`;
 export const SSO_URL = `${BASE_URL}/sso-wrapper`;
 export const LOGIN_SUCCESS_URL = `${BASE_URL}/codev/oauth/success`;
 export const SKILLHUB_URL = `${BASE_URL}/netmindhub`;
+// The landing page serves CoDev Code's static downloads (the vsix, ripgrep
+// binaries) from its public/ dir under the site's /codev base path.
+export const CODE_DOWNLOADS_URL = `${BASE_URL}/codev/docs/code/downloads`;
 
 export const FALLBACK_MODEL = atob("TWluaU1heC9NaW5pTWF4LU0yLjc=");
 
