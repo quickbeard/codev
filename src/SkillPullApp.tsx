@@ -42,7 +42,7 @@ type Phase =
 	| "error";
 
 const LOCATIONS: { key: InstallLocation; label: string }[] = [
-	{ key: "current", label: "Current directory" },
+	{ key: "current", label: "Current directory (recommended)" },
 	{ key: "global", label: "Global" },
 ];
 

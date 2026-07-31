@@ -93,7 +93,7 @@ describe("SkillPullApp", () => {
 
 		await waitFor(() => frameText(lastFrame).includes("pg-tuner"));
 		const frame = frameText(lastFrame);
-		expect(frame).toContain("Current directory");
+		expect(frame).toContain("Current directory (recommended)");
 		expect(frame).not.toContain(ID);
 	});
 
