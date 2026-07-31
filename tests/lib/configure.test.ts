@@ -19,6 +19,10 @@ beforeEach(() => {
 	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
 	// hit the temp home on every platform.
 	vi.stubEnv("USERPROFILE", tempDir);
+	// The model-seeding writer resolves the agents' state dir via
+	// XDG_STATE_HOME before falling back to $HOME/.local/state; clear it so a
+	// host that exports it can't leak test writes into a real state dir.
+	vi.stubEnv("XDG_STATE_HOME", "");
 	// The configure* functions fall back to AI_GATEWAY_URL()/AI_GATEWAY_OPENAI_URL()
 	// whenever creds carry no baseUrl (the SSO-key path), and those accessors read
 	// gateway_url out of ~/.codev-hub/auth.json. Seed it so the fallback resolves.
@@ -708,6 +712,111 @@ describe("configureCodevCode", () => {
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
 		expect(config.provider.netgate.options.apiKey).toBe("sk-new");
+	});
+});
+
+describe("first-launch model seeding (state/model.json recents)", () => {
+	function statePath(app: "opencode" | "codev") {
+		return join(tempDir, ".local", "state", app, "model.json");
+	}
+
+	test("configureCodevCode seeds the chosen model as the saved selection", async () => {
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "chosen-model" });
+
+		const state = JSON.parse(readFileSync(statePath("codev"), "utf-8"));
+		expect(state.recent).toEqual([
+			{ providerID: "netgate", modelID: "chosen-model" },
+		]);
+	});
+
+	test("configureOpenCode seeds its own state dir, not the fork's", async () => {
+		const { configureOpenCode } = await import("@/lib/configure.js");
+		configureOpenCode({ apiKey: "sk-xyz", model: "chosen-model" });
+
+		const state = JSON.parse(readFileSync(statePath("opencode"), "utf-8"));
+		expect(state.recent).toEqual([
+			{ providerID: "netgate", modelID: "chosen-model" },
+		]);
+		expect(existsSync(statePath("codev"))).toBe(false);
+	});
+
+	test("honors XDG_STATE_HOME", async () => {
+		vi.stubEnv("XDG_STATE_HOME", join(tempDir, "xdg-state"));
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "m" });
+
+		const state = JSON.parse(
+			readFileSync(join(tempDir, "xdg-state", "codev", "model.json"), "utf-8"),
+		);
+		expect(state.recent[0]?.modelID).toBe("m");
+	});
+
+	test("never overrides a non-empty saved selection (key refresh, codevhub model)", async () => {
+		const dir = join(tempDir, ".local", "state", "codev");
+		mkdirSync(dir, { recursive: true });
+		const original = {
+			recent: [{ providerID: "netgate", modelID: "user-switched" }],
+			favorite: [],
+			variant: {},
+		};
+		writeFileSync(join(dir, "model.json"), JSON.stringify(original));
+
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "install-choice" });
+
+		const state = JSON.parse(readFileSync(statePath("codev"), "utf-8"));
+		expect(state).toEqual(original);
+	});
+
+	test("seeds an empty recents list and carries the other fields over", async () => {
+		const dir = join(tempDir, ".local", "state", "codev");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "model.json"),
+			JSON.stringify({
+				recent: [],
+				favorite: [{ providerID: "netgate", modelID: "fav" }],
+				variant: { "netgate/fav": "default" },
+			}),
+		);
+
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "chosen-model" });
+
+		const state = JSON.parse(readFileSync(statePath("codev"), "utf-8"));
+		expect(state.recent).toEqual([
+			{ providerID: "netgate", modelID: "chosen-model" },
+		]);
+		expect(state.favorite).toEqual([{ providerID: "netgate", modelID: "fav" }]);
+		expect(state.variant).toEqual({ "netgate/fav": "default" });
+	});
+
+	test("replaces a corrupt state file with a fresh seed", async () => {
+		const dir = join(tempDir, ".local", "state", "codev");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "model.json"), "{not json");
+
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "chosen-model" });
+
+		const state = JSON.parse(readFileSync(statePath("codev"), "utf-8"));
+		expect(state.recent).toEqual([
+			{ providerID: "netgate", modelID: "chosen-model" },
+		]);
+	});
+
+	test("uses the manual-path provider id in the seed", async () => {
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({
+			apiKey: "sk-xyz",
+			model: "m",
+			providerId: "myprov",
+			providerName: "My Provider",
+		});
+
+		const state = JSON.parse(readFileSync(statePath("codev"), "utf-8"));
+		expect(state.recent).toEqual([{ providerID: "myprov", modelID: "m" }]);
 	});
 });
 

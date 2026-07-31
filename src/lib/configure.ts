@@ -145,6 +145,9 @@ const OPENCODE_K = {
 	baseURL: atob("YmFzZVVSTA=="),
 	apiKey: atob("YXBpS2V5"),
 	models: atob("bW9kZWxz"),
+	recent: atob("cmVjZW50"),
+	providerID: atob("cHJvdmlkZXJJRA=="),
+	modelID: atob("bW9kZWxJRA=="),
 	attachment: atob("YXR0YWNobWVudA=="),
 	modalities: atob("bW9kYWxpdGllcw=="),
 	input: atob("aW5wdXQ="),
@@ -923,10 +926,10 @@ function configureOpenCodeKind(
 	const provider = resolveProvider(creds);
 	// Fall back to [defaultModel] when `models` is unset so callers that don't
 	// know about the list (e.g. older fixtures, the fallback path with no
-	// fetched list) still produce a valid one-entry map. The chosen model leads
-	// the map: with no top-level pin (see below) a first launch with no saved
-	// selection falls through to the provider's first model, so ordering is
-	// what carries the choice.
+	// fetched list) still produce a valid one-entry map. The chosen model
+	// leads the map for readability, but ordering does not carry the choice —
+	// the first-launch default is seeded into the agent's saved selection
+	// instead (see seedOpenCodeRecentModel).
 	const allModels = [
 		...new Set([
 			defaultModel,
@@ -970,10 +973,15 @@ function configureOpenCodeKind(
 		// CoDev Code switch freely in-CLI (docs/hub/installation). A pin there
 		// outranks their saved selection on every launch — it beats the recent
 		// models in their state dir — so each in-CLI switch reverted on restart
-		// and only hand-editing the config undid it. The chosen model leads the
-		// models map instead, which decides the first launch and yields to any
-		// later selection. This is why `codevhub model` steers only Claude Code
-		// and Codex.
+		// and only hand-editing the config undid it. The chosen model is
+		// seeded into that saved selection instead (seedOpenCodeRecentModel,
+		// below), which decides the first launch and yields to any later
+		// switch. The models-map order alone can't carry the choice: with no
+		// pin and no saved selection the TUI falls back to the first provider
+		// in its list — upstream's hosted Zen provider, which self-registers
+		// ahead of config providers — and, within a provider, to the server's
+		// own model sort, neither of which reads this map's order. This is why
+		// `codevhub model` steers only Claude Code and Codex directly.
 		// OpenCode has no percentage trigger; it compacts at `context − reserved`.
 		// Reserve the headroom that lands the trigger at ~85% of the window, to
 		// match Claude Code and Codex.
@@ -994,5 +1002,62 @@ function configureOpenCodeKind(
 		},
 	});
 
+	seedOpenCodeRecentModel(kind, provider.id, defaultModel);
+
 	return [{ kind, sourcePath, backupPath, created }];
+}
+
+// OpenCode-family agents persist the TUI's model selection in the XDG state
+// dir (`state/model.json`, `recent` list); only the app segment differs
+// between OpenCode and the codev-code fork, mirroring dbPath in
+// providers/opencode.ts.
+function openCodeStateModelPath(
+	kind: "opencode-config" | "codev-code-config",
+): string {
+	const app = kind === "codev-code-config" ? "codev" : "opencode";
+	const xdg = process.env.XDG_STATE_HOME;
+	if (xdg) return join(xdg, app, "model.json");
+	return join(homedir(), ".local", "state", app, "model.json");
+}
+
+// Seed the install-time model choice as the agent's saved selection —
+// `recent[0]` in the state dir is the TUI's highest-priority startup source
+// once the config carries no `model` pin, and a later in-CLI switch simply
+// displaces it. Seeds ONLY when the recents list is empty or absent: this
+// writer also runs on every gateway-key auto-refresh (refresh.ts) and
+// `codevhub model`, and a non-empty list is a selection the user already
+// made that must keep winning. Best-effort by design, like the config
+// writer: a corrupt state file is replaced (the agent ignores one anyway),
+// other fields (favorites, variants) are carried over, and a filesystem
+// failure never fails the configure step.
+function seedOpenCodeRecentModel(
+	kind: "opencode-config" | "codev-code-config",
+	providerId: string,
+	modelId: string,
+): void {
+	try {
+		const path = openCodeStateModelPath(kind);
+		let existing: Record<string, unknown> = {};
+		if (existsSync(path)) {
+			try {
+				const raw = JSON.parse(readFileSync(path, "utf-8"));
+				if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+					existing = raw as Record<string, unknown>;
+				}
+			} catch {
+				// Corrupt state file: replaced below.
+			}
+		}
+		const recent = existing[OPENCODE_K.recent];
+		if (Array.isArray(recent) && recent.length > 0) return;
+		mkdirSync(dirname(path), { recursive: true });
+		writeJson(path, {
+			...existing,
+			[OPENCODE_K.recent]: [
+				{ [OPENCODE_K.providerID]: providerId, [OPENCODE_K.modelID]: modelId },
+			],
+		});
+	} catch {
+		// The seed is a nicety; the config write above already succeeded.
+	}
 }
