@@ -64,6 +64,7 @@ import {
 } from "@/lib/doctor.js";
 import { logApiKeyConfigured, logDebug, logError, logWarn } from "@/lib/log.js";
 import { providerFromName } from "@/lib/provider.js";
+import { installRipgrep } from "@/lib/ripgrep.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 import { disableClaudeCodeLoginPrompt } from "@/lib/vscode-settings.js";
 
@@ -195,6 +196,10 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// CodeGraph-eligible tools, so the row never renders.
 	const [codegraphResult, setCodegraphResult] =
 		useState<CodegraphSetupResult | null>(null);
+	// Set only when staging ripgrep into CoDev Code's cache fails during the
+	// finalize Phase (best-effort, CoDev Code selections only). Drives a yellow
+	// ▲ row so the user learns file search may be degraded and how to fix it.
+	const [ripgrepWarning, setRipgrepWarning] = useState<string | null>(null);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
 	// Set when ModelSelect falls back to FALLBACK_MODEL because the gateway's
 	// model list couldn't be fetched. Drives a persistent yellow ▲ row above
@@ -582,7 +587,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 			// The flow holds on "finalizing" (spinner) until this resolves; a
 			// failure surfaces as a warning row but never blocks completion.
 			// setupCodegraph never throws, but the catch is defensive.
-			setupCodegraph(installedTools)
+			const codegraph = setupCodegraph(installedTools)
 				.then(setCodegraphResult)
 				.catch((err: unknown) =>
 					setCodegraphResult({
@@ -592,15 +597,29 @@ export function SetupApp({ mode }: SetupAppProps) {
 							err instanceof Error ? err.message : String(err)
 						}`,
 					}),
-				)
-				.finally(() => {
-					setStep("done");
-					// Hold the terminal frame for ~1s so the user can read "Done! Run
-					// exec $SHELL" and "Happy coding!" before Ink tears down. Without
-					// this, React's render of the "done" Phase wouldn't flush to the
-					// terminal before exit() unmounts the app.
-					setTimeout(() => exit(), 1000);
-				});
+				);
+			// Best-effort ripgrep staging for CoDev Code's file search — see
+			// lib/ripgrep.ts for why the agent can't be left to download its own
+			// on corporate networks. Failure warns but never blocks completion;
+			// the agent still tries PATH and its own GitHub download at runtime.
+			const ripgrep = installedTools.includes("codev-code")
+				? installRipgrep().catch((err: unknown) => {
+						logError("ripgrep staging failed during finalize", { err });
+						setRipgrepWarning(
+							`Could not stage ripgrep for CoDev Code: ${
+								err instanceof Error ? err.message : String(err)
+							}. File search may be empty on Windows — install ripgrep (winget install BurntSushi.ripgrep.MSVC) and restart the agent.`,
+						);
+					})
+				: Promise.resolve();
+			Promise.all([codegraph, ripgrep]).finally(() => {
+				setStep("done");
+				// Hold the terminal frame for ~1s so the user can read "Done! Run
+				// exec $SHELL" and "Happy coding!" before Ink tears down. Without
+				// this, React's render of the "done" Phase wouldn't flush to the
+				// terminal before exit() unmounts the app.
+				setTimeout(() => exit(), 1000);
+			});
 		},
 		[installedTools, exit],
 	);
@@ -880,6 +899,14 @@ export function SetupApp({ mode }: SetupAppProps) {
 									)}
 								</Step>
 							)}
+						{(step === "finalizing" || step === "done") && ripgrepWarning && (
+							<Step title={<Text bold>File search</Text>}>
+								<Box>
+									<Text color="yellow">▲</Text>
+									<Text color="yellow">{` ${ripgrepWarning}`}</Text>
+								</Box>
+							</Step>
+						)}
 						{step === "done" && (
 							<SetupComplete
 								tools={installedTools}
