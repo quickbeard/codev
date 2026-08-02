@@ -2,11 +2,7 @@ import { cleanup, render } from "ink-testing-library";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { TaskList } from "@/components/TaskList.js";
 
-const VERB = {
-	infinitive: "install",
-	present: "Installing",
-	past: "Installed",
-};
+const VERB = "install" as const;
 
 afterEach(() => {
 	cleanup();
@@ -60,7 +56,7 @@ describe("TaskList", () => {
 		expect(onDone).toHaveBeenCalledWith(["a"]);
 	});
 
-	test("marks a task as failed and uses the infinitive verb in the error", async () => {
+	test("marks a task as failed and names the verb in the error", async () => {
 		const onDone = vi.fn(() => {});
 		const { frames } = render(
 			<TaskList
@@ -94,7 +90,7 @@ describe("TaskList", () => {
 							),
 					},
 				]}
-				verb={{ infinitive: "update", present: "Updating", past: "Updated" }}
+				verb="update"
 				onDone={() => {}}
 			/>,
 		);

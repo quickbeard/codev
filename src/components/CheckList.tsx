@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import type { CheckOutcome, CheckStatus, Diagnosis } from "@/lib/doctor.js";
+import { t, tCount } from "@/lib/i18n.js";
 
 interface CheckListProps {
 	/** Labels of checks that have not produced an outcome yet, in order. */
@@ -42,7 +43,9 @@ export function CheckList({
 			{collapsePasses && passes.length > 0 && (
 				<Box>
 					<Text color="green">✓</Text>
-					<Text dimColor>{` ${passes.length} environment checks passed`}</Text>
+					<Text dimColor>
+						{` ${tCount("checklist.env_passed", passes.length)}`}
+					</Text>
 				</Box>
 			)}
 			{shown.map((outcome) => (
@@ -123,15 +126,38 @@ function CheckRow({ outcome }: { outcome: CheckOutcome }) {
 	);
 }
 
-const LABEL_WIDTH = 15;
+const FIELD_KEYS = [
+	"checklist.field.what",
+	"checklist.field.cause",
+	"checklist.field.fix",
+	"checklist.field.context",
+	"checklist.field.raw",
+] as const;
+
+/**
+ * Width of the diagnosis label gutter, derived from the active locale rather
+ * than the hard-coded 15 this used to be — every one of these labels is longer
+ * in some language than in English, and an under-sized `width` leaves the column
+ * ragged (the box has flexShrink={0}, so the label wraps inside it instead of
+ * overflowing).
+ *
+ * `.length` is the right measure while the shipped locales are Latin-script:
+ * Vietnamese is precomposed NFC and single-width. A CJK locale would need a real
+ * `stringWidth()` — Ink carries one transitively — since those characters are
+ * two cells wide.
+ */
+function labelWidth(): number {
+	return Math.max(...FIELD_KEYS.map((key) => t(key).length)) + 2;
+}
 
 function Field({ name, children }: { name: string; children: string[] }) {
 	if (children.length === 0) return null;
+	const width = labelWidth();
 	return (
 		<Box flexDirection="column">
 			{children.map((line, i) => (
 				<Box key={`${name}-${i.toString()}`}>
-					<Box width={LABEL_WIDTH} flexShrink={0}>
+					<Box width={width} flexShrink={0}>
 						<Text dimColor bold>
 							{i === 0 ? name : ""}
 						</Text>
@@ -148,11 +174,13 @@ function Field({ name, children }: { name: string; children: string[] }) {
 function DiagnosisBlock({ diagnosis }: { diagnosis: Diagnosis }) {
 	return (
 		<Box flexDirection="column" paddingLeft={2} marginTop={1}>
-			<Field name="What happened">{[diagnosis.what]}</Field>
-			<Field name="Likely cause">{[diagnosis.cause]}</Field>
-			<Field name="What to do">{diagnosis.fix.split("\n")}</Field>
-			<Field name="Context">{diagnosis.context}</Field>
-			<Field name="Raw">{diagnosis.raw}</Field>
+			{/* The field *labels* are translated; the diagnosis prose they carry
+			    comes from lib/doctor.ts and is deliberately still English. */}
+			<Field name={t("checklist.field.what")}>{[diagnosis.what]}</Field>
+			<Field name={t("checklist.field.cause")}>{[diagnosis.cause]}</Field>
+			<Field name={t("checklist.field.fix")}>{diagnosis.fix.split("\n")}</Field>
+			<Field name={t("checklist.field.context")}>{diagnosis.context}</Field>
+			<Field name={t("checklist.field.raw")}>{diagnosis.raw}</Field>
 		</Box>
 	);
 }

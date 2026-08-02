@@ -3,6 +3,7 @@ import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
 import { PasteBackPrompt, usePasteBack } from "@/components/PasteBack.js";
 import { useCanType } from "@/components/useCanType.js";
+import { t } from "@/lib/i18n.js";
 import { runUpload, type UploadSummary } from "@/lib/upload.js";
 
 type Phase = "running" | "done" | "error";
@@ -11,7 +12,7 @@ export function UploadApp({ force = false }: { force?: boolean }) {
 	const { exit } = useApp();
 	const canType = useCanType();
 	const [phase, setPhase] = useState<Phase>("running");
-	const [status, setStatus] = useState("Uploading logs...");
+	const [status, setStatus] = useState(t("upload.uploading"));
 	const [loginUrl, setLoginUrl] = useState<string | null>(null);
 	const [summary, setSummary] = useState<UploadSummary | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -64,9 +65,7 @@ export function UploadApp({ force = false }: { force?: boolean }) {
 				</Box>
 				{loginUrl && !paste.submitting && (
 					<Box flexDirection="column" marginTop={1}>
-						<Text dimColor>
-							{"If the browser didn't open, visit this URL manually:"}
-						</Text>
+						<Text dimColor>{t("upload.browser_url")}</Text>
 						<Text>{loginUrl}</Text>
 						{/* Without raw mode the hook ignores keystrokes (lib/tty.ts), so
 						    the field would be inert. The URL above still completes sign-in
@@ -78,11 +77,7 @@ export function UploadApp({ force = false }: { force?: boolean }) {
 								submitting={paste.submitting}
 							/>
 						) : (
-							<Text dimColor>
-								{
-									"This terminal can't accept keyboard input — finish sign-in in the browser."
-								}
-							</Text>
+							<Text dimColor>{t("upload.no_keyboard")}</Text>
 						)}
 					</Box>
 				)}
@@ -93,8 +88,8 @@ export function UploadApp({ force = false }: { force?: boolean }) {
 	if (phase === "error") {
 		return (
 			<Box flexDirection="column">
-				<Text color="red">✗ Upload failed</Text>
-				<Text dimColor>{error ?? "unknown error"}</Text>
+				<Text color="red">{t("upload.failed")}</Text>
+				<Text dimColor>{error ?? t("tasklist.unknown_error")}</Text>
 			</Box>
 		);
 	}
@@ -107,23 +102,20 @@ export function UploadApp({ force = false }: { force?: boolean }) {
 		const targets = summary.targets ?? [];
 		return (
 			<Box flexDirection="column">
-				<Text color="yellow">No conversations found for this project.</Text>
+				<Text color="yellow">{t("upload.none_found")}</Text>
 				{targets.length > 0 && (
 					<Box flexDirection="column" marginTop={1}>
-						<Text dimColor>codevhub looked in:</Text>
-						{targets.map((t) => (
-							<Text key={t.agent} dimColor>
+						<Text dimColor>{t("upload.looked_in")}</Text>
+						{targets.map((target) => (
+							<Text key={target.agent} dimColor>
 								{"  • "}
-								{t.agent}: {t.path}
+								{target.agent}: {target.path}
 							</Text>
 						))}
 					</Box>
 				)}
 				<Box marginTop={1}>
-					<Text dimColor>
-						If you used an AI agent here, make sure you launched it from this
-						directory.
-					</Text>
+					<Text dimColor>{t("upload.launch_hint")}</Text>
 				</Box>
 			</Box>
 		);
@@ -131,23 +123,30 @@ export function UploadApp({ force = false }: { force?: boolean }) {
 	return (
 		<Box flexDirection="column">
 			<Text color={summary.failed > 0 ? "yellow" : "green"}>
-				✓ Uploaded {summary.uploaded}/{summary.found} conversation logs
+				{t("upload.uploaded", {
+					uploaded: summary.uploaded,
+					found: summary.found,
+				})}
 			</Text>
-			<Text dimColor>Skipped {summary.skipped} unchanged logs</Text>
+			<Text dimColor>{t("upload.skipped", { count: summary.skipped })}</Text>
 			{summary.failed > 0 && (
 				<Box flexDirection="column" marginTop={1}>
-					<Text color="red">Failed {summary.failed} logs:</Text>
+					<Text color="red">
+						{t("upload.failed_logs", { count: summary.failed })}
+					</Text>
 					{summary.errors.slice(0, 5).map((err) => (
 						<Text key={err.file} dimColor>
 							- {err.file}: {err.message}
 						</Text>
 					))}
 					{summary.errors.length > 5 && (
-						<Text dimColor>(+{summary.errors.length - 5} more)</Text>
+						<Text dimColor>
+							{t("upload.more", { count: summary.errors.length - 5 })}
+						</Text>
 					)}
 				</Box>
 			)}
-			<Text dimColor>Source: {summary.outDir}</Text>
+			<Text dimColor>{t("upload.source", { dir: summary.outDir })}</Text>
 		</Box>
 	);
 }

@@ -25,9 +25,9 @@ import {
 	type Tool,
 } from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
+import { formatList, t } from "@/lib/i18n.js";
 import { logError, logInfo, logWarn } from "@/lib/log.js";
 import { providerFromName } from "@/lib/provider.js";
-import { formatToolList } from "@/lib/text.js";
 
 // ModelSelect handles its own /v1/models fetch — we don't duplicate it here.
 // The "model-choice" phase mounts ModelSelect (which shows its own spinner
@@ -112,9 +112,7 @@ export function ModelApp() {
 			if (!isInvalidKeyError(err)) return;
 			logWarn("saved API key rejected by gateway; re-authenticating", { err });
 			if (reAuthed.current) {
-				setError(
-					`${err.message}\nRe-authentication did not produce a valid key. Run 'codevhub install' to refresh credentials.`,
-				);
+				setError(`${err.message}\n${t("model.reauth_failed")}`);
 				setPhase("failed");
 				return;
 			}
@@ -255,23 +253,23 @@ export function ModelApp() {
 						<Text color="cyan">
 							<Spinner />
 						</Text>
-						<Text> Loading saved credentials...</Text>
+						<Text>{` ${t("model.loading")}`}</Text>
 					</Box>
 				)}
 
 				{phase === "no-creds" && (
 					<Text color="red">
-						{"No CoDev credentials found. Run "}
+						{t("model.no_creds_prefix")}
 						<Text color="cyan">codevhub install</Text>
-						{" first."}
+						{t("model.run_install_suffix")}
 					</Text>
 				)}
 
 				{phase === "no-tools" && (
 					<Text color="red">
-						{"No CoDev-configured AI tools found. Run "}
+						{t("model.no_tools_prefix")}
 						<Text color="cyan">codevhub install</Text>
-						{" first."}
+						{t("model.run_install_suffix")}
 					</Text>
 				)}
 
@@ -279,11 +277,7 @@ export function ModelApp() {
 					phase === "re-auth-fetch-key" ||
 					phase === "re-auth-manual") && (
 					<Box marginBottom={1}>
-						<Text color="yellow">
-							{
-								"Saved API key was rejected — refreshing credentials before continuing."
-							}
-						</Text>
+						<Text color="yellow">{t("model.re_auth")}</Text>
 					</Box>
 				)}
 
@@ -336,37 +330,42 @@ export function ModelApp() {
 				{(phase === "configuring" || phase === "done") && (
 					<Step
 						active={phase === "configuring"}
-						title={<Text bold>Update tool configs</Text>}
+						title={<Text bold>{t("model.update_configs_title")}</Text>}
 					>
 						{phase === "configuring" && (
 							<Box>
 								<Text color="cyan">
 									<Spinner />
 								</Text>
-								<Text> Updating tool configs...</Text>
+								<Text>{` ${t("model.updating")}`}</Text>
 							</Box>
 						)}
 						{phase === "done" && chosenModel && (
 							<Box flexDirection="column">
 								<Text>
-									{"Default model updated to "}
+									{t("model.updated_prefix")}
 									<Text color="cyan">{chosenModel}</Text>
-									{" for "}
-									{formatToolList(tools.map((t) => TOOL_LABEL[t]))}
+									{t("model.updated_middle")}
+									{formatList(tools.map((tool) => TOOL_LABEL[tool]))}
 									{"."}
 								</Text>
 								{/* Their configs carry no model pin (see configureOpenCodeKind),
 								    so a model already selected in-CLI keeps winning there —
 								    say so rather than let the line above imply otherwise. */}
-								{tools.some((t) => t === "opencode" || t === "codev-code") && (
+								{tools.some(
+									(tool) => tool === "opencode" || tool === "codev-code",
+								) && (
 									<Text dimColor>
-										{"In "}
-										{formatToolList(
+										{t("model.opencode_prefix")}
+										{formatList(
 											tools
-												.filter((t) => t === "opencode" || t === "codev-code")
-												.map((t) => TOOL_LABEL[t]),
+												.filter(
+													(tool) =>
+														tool === "opencode" || tool === "codev-code",
+												)
+												.map((tool) => TOOL_LABEL[tool]),
 										)}
-										{", switch models anytime with /models."}
+										{t("model.opencode_suffix")}
 									</Text>
 								)}
 							</Box>

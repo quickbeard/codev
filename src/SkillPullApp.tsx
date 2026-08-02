@@ -5,6 +5,7 @@ import { Banner } from "@/components/Banner.js";
 import { Frame } from "@/components/Frame.js";
 import { Step } from "@/components/Step.js";
 import { useCanType } from "@/components/useCanType.js";
+import { t } from "@/lib/i18n.js";
 import { stripControlChars } from "@/lib/sanitize.js";
 import {
 	AGENT_LABELS,
@@ -41,10 +42,14 @@ type Phase =
 	| "done"
 	| "error";
 
-const LOCATIONS: { key: InstallLocation; label: string }[] = [
-	{ key: "current", label: "Current directory (recommended)" },
-	{ key: "global", label: "Global" },
-];
+// Labels resolved per render rather than frozen at import time.
+const LOCATIONS = [
+	{
+		key: "current" as InstallLocation,
+		labelKey: "skill_pull.location.current",
+	},
+	{ key: "global" as InstallLocation, labelKey: "skill_pull.location.global" },
+] as const;
 
 export function SkillPullApp({
 	target,
@@ -127,10 +132,7 @@ export function SkillPullApp({
 	// unlike the ungated case this is a silent hang, not a throw.
 	useEffect(() => {
 		if ((phase !== "select" && phase !== "agents") || canType) return;
-		setError(
-			"This terminal cannot supply keystrokes, so the install prompts cannot be shown.\n" +
-				"Pass --here, --global, or --dir <path> to choose a location without them.",
-		);
+		setError(t("skill_pull.no_keyboard"));
 		setPhase("error");
 		finish(false);
 	}, [phase, canType, finish]);
@@ -186,7 +188,9 @@ export function SkillPullApp({
 
 	// Sanitize the hub-sourced name before rendering it to the terminal.
 	const skillName = meta ? stripControlChars(meta.name) : null;
-	const title = skillName ? `Install ${skillName} skill` : "Install skill";
+	const title = skillName
+		? t("skill_pull.title", { name: skillName })
+		: t("skill_pull.title_generic");
 
 	return (
 		<Box flexDirection="column" paddingX={1} paddingBottom={1}>
@@ -198,22 +202,24 @@ export function SkillPullApp({
 							<Text color="cyan">
 								<Spinner />
 							</Text>
-							<Text>{" Resolving skill..."}</Text>
+							<Text>{` ${t("skill_pull.resolving")}`}</Text>
 						</Box>
 					)}
 					{phase === "select" && meta && (
 						<Box flexDirection="column">
-							<Text dimColor>{`Install ${skillName} to:`}</Text>
+							<Text dimColor>
+								{t("skill_pull.install_to", { name: skillName ?? "" })}
+							</Text>
 							{LOCATIONS.map((loc, i) => (
 								<Text key={loc.key} color={i === index ? "cyan" : undefined}>
-									{`${i === index ? "❯ " : "  "}${loc.label}`}
+									{`${i === index ? "❯ " : "  "}${t(loc.labelKey)}`}
 								</Text>
 							))}
 						</Box>
 					)}
 					{phase === "agents" && (
 						<Box flexDirection="column">
-							<Text dimColor>For which agents?</Text>
+							<Text dimColor>{t("skill_pull.which_agents")}</Text>
 							{SKILL_AGENTS.map((agent, i) => {
 								const locked = agent === ALWAYS_AGENT;
 								const checked = locked || picked.has(agent);
@@ -227,7 +233,7 @@ export function SkillPullApp({
 									</Text>
 								);
 							})}
-							<Text dimColor>space toggles · enter confirms</Text>
+							<Text dimColor>{t("skill_pull.toggle_hint")}</Text>
 						</Box>
 					)}
 					{phase === "installing" && (
@@ -235,7 +241,7 @@ export function SkillPullApp({
 							<Text color="cyan">
 								<Spinner />
 							</Text>
-							<Text>{" Installing..."}</Text>
+							<Text>{` ${t("skill_pull.installing")}`}</Text>
 						</Box>
 					)}
 					{phase === "done" && result && (

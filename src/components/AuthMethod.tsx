@@ -1,5 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
+import { t } from "@/lib/i18n.js";
 
 export type AuthMethodChoice = "existing" | "new" | "manual" | "skip";
 
@@ -8,22 +9,19 @@ interface Option {
 	value: AuthMethodChoice;
 }
 
-const NEW_OPTION: Option = {
-	label: "Get a new API Key",
-	value: "new",
-};
-const MANUAL_OPTION: Option = {
-	label: "I have my own API Key",
-	value: "manual",
-};
-const EXISTING_OPTION: Option = {
-	label: "Reuse existing API Key",
-	value: "existing",
-};
-const SKIP_OPTION: Option = {
-	label: "Skip configuration",
-	value: "skip",
-};
+// Built per render rather than held in module-level constants. A `const` here
+// would resolve its label at import time, which is correct in production (the
+// locale comes from the environment and never changes mid-process) but freezes
+// the English text before a test can call resetLocaleCache().
+function authOptions(hasExisting: boolean): Option[] {
+	const options: Option[] = [
+		{ label: t("auth_method.new"), value: "new" },
+		{ label: t("auth_method.manual"), value: "manual" },
+		{ label: t("auth_method.skip"), value: "skip" },
+	];
+	if (!hasExisting) return options;
+	return [{ label: t("auth_method.existing"), value: "existing" }, ...options];
+}
 
 interface AuthMethodProps {
 	onSelect: (choice: AuthMethodChoice) => void;
@@ -38,9 +36,7 @@ export function AuthMethod({
 	selected = null,
 	hasExisting = false,
 }: AuthMethodProps) {
-	const options: Option[] = hasExisting
-		? [EXISTING_OPTION, NEW_OPTION, MANUAL_OPTION, SKIP_OPTION]
-		: [NEW_OPTION, MANUAL_OPTION, SKIP_OPTION];
+	const options = authOptions(hasExisting);
 	const [cursor, setCursor] = useState(0);
 
 	useInput(
@@ -81,8 +77,8 @@ export function AuthMethod({
 export function configurationMethodTitle(readOnly = false) {
 	return (
 		<Text bold>
-			{"Choose configuration method "}
-			{!readOnly && <Text dimColor>(↑/↓ to move, Enter to confirm)</Text>}
+			{`${t("auth_method.title")} `}
+			{!readOnly && <Text dimColor>{t("common.hint.move_confirm")}</Text>}
 		</Text>
 	);
 }

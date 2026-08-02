@@ -13,6 +13,7 @@ import {
 	kindForTool,
 	type Tool,
 } from "@/lib/configure.js";
+import { t } from "@/lib/i18n.js";
 import { logError, logInfo } from "@/lib/log.js";
 
 interface ConfigureProps {
@@ -91,7 +92,11 @@ export function Configure({ tools, creds, onDone }: ConfigureProps) {
 			// its side-effects, but renders no rows — SetupApp hides the whole
 			// Step on that path. Only the configure path emits visible output.
 			if (creds !== null) {
-				setLogs(results.map((r) => `Configured ${LABEL[r.kind]}`));
+				setLogs(
+					results.map((r) =>
+						t("configure.configured", { tool: LABEL[r.kind] }),
+					),
+				);
 			}
 			setPhase("done");
 			// Hand off immediately. SetupApp's finalize Phase owns the visible
@@ -116,11 +121,11 @@ export function Configure({ tools, creds, onDone }: ConfigureProps) {
 			{logs.map((log, i) => (
 				<Text key={`cfg-${i.toString()}`}>{log}</Text>
 			))}
-			{error && <Text color="red">{`Configure failed: ${error}`}</Text>}
+			{error && <Text color="red">{t("configure.failed", { error })}</Text>}
 		</Box>
 	);
 }
 
 export function configureTitle() {
-	return <Text bold>Configure tools</Text>;
+	return <Text bold>{t("configure.title")}</Text>;
 }

@@ -17,6 +17,7 @@ import {
 } from "@/lib/const.js";
 import { doctorOutcome, rerunDoctorWithProxy } from "@/lib/doctor.js";
 import { printHelp, printVersion } from "@/lib/help.js";
+import { t } from "@/lib/i18n.js";
 import { initLogging, logWarn } from "@/lib/log.js";
 import { runLogs } from "@/lib/logs.js";
 import { applyEnvProxy } from "@/lib/proxy.js";
@@ -66,11 +67,15 @@ import { UploadApp } from "@/UploadApp.js";
 // comfortably below this and still handled by the --experimental-sqlite
 // re-exec in lib/reexec.ts.)
 if (!nodeVersionMeets(process.versions.node)) {
+	// Safe to translate even here, above the argv parse: lib/i18n.ts resolves
+	// lazily from the environment, so it needs no initialization step.
 	console.error(
-		`CoDev requires Node.js >= ${MIN_NODE_STRING} (Node ${RECOMMENDED_NODE} recommended). ` +
-			`Current version: ${process.version}.\n` +
-			`Below ${MIN_NODE_STRING}, Node ignores HTTP_PROXY/HTTPS_PROXY entirely, so sign-in ` +
-			`cannot work behind a corporate proxy.\nDownload: ${NODE_DOWNLOAD_URL}`,
+		t("cli.node_too_old", {
+			min: MIN_NODE_STRING,
+			recommended: RECOMMENDED_NODE,
+			current: process.version,
+			url: NODE_DOWNLOAD_URL,
+		}),
 	);
 	process.exit(1);
 }
@@ -262,9 +267,7 @@ switch (command) {
 			password !== undefined;
 		// Non-interactive admin login needs both halves; one alone is a usage error.
 		if ((username === undefined) !== (password === undefined)) {
-			console.error(
-				"codevhub login: --username and --password must be provided together.",
-			);
+			console.error(t("cli.login.credentials_together"));
 			process.exit(1);
 		}
 		// Only the admin *form* needs the keyboard. SSO sign-in completes through
@@ -291,7 +294,9 @@ switch (command) {
 		// Full sign-out: drop the SSO session AND any SkillHub admin cookie.
 		const ssoOut = await logout();
 		const cookieOut = clearSkillhubCookie();
-		console.log(ssoOut || cookieOut ? "Logged out." : "Not logged in.");
+		console.log(
+			ssoOut || cookieOut ? t("cli.logged_out") : t("cli.not_logged_in"),
+		);
 		process.exit(0);
 		break;
 	}
@@ -358,7 +363,10 @@ switch (command) {
 		}
 		if (!(RESTORE_AGENTS as readonly string[]).includes(agent)) {
 			console.error(
-				`Unknown agent: ${agent}. Valid: ${RESTORE_AGENTS.join(", ")}.`,
+				t("cli.unknown_agent", {
+					agent: agent ?? "",
+					valid: RESTORE_AGENTS.join(", "),
+				}),
 			);
 			process.exit(1);
 		}
@@ -376,9 +384,9 @@ switch (command) {
 		const targetDir = args.find((a) => !a.startsWith("-")) ?? ".";
 		if (code === 0 && existsSync(join(targetDir, ".codegraph"))) {
 			console.log(
-				`Created the local ${styleText("cyan", ".codegraph/")} directory. ` +
-					"You can commit it if you'd like to share the knowledge graph with " +
-					"your team.",
+				t("cli.codegraph_dir_created", {
+					dir: styleText("cyan", ".codegraph/"),
+				}),
 			);
 		}
 		process.exit(code);
@@ -466,7 +474,7 @@ switch (command) {
 		console.error(
 			sub === undefined
 				? "Usage: codevhub skill <search|pull|push> ..."
-				: `Unknown skill subcommand: ${sub}. Valid: search, pull, push.`,
+				: t("cli.unknown_skill_subcommand", { sub }),
 		);
 		process.exit(1);
 		break;
@@ -508,10 +516,7 @@ switch (command) {
 		if (args.length === 0) {
 			agents = detectCodevTools();
 			if (agents.length === 0) {
-				console.log(
-					"No CoDev-installed tools found. Run `codevhub install` first, " +
-						"or specify agents explicitly: `codevhub hook claude|codex|opencode`.",
-				);
+				console.log(t("cli.no_tools_for_hook"));
 				process.exit(0);
 			}
 		} else {
@@ -520,16 +525,20 @@ switch (command) {
 			);
 			if (invalid.length > 0) {
 				console.error(
-					`Unknown agent(s): ${invalid.join(", ")}. Valid: ${SHIM_AGENTS.join(", ")}.`,
+					t("cli.unknown_agents", {
+						agents: invalid.join(", "),
+						valid: SHIM_AGENTS.join(", "),
+					}),
 				);
 				process.exit(1);
 			}
 			agents = args as ShimAgent[];
 		}
 		const r = installShims(agents);
-		console.log(`Installed shims in ${r.shimDir}`);
-		for (const path of r.rcFilesUpdated) console.log(`  patched ${path}`);
-		if (r.windowsUserPathUpdated) console.log("  updated user PATH");
+		console.log(t("cli.shims_installed", { dir: r.shimDir }));
+		for (const path of r.rcFilesUpdated)
+			console.log(t("cli.shims_patched", { path }));
+		if (r.windowsUserPathUpdated) console.log(t("cli.shims_path_updated"));
 		console.log(activationHint());
 		process.exit(0);
 		break;
@@ -537,11 +546,17 @@ switch (command) {
 	case "unhook": {
 		const r = uninstallShims();
 		if (r.shimsRemoved.length === 0 && r.rcFilesUpdated.length === 0) {
-			console.log("No CoDev shims installed.");
+			console.log(t("cli.shims_none"));
 		} else {
-			console.log(`Removed ${r.shimsRemoved.length} shim(s) from ${r.shimDir}`);
-			for (const path of r.rcFilesUpdated) console.log(`  cleaned ${path}`);
-			if (r.windowsUserPathUpdated) console.log("  updated user PATH");
+			console.log(
+				t("cli.shims_removed", {
+					count: r.shimsRemoved.length,
+					dir: r.shimDir,
+				}),
+			);
+			for (const path of r.rcFilesUpdated)
+				console.log(t("cli.shims_cleaned", { path }));
+			if (r.windowsUserPathUpdated) console.log(t("cli.shims_path_updated"));
 			console.log(activationHint());
 		}
 		process.exit(0);

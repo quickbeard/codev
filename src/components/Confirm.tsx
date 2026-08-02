@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 import { YesNo } from "@/components/YesNo.js";
 import { type BackupKind, kindForTool, type Tool } from "@/lib/configure.js";
+import { formatListParts, t } from "@/lib/i18n.js";
 
 interface ConfirmProps {
 	tools: Tool[];
@@ -24,33 +25,26 @@ const KIND_RESTORE_CMD: Record<BackupKind, string> = {
 	"continue-config": "codevhub restore continue",
 };
 
-// Render the restore-command list with cyan emphasis on each command,
-// matching `formatToolList`'s Oxford-comma / "and" join rules:
-//   1 →  X
-//   2 →  X and Y
-//   3+ → X, Y, and Z
+// Render the restore-command list with cyan emphasis on each command.
+//
+// The separators come from `formatListParts` (Intl.ListFormat) rather than the
+// hand-written " and " / ", and " / ", " ladder this used to carry: those rules
+// are English's, and a locale that joins differently had no way to express it.
+// Splitting into parts is what lets the commands stay cyan while the separators
+// between them render plain.
 function renderCommandList(cmds: string[]): ReactNode {
 	if (cmds.length === 0) return null;
-	const nodes: ReactNode[] = [];
-	// Cmds are deduped by BackupKind upstream, so each command string is
-	// unique within `cmds` and safe to use as a React key. Separators key
-	// off the trailing command to inherit that uniqueness.
-	cmds.forEach((cmd, i) => {
-		if (i > 0) {
-			const isLast = i === cmds.length - 1;
-			let sep: string;
-			if (cmds.length === 2) sep = " and ";
-			else if (isLast) sep = ", and ";
-			else sep = ", ";
-			nodes.push(<Text key={`sep-${cmd}`}>{sep}</Text>);
-		}
-		nodes.push(
-			<Text key={`cmd-${cmd}`} color="cyan">
-				{cmd}
-			</Text>,
-		);
-	});
-	return nodes;
+	// Cmds are deduped by BackupKind upstream, so each command string is unique
+	// within `cmds`; part indices key the separators, which are not.
+	return formatListParts(cmds).map((part, i) =>
+		part.type === "element" ? (
+			<Text key={`cmd-${part.value}`} color="cyan">
+				{part.value}
+			</Text>
+		) : (
+			<Text key={`sep-${i.toString()}`}>{part.value}</Text>
+		),
+	);
 }
 
 export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
@@ -69,7 +63,7 @@ export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
 		<Box flexDirection="column">
 			{cmds.length > 0 && (
 				<Text>
-					{"To revert to your pre-CoDev state, run "}
+					{t("confirm.revert_prefix")}
 					{renderCommandList(cmds)}
 					{"."}
 				</Text>
@@ -86,7 +80,7 @@ export function Confirm({ tools, onConfirm, readOnly = false }: ConfirmProps) {
 export function confirmTitle() {
 	return (
 		<Text bold color="yellow">
-			{"Heads up — CoDev will change your settings."}
+			{t("confirm.title")}
 		</Text>
 	);
 }

@@ -135,6 +135,32 @@ npm uninstall -g codev-ai
 
 Then restart your terminal.
 
+## Language
+
+The CLI speaks **English** and **Vietnamese**. It picks the language from your
+operating system automatically, so on a Vietnamese machine there is nothing to
+configure.
+
+To choose explicitly, set `CODEV_LANG`:
+
+```bash
+CODEV_LANG=vi codevhub install   # one command
+export CODEV_LANG=vi             # every command in this shell
+```
+
+Accepted values are `vi` and `en`, in any of the usual spellings (`vi`,
+`vi-VN`, `vi_VN.UTF-8`). Anything unrecognized falls back to English rather than
+erroring. Without `CODEV_LANG`, the standard `LC_ALL` / `LC_MESSAGES` / `LANG`
+variables are consulted in that order, then the OS locale.
+
+Two things stay in English on purpose:
+
+- **Diagnostic prose** — `codevhub doctor`'s findings, network error
+  explanations and remediation steps. These are the messages most often pasted
+  into a ticket or a search box, and keeping one wording makes them matchable.
+- **Names you type or that identify things** — command and flag names, agent and
+  model names, config keys, and the diagnostic log.
+
 ## Diagnostic logs
 
 Every codevhub command appends a structured diagnostic log to `~/.codev-hub/logs/codev-YYYYMMDD.ndjson` — one [Elastic Common Schema](https://www.elastic.co/guide/en/ecs/current/index.html) JSON document per line. If a command misbehaves, this file shows what actually happened: each network request with its status and duration, every child process with its exit code and stderr tail, step-by-step flow progress, and any crash with a stack trace.

@@ -1,4 +1,5 @@
 import { Box, Text } from "ink";
+import { t } from "@/lib/i18n.js";
 import type { RequestRecord } from "@/lib/log.js";
 import type { CommandRecord } from "@/lib/npm.js";
 
@@ -31,7 +32,7 @@ export function ActivityLog({ commands, requests }: ActivityLogProps) {
 		<Box flexDirection="column">
 			{commands.length > 0 && (
 				<Box flexDirection="column">
-					<Text bold>{"Commands run"}</Text>
+					<Text bold>{t("activity.commands")}</Text>
 					{commands.map((c, i) => (
 						<Row
 							key={`cmd-${i.toString()}`}
@@ -44,7 +45,7 @@ export function ActivityLog({ commands, requests }: ActivityLogProps) {
 			)}
 			{requests.length > 0 && (
 				<Box flexDirection="column" marginTop={commands.length > 0 ? 1 : 0}>
-					<Text bold>{"Endpoints contacted"}</Text>
+					<Text bold>{t("activity.endpoints")}</Text>
 					{requests.map((r, i) => (
 						<Row
 							key={`req-${i.toString()}`}
@@ -56,7 +57,7 @@ export function ActivityLog({ commands, requests }: ActivityLogProps) {
 							// through at all, so any response, including a refusal, is a
 							// reached endpoint; only "nothing came back" is a failure.
 							ok={r.status !== null}
-							text={`${r.method} ${r.url} → ${r.status ?? "no response"}`}
+							text={`${r.method} ${r.url} → ${r.status ?? t("activity.no_response")}`}
 							durationMs={r.durationMs}
 						/>
 					))}

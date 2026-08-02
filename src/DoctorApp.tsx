@@ -35,6 +35,7 @@ import {
 	startCommandRecording,
 	writeDoctorReport,
 } from "@/lib/doctor.js";
+import { type MessageKey, t } from "@/lib/i18n.js";
 import { logDebug, type RequestRecord } from "@/lib/log.js";
 import type { CommandRecord } from "@/lib/npm.js";
 import { readProxyEnv } from "@/lib/proxy.js";
@@ -50,13 +51,15 @@ type Phase =
 	| "state"
 	| "done";
 
-const GROUP_TITLES: Record<CheckGroup, string> = {
-	environment: "Environment",
-	network: "Network",
-	account: "Account & credentials",
-	llm: "LLM access",
-	state: "This machine",
-};
+// Message keys, not resolved titles — a Record of strings here would freeze
+// the English text at import time.
+const GROUP_TITLE_KEYS = {
+	environment: "doctor.group.environment",
+	network: "doctor.group.network",
+	account: "doctor.group.account",
+	llm: "doctor.group.llm",
+	state: "doctor.group.state",
+} as const satisfies Record<CheckGroup, MessageKey>;
 
 const GROUP_CHECKS: Record<CheckGroup, Check[]> = {
 	environment: ENVIRONMENT_CHECKS,
@@ -346,8 +349,8 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 			<Banner />
 			<Frame tag="CoDev">
 				{phase === "preparing" && (
-					<Step active title={<Text bold>Signing out previous session</Text>}>
-						<Text dimColor>Revoking tokens...</Text>
+					<Step active title={<Text bold>{t("login.signing_out")}</Text>}>
+						<Text dimColor>{t("login.revoking")}</Text>
 					</Step>
 				)}
 
@@ -357,7 +360,7 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 							<Step
 								key={group}
 								active={phase === group}
-								title={<Text bold>{GROUP_TITLES[group]}</Text>}
+								title={<Text bold>{t(GROUP_TITLE_KEYS[group])}</Text>}
 							>
 								<CheckList {...groupProps(group)} />
 							</Step>
@@ -395,7 +398,7 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 							<Step
 								key={group}
 								active={phase === group}
-								title={<Text bold>{GROUP_TITLES[group]}</Text>}
+								title={<Text bold>{t(GROUP_TITLE_KEYS[group])}</Text>}
 							>
 								<CheckList {...groupProps(group)} />
 							</Step>
@@ -409,13 +412,13 @@ export function DoctorApp({ force = false }: DoctorAppProps) {
 				    the numbered next steps and the report path. A list of every
 				    command and endpoint printed after those would scroll them away. */}
 				{phase === "done" && (
-					<Step title={<Text bold>Activity</Text>}>
+					<Step title={<Text bold>{t("doctor.step.activity")}</Text>}>
 						<ActivityLog commands={commands} requests={requests} />
 					</Step>
 				)}
 
 				{phase === "done" && (
-					<Step title={<Text bold>Result</Text>}>
+					<Step title={<Text bold>{t("doctor.step.result")}</Text>}>
 						<Summary
 							outcomes={allOutcomes}
 							nextSteps={nextSteps}
@@ -453,28 +456,24 @@ function Summary({
 	return (
 		<Box flexDirection="column">
 			{failed === 0 && warned === 0 && (
-				<Text color="green">
-					{"✓ Everything checks out. You're ready to run `codevhub install`."}
-				</Text>
+				<Text color="green">{t("doctor.summary.ok")}</Text>
 			)}
 			{failed === 0 && warned > 0 && (
-				<Text color="yellow">
-					{`▲ ${warned} warning(s). \`codevhub install\` should work, but read the notes below first.`}
-				</Text>
+				<Text color="yellow">{t("doctor.summary.warned", { warned })}</Text>
 			)}
 			{failed > 0 && (
 				// Name the warnings too: the Next steps list below numbers failures
 				// and warnings together, so a bare "5 failed" above 7 numbered
 				// items reads as a contradiction.
 				<Text color="red">
-					{`✗ ${failed} check(s) failed${
-						warned > 0 ? `, ${warned} warning(s)` : ""
-					}. Fix these before running \`codevhub install\`.`}
+					{warned > 0
+						? t("doctor.summary.failed_with_warnings", { failed, warned })
+						: t("doctor.summary.failed", { failed })}
 				</Text>
 			)}
 			{nextSteps.length > 0 && (
 				<Box flexDirection="column" marginTop={1}>
-					<Text bold>{"Next steps"}</Text>
+					<Text bold>{t("doctor.next_steps")}</Text>
 					{nextSteps.map((line, i) => (
 						<Text key={`next-${i.toString()}`} dimColor={line.startsWith("  ")}>
 							{line}
@@ -490,7 +489,7 @@ function Summary({
 			{reportPath && (
 				<Box marginTop={1}>
 					<Text dimColor>
-						{`Full report saved to ${abbreviateHome(reportPath)} — attach it to a support ticket.`}
+						{t("doctor.report_saved", { path: abbreviateHome(reportPath) })}
 					</Text>
 				</Box>
 			)}

@@ -18,6 +18,7 @@ import {
 	refreshCodevConfig,
 	saveSkillhubCookie,
 } from "@/lib/auth.js";
+import { t } from "@/lib/i18n.js";
 import { type SkillhubUser, skillhubSignIn } from "@/lib/skillhub.js";
 import { describeNetworkError } from "@/lib/tls.js";
 
@@ -111,17 +112,22 @@ function AdminLoginApp({
 	let content: ReactNode;
 	if (user) {
 		content = (
-			<Text color="green">{`✓ Logged in as ${user.username} (${user.role})`}</Text>
+			<Text color="green">
+				{t("login.admin.logged_in_as", {
+					username: user.username,
+					role: user.role,
+				})}
+			</Text>
 		);
 	} else if (error) {
-		content = <Text color="red">{`Login failed: ${error}`}</Text>;
+		content = <Text color="red">{t("login.failed", { reason: error })}</Text>;
 	} else if (nonInteractive) {
 		content = (
 			<Box>
 				<Text color="cyan">
 					<Spinner />
 				</Text>
-				<Text>{" Signing in..."}</Text>
+				<Text>{` ${t("admin_login.signing_in")}`}</Text>
 			</Box>
 		);
 	} else {
@@ -172,8 +178,8 @@ function SsoLoginApp({ force = false }: { force?: boolean }) {
 			<Banner />
 			<Frame tag="CoDev">
 				{phase === "preparing" && (
-					<Step active title={<Text bold>Signing out previous session</Text>}>
-						<Text dimColor>Revoking tokens...</Text>
+					<Step active title={<Text bold>{t("login.signing_out")}</Text>}>
+						<Text dimColor>{t("login.revoking")}</Text>
 					</Step>
 				)}
 				{phase !== "preparing" && (

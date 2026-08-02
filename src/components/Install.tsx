@@ -6,6 +6,7 @@ import {
 	ensureCodegraphInstalled,
 } from "@/lib/codegraph.js";
 import type { Tool } from "@/lib/configure.js";
+import { t } from "@/lib/i18n.js";
 import {
 	CLAUDE_CODE_INTELLIJ_PLUGIN_ID,
 	CONTINUE_INTELLIJ_PLUGIN_ID,
@@ -26,14 +27,13 @@ import {
 // downloading from the marketplace page, etc.) and naming one risks reading
 // like "this is what CoDev was trying to do." We just confirm a manual
 // fallback exists.
-const VSCODE_CONTINUE_HINT =
-	"You can install the Continue extension yourself later.";
-const JETBRAINS_CONTINUE_HINT =
-	"You can install the Continue plugin yourself later.";
-const VSCODE_CLAUDE_CODE_HINT =
-	"You can install the Claude Code extension yourself later.";
-const JETBRAINS_CLAUDE_CODE_HINT =
-	"You can install the Claude Code plugin yourself later.";
+// Looked up per call rather than held in module constants, so the locale is
+// read at render time rather than frozen at import.
+const VSCODE_CONTINUE_HINT = () => t("install.hint.vscode_continue");
+const JETBRAINS_CONTINUE_HINT = () => t("install.hint.jetbrains_continue");
+const VSCODE_CLAUDE_CODE_HINT = () => t("install.hint.vscode_claude_code");
+const JETBRAINS_CLAUDE_CODE_HINT = () =>
+	t("install.hint.jetbrains_claude_code");
 
 interface InstallProps {
 	tools: Tool[];
@@ -64,7 +64,7 @@ export function Install({ tools, onDone, includeAgents = true }: InstallProps) {
 				run: async () => {
 					const r = await installClaudeCodeExtension();
 					if (r === null) return null;
-					return { warning: `${r.warning}. ${VSCODE_CLAUDE_CODE_HINT}` };
+					return { warning: `${r.warning}. ${VSCODE_CLAUDE_CODE_HINT()}` };
 				},
 			};
 		}
@@ -75,7 +75,7 @@ export function Install({ tools, onDone, includeAgents = true }: InstallProps) {
 				run: async () => {
 					const r = await installClaudeCodePlugin();
 					if (r === null) return null;
-					return { warning: `${r.warning}. ${JETBRAINS_CLAUDE_CODE_HINT}` };
+					return { warning: `${r.warning}. ${JETBRAINS_CLAUDE_CODE_HINT()}` };
 				},
 			};
 		}
@@ -86,7 +86,7 @@ export function Install({ tools, onDone, includeAgents = true }: InstallProps) {
 				run: async () => {
 					const r = await installContinueExtension();
 					if (r === null) return null;
-					return { warning: `${r.warning}. ${VSCODE_CONTINUE_HINT}` };
+					return { warning: `${r.warning}. ${VSCODE_CONTINUE_HINT()}` };
 				},
 			};
 		}
@@ -97,7 +97,7 @@ export function Install({ tools, onDone, includeAgents = true }: InstallProps) {
 			run: async () => {
 				const r = await installContinuePlugin();
 				if (r === null) return null;
-				return { warning: `${r.warning}. ${JETBRAINS_CONTINUE_HINT}` };
+				return { warning: `${r.warning}. ${JETBRAINS_CONTINUE_HINT()}` };
 			},
 		};
 	});
@@ -115,16 +115,12 @@ export function Install({ tools, onDone, includeAgents = true }: InstallProps) {
 			label: CODEGRAPH_PKG,
 			run: async () => {
 				const err = await ensureCodegraphInstalled();
-				return err ? { warning: `CodeGraph not installed: ${err}` } : null;
+				return err
+					? { warning: t("install.codegraph_failed", { error: err }) }
+					: null;
 			},
 		});
 	}
 
-	return (
-		<TaskList
-			tasks={tasks}
-			verb={{ infinitive: "install", present: "Installing", past: "Installed" }}
-			onDone={onDone}
-		/>
-	);
+	return <TaskList tasks={tasks} verb="install" onDone={onDone} />;
 }

@@ -9,6 +9,7 @@ import {
 	ensureCodegraphInstalled,
 } from "@/lib/codegraph.js";
 import { detectConfiguredTools } from "@/lib/configure.js";
+import { t } from "@/lib/i18n.js";
 import {
 	CLAUDE_CODE_INTELLIJ_PLUGIN_ID,
 	CONTINUE_INTELLIJ_PLUGIN_ID,
@@ -89,7 +90,7 @@ export function Update({ onDone }: UpdateProps) {
 				jetbrainsAvailable,
 				codegraphInstalled,
 			] = await Promise.all([
-				Promise.all(NPM_TOOLS.map((t) => detectInstalledViaNpm(t))),
+				Promise.all(NPM_TOOLS.map((tool) => detectInstalledViaNpm(tool))),
 				hasClaudeCodeMarker || hasContinueMarker
 					? isCodeCliAvailable()
 					: Promise.resolve(false),
@@ -140,13 +141,13 @@ export function Update({ onDone }: UpdateProps) {
 						<Spinner />
 					</Text>
 				</Box>
-				<Text>Checking installed agents...</Text>
+				<Text>{t("update.detecting")}</Text>
 			</Box>
 		);
 	}
 
 	if (phase.kind === "nothing") {
-		return <Text>Nothing to update.</Text>;
+		return <Text>{t("update.nothing")}</Text>;
 	}
 
 	const tasks: TaskItem[] = [
@@ -195,14 +196,16 @@ export function Update({ onDone }: UpdateProps) {
 			label: CODEGRAPH_PKG,
 			run: async () => {
 				const err = await ensureCodegraphInstalled();
-				return err ? { warning: `CodeGraph not updated: ${err}` } : null;
+				return err
+					? { warning: t("update.codegraph_failed", { error: err }) }
+					: null;
 			},
 		});
 	}
 	return (
 		<TaskList
 			tasks={tasks}
-			verb={{ infinitive: "update", present: "Updating", past: "Updated" }}
+			verb="update"
 			// All-or-nothing for the agent/extension rows: UpdateApp aborts on any
 			// hard failure (✗), no partial-success advance. The CodeGraph row is
 			// best-effort — it warns (▲) instead of failing, so it stays in the

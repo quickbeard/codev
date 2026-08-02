@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 import type { Tool } from "@/lib/configure.js";
-import { HAPPY_CODING, HELP_HINT } from "@/lib/const.js";
+import { t } from "@/lib/i18n.js";
 
 interface SetupCompleteProps {
 	tools: Tool[];
@@ -18,10 +18,10 @@ export function SetupComplete({ tools, shimsInstalled }: SetupCompleteProps) {
 		<Box marginTop={1} marginBottom={1} flexDirection="column">
 			{resumeMessage(tools, shimsInstalled)}
 			<Box marginTop={1}>
-				<Text dimColor>{HELP_HINT}</Text>
+				<Text dimColor>{t("common.hint.help")}</Text>
 			</Box>
 			<Text bold color="magenta">
-				{HAPPY_CODING}
+				{t("common.happy_coding")}
 			</Text>
 		</Box>
 	);
@@ -29,15 +29,15 @@ export function SetupComplete({ tools, shimsInstalled }: SetupCompleteProps) {
 
 function resumeMessage(tools: Tool[], shimsInstalled: boolean): ReactNode {
 	if (tools.length === 0) return null;
-	if (!shimsInstalled) return <Text>Done!</Text>;
+	if (!shimsInstalled) return <Text>{t("common.done")}</Text>;
 	if (process.platform === "win32") {
-		return <Text>Done! Restart your terminal.</Text>;
+		return <Text>{t("setup.complete.restart_terminal")}</Text>;
 	}
 	return (
 		<Text>
-			{"Done! Run "}
+			{t("setup.complete.reload_shell_prefix")}
 			<Text color="cyan">exec $SHELL</Text>
-			{" to reload your shell."}
+			{t("setup.complete.reload_shell_suffix")}
 		</Text>
 	);
 }

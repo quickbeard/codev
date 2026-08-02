@@ -7,6 +7,7 @@ import { type AuthData, login } from "@/lib/auth.js";
 import { clipboard } from "@/lib/clipboard.js";
 import { SSO_URL } from "@/lib/const.js";
 import { describeFailure } from "@/lib/doctor.js";
+import { t } from "@/lib/i18n.js";
 
 interface LoginProps {
 	onDone: (auth: AuthData) => void;
@@ -138,15 +139,13 @@ export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 		const [first = "", ...rest] = lines;
 		return (
 			<Box flexDirection="column">
-				<Text color="red">{`Login failed: ${first}`}</Text>
+				<Text color="red">{t("login.failed", { reason: first })}</Text>
 				{rest.map((line, i) => (
 					<Text key={`login-err-${i.toString()}`} color="red">
 						{line}
 					</Text>
 				))}
-				{!onError && canType && (
-					<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
-				)}
+				{!onError && canType && <Text dimColor>{t("common.retry_hint")}</Text>}
 			</Box>
 		);
 	}
@@ -160,7 +159,9 @@ export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 	if (completed) {
 		return (
 			<Text color="green">
-				{`✓ Signed in${doneAuth ? ` as ${doneAuth.user.email}` : ""}`}
+				{doneAuth
+					? t("login.signed_in_as", { email: doneAuth.user.email })
+					: t("login.signed_in")}
 			</Text>
 		);
 	}
@@ -181,7 +182,7 @@ export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 					<Text color="cyan">
 						<Spinner />
 					</Text>
-					<Text>{" Starting sign-in..."}</Text>
+					<Text>{` ${t("login.starting")}`}</Text>
 				</Box>
 			</Box>
 		);
@@ -202,7 +203,7 @@ export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 						<Spinner />
 					</Text>
 				)}
-				<Text>{" Waiting for sign-in to complete in your browser..."}</Text>
+				<Text>{` ${t("login.waiting")}`}</Text>
 			</Box>
 			{showFallback && (
 				<Box flexDirection="column" marginTop={1}>
@@ -216,11 +217,11 @@ export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 					    press-c-to-copy shortcut sidesteps manual selection entirely. */}
 					<Box flexDirection="column" marginLeft={-4}>
 						<Box>
-							<Text dimColor>{"Browser didn't open? Sign in here "}</Text>
+							<Text dimColor>{t("login.browser_didnt_open")}</Text>
 							{copied ? (
-								<Text color="green">{"(copied!)"}</Text>
+								<Text color="green">{t("login.copied")}</Text>
 							) : (
-								canType && <Text dimColor>{"(press C to copy)"}</Text>
+								canType && <Text dimColor>{t("login.press_c")}</Text>
 							)}
 							<Text dimColor>{":"}</Text>
 						</Box>
@@ -236,19 +237,11 @@ export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 							pasteValue={paste.pasteValue}
 							pasteError={paste.pasteError}
 							submitting={paste.submitting}
-							caption={
-								<Text dimColor>
-									{"After signing in, copy the code shown and paste it here:"}
-								</Text>
-							}
+							caption={<Text dimColor>{t("login.paste_caption")}</Text>}
 						/>
 					) : (
 						<Box marginTop={1}>
-							<Text dimColor>
-								{
-									"This terminal can't accept keyboard input, so the paste-back fallback is unavailable — finish sign-in in the browser."
-								}
-							</Text>
+							<Text dimColor>{t("login.no_keyboard")}</Text>
 						</Box>
 					)}
 				</Box>
@@ -258,5 +251,5 @@ export function Login({ onDone, fallbackDelayMs = 3000, onError }: LoginProps) {
 }
 
 export function loginTitle() {
-	return <Text bold>{"Login"}</Text>;
+	return <Text bold>{t("login.title")}</Text>;
 }

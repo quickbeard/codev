@@ -7,6 +7,7 @@ import {
 	fetchModelWindows,
 	isInvalidKeyError,
 } from "@/lib/backend.js";
+import { t } from "@/lib/i18n.js";
 import { limitsFromWindow, resetModelLimitsCache } from "@/lib/model-limits.js";
 
 interface ModelSelectProps {
@@ -141,7 +142,7 @@ export function ModelSelect({
 				<Text color="cyan">
 					<Spinner />
 				</Text>
-				<Text> Fetching available models...</Text>
+				<Text>{` ${t("model_select.loading")}`}</Text>
 			</Box>
 		);
 	}
@@ -149,8 +150,12 @@ export function ModelSelect({
 	if (phase === "errored") {
 		return (
 			<Box flexDirection="column">
-				<Text color="red">{`Failed to fetch models: ${error ?? "unknown error"}`}</Text>
-				<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
+				<Text color="red">
+					{t("model_select.failed", {
+						error: error ?? t("tasklist.unknown_error"),
+					})}
+				</Text>
+				<Text dimColor>{t("common.retry_hint")}</Text>
 			</Box>
 		);
 	}
@@ -196,8 +201,8 @@ export function ModelSelect({
 export function modelSelectTitle(readOnly = false) {
 	return (
 		<Text bold>
-			{"Choose default model "}
-			{!readOnly && <Text dimColor>(↑/↓ to move, Enter to confirm)</Text>}
+			{`${t("model_select.title")} `}
+			{!readOnly && <Text dimColor>{t("common.hint.move_confirm")}</Text>}
 		</Text>
 	);
 }

@@ -2,6 +2,7 @@ import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { YesNo } from "@/components/YesNo.js";
+import { t, tCount } from "@/lib/i18n.js";
 import { type RemoveResult, runRemove } from "@/lib/remove.js";
 
 type Phase = "confirm" | "running" | "done" | "aborted";
@@ -37,6 +38,8 @@ export function RemoveApp({
 				setResult({
 					steps: [
 						{
+							// Sits alongside step labels produced by lib/remove.ts, which are
+							// still English — translating only this one would split the list.
 							label: "Remove",
 							detail: err instanceof Error ? err.message : String(err),
 							status: "failed",
@@ -72,8 +75,7 @@ export function RemoveApp({
 		return (
 			<Box flexDirection="column">
 				<Text bold color="yellow">
-					Everything will be reverted to the pre-CoDev state. Do you want to
-					proceed?
+					{t("remove.confirm")}
 				</Text>
 				<Box marginTop={1}>
 					<YesNo defaultAnswer="no" onAnswer={handleAnswer} />
@@ -83,7 +85,7 @@ export function RemoveApp({
 	}
 
 	if (phase === "aborted") {
-		return <Text>Abort.</Text>;
+		return <Text>{t("remove.aborted")}</Text>;
 	}
 
 	if (phase === "running" || !result) {
@@ -92,7 +94,7 @@ export function RemoveApp({
 				<Text color="cyan">
 					<Spinner />
 				</Text>
-				<Text> Removing CoDev components...</Text>
+				<Text>{` ${t("remove.running")}`}</Text>
 			</Box>
 		);
 	}
@@ -113,9 +115,7 @@ export function RemoveApp({
 		result.keptPaths.length > 0 ? (
 			<Box flexDirection="column" marginTop={1}>
 				<Text color="yellow">
-					Kept {result.keptPaths.length} config file
-					{result.keptPaths.length === 1 ? "" : "s"} CoDev didn't write — your
-					own settings were left untouched:
+					{tCount("remove.kept", result.keptPaths.length)}
 				</Text>
 				{result.keptPaths.map((p) => (
 					<Text key={p} dimColor>
@@ -130,7 +130,7 @@ export function RemoveApp({
 		return (
 			<Box flexDirection="column">
 				{warningRows}
-				<Text color="red">✗ Some steps failed:</Text>
+				<Text color="red">{t("remove.some_failed")}</Text>
 				{failures.map((s) => (
 					<Text key={s.label} dimColor>
 						- {s.label}: {s.detail}
@@ -145,9 +145,9 @@ export function RemoveApp({
 		<Box flexDirection="column">
 			{warningRows}
 			<Text>
-				{"Removed successfully. You can now run "}
+				{t("remove.success_prefix")}
 				<Text color="cyan">npm uninstall -g codev-ai</Text>
-				{" to remove the CoDev package. Restart your terminal to apply."}
+				{t("remove.success_suffix")}
 			</Text>
 			{keptHint}
 		</Box>

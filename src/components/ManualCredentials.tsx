@@ -1,5 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
+import { t } from "@/lib/i18n.js";
 import { slugifyProviderName } from "@/lib/provider.js";
 
 export interface ManualCredentialsValue {
@@ -16,13 +17,27 @@ interface ManualCredentialsProps {
 // The provider name is optional — an empty value means "use the default
 // provider identity" and the caller resolves it (lib/provider.ts). The URL and
 // key stay required.
+//
+// The `key` and `optional` halves are static, but the labels are looked up per
+// render: a module-level constant would freeze the English text at import time,
+// before a test could switch locale.
 const FIELDS = [
-	{ key: "providerName" as const, label: "Provider Name", optional: true },
-	{ key: "baseUrl" as const, label: "API URL", optional: false },
-	{ key: "apiKey" as const, label: "API Key", optional: false },
-];
-
-const LABEL_WIDTH = Math.max(...FIELDS.map((f) => f.label.length));
+	{
+		key: "providerName" as const,
+		labelKey: "manual_creds.field.provider_name",
+		optional: true,
+	},
+	{
+		key: "baseUrl" as const,
+		labelKey: "manual_creds.field.api_url",
+		optional: false,
+	},
+	{
+		key: "apiKey" as const,
+		labelKey: "manual_creds.field.api_key",
+		optional: false,
+	},
+] as const;
 
 type Values = Record<(typeof FIELDS)[number]["key"], string>;
 
@@ -49,7 +64,7 @@ export function ManualCredentials({
 			if (key.return) {
 				const value = values[current.key].trim();
 				if (!value && !current.optional) {
-					setError(`${current.label} is required`);
+					setError(t("common.field_required", { field: t(current.labelKey) }));
 					return;
 				}
 				setError(null);
@@ -98,6 +113,11 @@ export function ManualCredentials({
 	);
 
 	const providerId = slugifyProviderName(values.providerName);
+	// Derived from the active locale's labels. Rendered as an Ink <Box width>
+	// rather than String.padEnd so the gutter stays correct for scripts whose
+	// characters are not one cell wide — Yoga measures display width, padEnd
+	// counts UTF-16 code units.
+	const labelWidth = Math.max(...FIELDS.map((f) => t(f.labelKey).length)) + 2;
 
 	return (
 		<Box flexDirection="column">
@@ -105,22 +125,27 @@ export function ManualCredentials({
 				const isActive = !readOnly && !submitted && i === index;
 				const isPast = submitted || i < index;
 				const value = values[field.key];
-				const label = field.label.padEnd(LABEL_WIDTH, " ");
 				return (
 					<Box key={field.key} flexDirection="column">
 						<Box>
-							<Text color={isActive ? "cyan" : undefined} dimColor={!isActive}>
-								{`${label}: `}
-							</Text>
+							<Box width={labelWidth} flexShrink={0}>
+								<Text
+									color={isActive ? "cyan" : undefined}
+									dimColor={!isActive}
+								>
+									{`${t(field.labelKey)}: `}
+								</Text>
+							</Box>
 							<Text>{value}</Text>
 							{isActive && <Text color="cyan">▌</Text>}
-							{isPast && !value && <Text dimColor>(empty)</Text>}
+							{isPast && !value && (
+								<Text dimColor>{t("manual_creds.empty")}</Text>
+							)}
 						</Box>
 						{field.key === "providerName" && providerId && (
 							<Box>
-								<Text
-									dimColor
-								>{`${" ".repeat(LABEL_WIDTH + 2)}→ id: ${providerId}`}</Text>
+								<Box width={labelWidth} flexShrink={0} />
+								<Text dimColor>{`→ id: ${providerId}`}</Text>
 							</Box>
 						)}
 					</Box>
@@ -133,9 +158,7 @@ export function ManualCredentials({
 			)}
 			{!readOnly && !submitted && (
 				<Box marginTop={1}>
-					<Text dimColor>
-						{"Press Enter to confirm each field (Provider Name is optional)."}
-					</Text>
+					<Text dimColor>{t("manual_creds.hint")}</Text>
 				</Box>
 			)}
 		</Box>
@@ -143,5 +166,5 @@ export function ManualCredentials({
 }
 
 export function manualCredentialsTitle() {
-	return <Text bold>{"Enter API credentials"}</Text>;
+	return <Text bold>{t("manual_creds.title")}</Text>;
 }

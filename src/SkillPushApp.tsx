@@ -7,6 +7,7 @@ import { Login, loginTitle } from "@/components/Login.js";
 import { Step } from "@/components/Step.js";
 import { useCanType } from "@/components/useCanType.js";
 import { type AuthData, loadAuth } from "@/lib/auth.js";
+import { type MessageKey, t, tCount } from "@/lib/i18n.js";
 import {
 	formatPublishResult,
 	type PublishArchive,
@@ -40,12 +41,14 @@ type Phase =
 	| "error";
 type StepState = "pending" | "running" | "done" | "failed";
 
-const STEP_LABELS: Record<PublishStep, string> = {
-	upload: "Uploading",
-	metadata: "Saving metadata",
-	submit: "Submitting for review",
-	approve: "Approving (admin)",
-};
+// Message keys rather than resolved labels: a Record of strings here would
+// freeze the English text at import time.
+const STEP_LABEL_KEYS = {
+	upload: "skill_push.step.uploading",
+	metadata: "skill_push.step.saving",
+	submit: "skill_push.step.submitting",
+	approve: "skill_push.step.approving",
+} as const satisfies Record<PublishStep, MessageKey>;
 
 // Marker glyph/color for a non-running step ("running" renders a spinner
 // instead, so its entries here are unused placeholders).
@@ -71,11 +74,9 @@ function formatBytes(n: number): string {
 }
 
 function actionSummary(opts: PublishOpts): string {
-	if (opts.draftOnly) return "Save as a DRAFT (not submitted).";
-	if (opts.autoApprove) {
-		return "Upload, submit, and auto-approve to PUBLIC (admin only).";
-	}
-	return "Upload and submit for review.";
+	if (opts.draftOnly) return t("skill_push.mode.draft");
+	if (opts.autoApprove) return t("skill_push.mode.auto_approve");
+	return t("skill_push.mode.submit");
 }
 
 export function SkillPushApp({
@@ -185,10 +186,7 @@ export function SkillPushApp({
 	// user and an upload.
 	useEffect(() => {
 		if (phase !== "confirm" || canType) return;
-		setError(
-			"This terminal cannot supply keystrokes, so the confirmation prompt cannot be shown.\n" +
-				"Re-run with --json to publish without confirming.",
-		);
+		setError(t("skill_push.no_keyboard"));
 		setPhase("error");
 		finish(false);
 	}, [phase, canType, finish]);
@@ -246,21 +244,22 @@ export function SkillPushApp({
 				    login and publishing so the user always sees what they're shipping. */}
 				<Step
 					active={phase === "preparing" || phase === "confirm"}
-					title={<Text bold>Publish skill to the hub</Text>}
+					title={<Text bold>{t("skill_push.title")}</Text>}
 				>
 					{phase === "preparing" ? (
 						<Box>
 							<Text color="cyan">
 								<Spinner />
 							</Text>
-							<Text>{" Preparing archive..."}</Text>
+							<Text>{` ${t("skill_push.preparing")}`}</Text>
 						</Box>
 					) : archive ? (
 						<Box flexDirection="column">
 							<Text>
-								{`${archive.fileName}  (${archive.files.length} file${
-									archive.files.length === 1 ? "" : "s"
-								}, ${formatBytes(archive.totalBytes)})`}
+								{tCount("skill_push.archive", archive.files.length, {
+									fileName: archive.fileName,
+									size: formatBytes(archive.totalBytes),
+								})}
 							</Text>
 							{archive.files.slice(0, MAX_PREVIEW_FILES).map((f) => (
 								<Text key={f} dimColor>
@@ -269,19 +268,24 @@ export function SkillPushApp({
 							))}
 							{archive.files.length > MAX_PREVIEW_FILES && (
 								<Text dimColor>
-									{`  … and ${archive.files.length - MAX_PREVIEW_FILES} more`}
+									{t("skill_push.and_more", {
+										count: archive.files.length - MAX_PREVIEW_FILES,
+									})}
 								</Text>
 							)}
 							{archive.skipped.length > 0 && (
 								<Text color="yellow">
-									{`Excluded: ${archive.skipped.join(", ")}`}
+									{t("skill_push.excluded", {
+										list: archive.skipped.join(", "),
+									})}
 								</Text>
 							)}
 							<Box marginTop={1} flexDirection="column">
 								<Text dimColor>{actionSummary(opts)}</Text>
 								{phase === "confirm" && (
 									<Text>
-										Publish this skill? <Text color="cyan">(y/N)</Text>
+										{`${t("skill_push.confirm")} `}
+										<Text color="cyan">(y/N)</Text>
 									</Text>
 								)}
 							</Box>
@@ -306,13 +310,15 @@ export function SkillPushApp({
 								<Text color="cyan">
 									<Spinner />
 								</Text>
-								<Text>{" Checking sign-in..."}</Text>
+								<Text>{` ${t("skill_push.checking_signin")}`}</Text>
 							</Box>
 						) : phase === "login" ? (
 							<Login onDone={handleLoginDone} />
 						) : (
 							<Text color="green">
-								{`✓ Signed in${loginEmail ? ` as ${loginEmail}` : ""}`}
+								{loginEmail
+									? t("login.signed_in_as", { email: loginEmail })
+									: t("login.signed_in")}
 							</Text>
 						)}
 					</Step>
@@ -322,7 +328,7 @@ export function SkillPushApp({
 				{(phase === "publishing" || phase === "done" || started) && (
 					<Step
 						active={phase === "publishing" || phase === "error"}
-						title={<Text bold>Publishing</Text>}
+						title={<Text bold>{t("skill_push.publishing")}</Text>}
 					>
 						{steps.map((step) => {
 							const state = stepState[step];
@@ -343,7 +349,7 @@ export function SkillPushApp({
 													? "gray"
 													: undefined
 										}
-									>{` ${STEP_LABELS[step]}`}</Text>
+									>{` ${t(STEP_LABEL_KEYS[step])}`}</Text>
 								</Box>
 							);
 						})}
@@ -359,7 +365,7 @@ export function SkillPushApp({
 
 				{phase === "cancelled" && (
 					<Box marginTop={1}>
-						<Text dimColor>Cancelled.</Text>
+						<Text dimColor>{t("skill_push.cancelled")}</Text>
 					</Box>
 				)}
 				{phase === "error" && error && (

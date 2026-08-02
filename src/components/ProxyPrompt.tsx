@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 import { normalizeProxyInput } from "@/lib/doctor.js";
+import { t } from "@/lib/i18n.js";
 
 interface ProxyPromptProps {
 	/** Called with a normalized proxy URL, or null when the user skips. */
@@ -17,13 +18,15 @@ interface ProxyPromptProps {
 // Concrete forms, because "host:port" alone leaves real questions unanswered:
 // does a hostname work, how do I pass a password, do I need http://. Each line
 // exists to answer one of those.
-const EXAMPLES: [string, string][] = [
-	["10.60.129.1:3128", "IP and port"],
-	["proxy.corp.vn:8080", "hostname and port"],
-	["user:pass@10.60.129.1:3128", "proxy that needs a login"],
-	["http://10.60.129.1:3128", "full URL (http:// is assumed if you omit it)"],
-];
+const EXAMPLES = [
+	["10.60.129.1:3128", "proxy_prompt.example.ip_port"],
+	["proxy.corp.vn:8080", "proxy_prompt.example.host_port"],
+	["user:pass@10.60.129.1:3128", "proxy_prompt.example.with_login"],
+	["http://10.60.129.1:3128", "proxy_prompt.example.full_url"],
+] as const;
 
+// Measures the addresses, which are literals in every locale — only the note
+// beside each one is translated — so this can stay a module constant.
 const EXAMPLE_WIDTH = Math.max(...EXAMPLES.map(([e]) => e.length));
 
 /**
@@ -67,8 +70,8 @@ export function ProxyPrompt({
 					// silent failure, so it gets its own message.
 					setError(
 						/^\d+$/.test(trimmed)
-							? `"${trimmed}" looks like just the port. Enter the host too, e.g. 10.0.0.1:${trimmed}`
-							: "That doesn't look like a proxy address. Use host:port, e.g. 10.0.0.1:8080",
+							? t("proxy_prompt.error.port_only", { input: trimmed })
+							: t("proxy_prompt.error.invalid"),
 					);
 					return;
 				}
@@ -94,7 +97,9 @@ export function ProxyPrompt({
 	if (submitted) {
 		return (
 			<Text dimColor>
-				{value.trim() ? `Retrying via ${value.trim()}…` : "Skipped."}
+				{value.trim()
+					? t("proxy_prompt.retrying", { proxy: value.trim() })
+					: t("proxy_prompt.skipped")}
 			</Text>
 		);
 	}
@@ -104,34 +109,24 @@ export function ProxyPrompt({
 			{currentProxy ? (
 				<>
 					<Text>
-						{`The network checks failed even though a proxy is configured (${currentProxy}).`}
+						{t("proxy_prompt.failed_with_proxy", { proxy: currentProxy })}
 					</Text>
-					<Text>
-						{
-							"If that address is wrong, enter the correct one and CoDev will re-run the checks with it."
-						}
-					</Text>
+					<Text>{t("proxy_prompt.wrong_address")}</Text>
 				</>
 			) : (
-				<Text>
-					{
-						"The network checks failed. If this machine reaches the internet through a proxy, enter it here and CoDev will re-run the checks with it applied."
-					}
-				</Text>
+				<Text>{t("proxy_prompt.failed_no_proxy")}</Text>
 			)}
-			<Text dimColor>
-				{"Nothing is written to disk — this applies to this run only."}
-			</Text>
+			<Text dimColor>{t("proxy_prompt.not_written")}</Text>
 
 			<Box flexDirection="column" marginTop={1}>
-				<Text dimColor>{"Examples:"}</Text>
-				{EXAMPLES.map(([example, note]) => (
+				<Text dimColor>{t("proxy_prompt.examples")}</Text>
+				{EXAMPLES.map(([example, noteKey]) => (
 					<Box key={example}>
 						<Text dimColor>{"  "}</Text>
 						<Box width={EXAMPLE_WIDTH + 2} flexShrink={0}>
 							<Text color="cyan">{example}</Text>
 						</Box>
-						<Text dimColor>{note}</Text>
+						<Text dimColor>{t(noteKey)}</Text>
 					</Box>
 				))}
 			</Box>
@@ -139,8 +134,8 @@ export function ProxyPrompt({
 			<Box marginTop={1}>
 				<Text>
 					{currentProxy
-						? "Proxy (host:port), or Enter to keep the current one: "
-						: "Proxy (host:port), or Enter to skip: "}
+						? t("proxy_prompt.field.keep")
+						: t("proxy_prompt.field.skip")}
 				</Text>
 				<Text color="cyan">{value}</Text>
 				<Text color="cyan">▌</Text>
@@ -151,5 +146,5 @@ export function ProxyPrompt({
 }
 
 export function proxyPromptTitle() {
-	return <Text bold>{"Configure a proxy"}</Text>;
+	return <Text bold>{t("proxy_prompt.title")}</Text>;
 }

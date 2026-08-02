@@ -1,10 +1,12 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
+import { t } from "@/lib/i18n.js";
 
 interface YesNoProps {
 	defaultAnswer: "yes" | "no";
 	onAnswer: (proceed: boolean) => void;
 	readOnly?: boolean;
+	/** Defaults to the localized "Continue?" when omitted. */
 	promptText?: string;
 }
 
@@ -15,7 +17,7 @@ export function YesNo({
 	defaultAnswer,
 	onAnswer,
 	readOnly = false,
-	promptText = "Continue?",
+	promptText,
 }: YesNoProps) {
 	const [buffer, setBuffer] = useState("");
 	const [submitted, setSubmitted] = useState(false);
@@ -56,11 +58,14 @@ export function YesNo({
 		{ isActive: !readOnly && !submitted },
 	);
 
+	// The [Y/n] letters are the keys the user actually types and are matched
+	// against "y" below, so they stay untranslated in every locale.
 	const label = defaultAnswer === "yes" ? "[Y/n]" : "[y/N]";
+	const prompt = promptText ?? t("common.continue_question");
 
 	return (
 		<Box>
-			<Text color="cyan">{`${promptText} ${label} `}</Text>
+			<Text color="cyan">{`${prompt} ${label} `}</Text>
 			<Text>{buffer}</Text>
 			{!readOnly && !submitted && <Text color="cyan">▌</Text>}
 		</Box>

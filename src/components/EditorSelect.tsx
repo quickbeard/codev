@@ -1,5 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
+import { t } from "@/lib/i18n.js";
 
 // Editor-agnostic identifier returned from the sub-select. The InstallApp
 // handler maps these to extension-specific Tool values (e.g.
@@ -79,9 +80,9 @@ export function EditorSelect({
 export function editorSelectTitle(readOnly = false) {
 	return (
 		<Text bold>
-			{"Select the editor(s) to install extensions in "}
+			{`${t("editor_select.title")} `}
 			{!readOnly && (
-				<Text dimColor>(↑/↓ to move, Space to select, Enter to confirm)</Text>
+				<Text dimColor>{t("common.hint.move_select_confirm")}</Text>
 			)}
 		</Text>
 	);

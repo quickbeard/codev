@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import { VERSION } from "@/lib/const.js";
+import { t } from "@/lib/i18n.js";
 import { terminalIsLight } from "@/lib/terminal-theme.js";
 
 // CoDev Code's lowercase "codev" pixel wordmark (codev-code
@@ -33,7 +34,7 @@ export function Banner() {
 				</Text>
 			))}
 			<Box marginBottom={1}>
-				<Text>{"AI Coding Agent Hub "}</Text>
+				<Text>{`${t("banner.tagline")} `}</Text>
 				<Text dimColor>v{VERSION}</Text>
 			</Box>
 		</Box>

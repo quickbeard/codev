@@ -51,9 +51,6 @@ export function nodeVersionMeets(version: string): boolean {
 	return patch >= MIN_NODE.patch;
 }
 
-export const HELP_HINT = "Run `codevhub --help` to see all commands.";
-export const HAPPY_CODING = "Happy coding! 🎉";
-
 interface CodevAuthFile {
 	supabase_url?: string;
 	supabase_anon_key?: string;

@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
+import { t } from "@/lib/i18n.js";
 import { logError, logInfo, logWarn } from "@/lib/log.js";
 
 // Three terminal outcomes for a task:
@@ -49,12 +50,13 @@ export interface TaskItem {
 	run: () => Promise<TaskRunResult>;
 }
 
-export interface TaskVerb {
-	// e.g. { infinitive: "install", present: "Installing", past: "Installed" }
-	infinitive: string;
-	present: string;
-	past: string;
-}
+// Which set of row messages this list speaks. It used to be a
+// `{ infinitive, present, past }` struct that `rowText` substituted into English
+// word order ("Failed to " + infinitive + " " + label) — a shape no other
+// language can satisfy, since nothing outside English conjugates by slotting
+// three principal parts into a fixed frame. Each state is now a complete
+// sentence in the catalog, and this prop only picks which family to read.
+export type TaskVerb = "install" | "update";
 
 type Status = "pending" | "running" | "done" | "warned" | "failed";
 
@@ -78,7 +80,11 @@ interface TaskListProps {
 
 export function TaskList({ tasks, verb, onDone }: TaskListProps) {
 	const [rows, setRows] = useState<Row[]>(() =>
-		tasks.map((t) => ({ key: t.key, label: t.label, status: "pending" })),
+		tasks.map((task) => ({
+			key: task.key,
+			label: task.label,
+			status: "pending",
+		})),
 	);
 	const hasRun = useRef(false);
 	const hasReported = useRef(false);
@@ -149,18 +155,27 @@ function TaskRow({ row, verb }: { row: Row; verb: TaskVerb }) {
 }
 
 function rowText(row: Row, verb: TaskVerb): string {
+	// `row.label` is a package or product name and is interpolated, never
+	// translated. The template literals resolve to real MessageKey unions, so a
+	// catalog missing one verb's messages is a compile error rather than a
+	// runtime fallback.
 	switch (row.status) {
 		case "running":
-			return `${verb.present} ${row.label}...`;
+			return t(`tasklist.${verb}.running`, { label: row.label });
 		case "done":
-			return `${verb.past} ${row.label}`;
+			return t(`tasklist.${verb}.done`, { label: row.label });
 		case "warned":
 			// Don't claim the task completed ("Installed X (warning: …)") when
 			// the install actually didn't run — the row would lie. Just surface
 			// the warning; the message itself names the editor / CLI involved.
-			return `Warning: ${row.warning ?? "unknown"}`;
+			return t("tasklist.warning", {
+				warning: row.warning ?? t("tasklist.unknown"),
+			});
 		case "failed":
-			return `Failed to ${verb.infinitive} ${row.label}: ${row.error ?? "unknown error"}`;
+			return t(`tasklist.${verb}.failed`, {
+				label: row.label,
+				error: row.error ?? t("tasklist.unknown_error"),
+			});
 		default:
 			return row.label;
 	}

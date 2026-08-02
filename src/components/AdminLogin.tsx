@@ -2,6 +2,7 @@ import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
 import { useCallback, useRef, useState } from "react";
 import { saveSkillhubCookie } from "@/lib/auth.js";
+import { t } from "@/lib/i18n.js";
 import { type SkillhubUser, skillhubSignIn } from "@/lib/skillhub.js";
 import { describeNetworkError } from "@/lib/tls.js";
 
@@ -17,11 +18,20 @@ interface AdminLoginProps {
 
 type FieldKey = "username" | "password";
 
-const FIELDS: { key: FieldKey; label: string; mask: boolean }[] = [
-	{ key: "username", label: "Username", mask: false },
-	{ key: "password", label: "Password", mask: true },
-];
-const LABEL_WIDTH = Math.max(...FIELDS.map((f) => f.label.length));
+// Labels are looked up per render rather than baked into a module constant —
+// see the same note in ManualCredentials.
+const FIELDS = [
+	{
+		key: "username" as FieldKey,
+		labelKey: "admin_login.field.username",
+		mask: false,
+	},
+	{
+		key: "password" as FieldKey,
+		labelKey: "admin_login.field.password",
+		mask: true,
+	},
+] as const;
 
 // "input" accepts a fresh attempt (a failed sign-in below the cap drops
 // straight back here with the fields cleared); "failed" is the terminal state
@@ -92,7 +102,7 @@ export function AdminLogin({
 				const raw = values[current.key];
 				const value = current.key === "username" ? raw.trim() : raw;
 				if (!value) {
-					setError(`${current.label} is required`);
+					setError(t("common.field_required", { field: t(current.labelKey) }));
 					return;
 				}
 				setError(null);
@@ -133,10 +143,12 @@ export function AdminLogin({
 				<Text color="cyan">
 					<Spinner />
 				</Text>
-				<Text>{" Signing in..."}</Text>
+				<Text>{` ${t("admin_login.signing_in")}`}</Text>
 			</Box>
 		);
 	}
+
+	const labelWidth = Math.max(...FIELDS.map((f) => t(f.labelKey).length)) + 2;
 
 	return (
 		<Box flexDirection="column">
@@ -144,12 +156,15 @@ export function AdminLogin({
 				const isActive = phase === "input" && i === index;
 				const value = values[field.key];
 				const shown = field.mask ? "•".repeat(value.length) : value;
-				const label = field.label.padEnd(LABEL_WIDTH, " ");
 				return (
 					<Box key={field.key}>
-						<Text color={isActive ? "cyan" : undefined} dimColor={!isActive}>
-							{`${label}: `}
-						</Text>
+						{/* <Box width> rather than padEnd: Yoga measures display width,
+						    String.padEnd counts UTF-16 code units. */}
+						<Box width={labelWidth} flexShrink={0}>
+							<Text color={isActive ? "cyan" : undefined} dimColor={!isActive}>
+								{`${t(field.labelKey)}: `}
+							</Text>
+						</Box>
 						<Text>{shown}</Text>
 						{isActive && <Text color="cyan">▌</Text>}
 					</Box>
@@ -159,22 +174,20 @@ export function AdminLogin({
 				<Box marginTop={1}>
 					<Text color="red">{error}</Text>
 					{phase === "input" && attempts > 0 && (
-						<Text dimColor>{`  (attempt ${attempts} of ${maxAttempts})`}</Text>
+						<Text dimColor>
+							{`  ${t("admin_login.attempt", { n: attempts, max: maxAttempts })}`}
+						</Text>
 					)}
 					{phase === "failed" && (
-						<Text
-							dimColor
-						>{`  (${maxAttempts} failed attempts — giving up)`}</Text>
+						<Text dimColor>
+							{`  ${t("admin_login.gave_up", { max: maxAttempts })}`}
+						</Text>
 					)}
 				</Box>
 			)}
 			{phase === "input" && (
 				<Box marginTop={1}>
-					<Text dimColor>
-						{
-							"Only ADMIN/SUPERADMIN accounts can sign in here — regular users use `codevhub login`."
-						}
-					</Text>
+					<Text dimColor>{t("admin_login.only_admin")}</Text>
 				</Box>
 			)}
 		</Box>
@@ -182,5 +195,5 @@ export function AdminLogin({
 }
 
 export function adminLoginTitle() {
-	return <Text bold>{"Admin login"}</Text>;
+	return <Text bold>{t("admin_login.title")}</Text>;
 }

@@ -276,6 +276,91 @@ The way to land there on Windows is **Git Bash**: MSYS2/mintty pipes stdin throu
 
 **The `Boolean` in `useCanType` is load-bearing.** Node leaves `isTTY` **undefined** on a pipe rather than setting it false, while `useInput` skips raw mode only on `options.isActive === false` — a strict comparison. Forwarding the raw `undefined` reads as "active" and throws the very error the gate exists to prevent. No unit test can catch it, since `ink-testing-library`'s fake stdin sets a real boolean; it was found by running the built CLI with `< /dev/null`, which is the only way to reproduce it. `tests/lib/tty.test.ts` pins `toBe(false)` rather than falsiness for that reason. **Do the same for any new prompt: gate on `useCanType()`, and smoke-test it with piped stdin, not only under vitest.**
 
+## Localization
+
+`src/lib/i18n.ts` plus `src/lib/locales/{en,vi}.ts` render the CLI in English or
+Vietnamese. `en.ts` is the source of truth; every other catalog is typed
+`Record<MessageKey, string>`, so **a key added to `en.ts` and not to `vi.ts` is a
+`pnpm typecheck` failure** — that type annotation *is* the completeness
+guarantee, and it is the reason the catalogs are `.ts` modules rather than JSON.
+They are statically imported, so esbuild inlines them and `build.ts` needs no
+change (nothing outside `dist/` ships).
+
+**Resolution is lazy and memoized on first `t()` call — deliberately not an
+`initLocale()` the dispatcher calls.** ESM imports evaluate before `index.tsx`'s
+body runs, so any module-level string would read the locale before an explicit
+init could set it; the Node-version gate at the top of `index.tsx` fires before
+argv is even destructured and still calls `t()` safely. Every input is an
+environment variable, fixed before the process starts, so there is no ordering
+hazard at all. This is also why **there is no `--lang` flag**: argv would put
+that hazard back, and a stray `--lang` would have to be stripped before
+`parsePullArgs` (which errors on unknown flags) and before the passthrough
+`default:` case forwards argv verbatim to the `codev` agent.
+
+Precedence: `CODEV_LANG` → `LC_ALL` → `LC_MESSAGES` → `LANG` → `Intl` (the
+Windows path, where `LANG` is normally unset) → `en`. Each spelling is
+normalized **independently** — a plain `??` chain over raw values would let an
+exported-but-empty `LC_ALL` mask a good `LANG`, the same trap `lib/proxy.ts`
+documents for `HTTP_PROXY`/`http_proxy`. Unshipped values fall *through* to the
+next source rather than pinning themselves. `resetLocaleCache()` is the test
+hook, alongside `resetLogging()` / `resetModelLimitsCache()`.
+
+**Scope is UI only, and the boundary is load-bearing rather than laziness.**
+Translated: `src/components/*`, the `src/*App.tsx` roots, `help.ts`, and
+`index.tsx`'s console output. Still English: all `src/lib/` diagnostic prose
+(`doctor.ts`, `tty.ts`, `proxy.ts`, `remove.ts`, `shims.ts`, `upload.ts`,
+`restore.ts`, `logs.ts`), the markdown export prose in `tool-render.ts` /
+`markdown.ts` / `providers/*` (archival structure — keep exports diffable), and
+every log message. The reason to leave lib alone is concrete:
+`upload.ts#isRefreshableError` matches on `msg.includes("Missing supabase_")`
+and `/failed \((\d{3})\)/` — **English message text** produced by `const.ts` and
+the `backend.ts` / `auth.ts` throwers. Translating lib prose silently breaks the
+upload retry. Replace that coupling with typed error codes *before* any
+lib-prose round.
+
+Rules for new strings:
+
+- **Never translate** brand names (`CoDev Code`, `Claude Code`, `VS Code`),
+  command/flag names, env var names, provider and model ids, URLs, status-union
+  literals, server-side role/status values (`ADMIN`, `DRAFT`, `PUBLIC`), the
+  `[Y/n]` / `(y/N)` letters (they are matched against typed input), or the
+  control-flow `new Error("aborted")` sentinels the Ink apps throw to force a
+  non-zero exit.
+- **No sentence assembly from grammatical fragments.** `TaskList` used to take
+  `verb: {infinitive, present, past}` and substitute into English word order;
+  nothing outside English conjugates that way, so it is now a `TaskVerb` id
+  selecting complete per-state messages. Same for `toolSelectTitle`, which is
+  one full sentence per mode rather than a verb dropped into a shared frame.
+- **List joins go through `formatList` / `formatListParts`** (`Intl.ListFormat`),
+  never hand-written `", and "`. `formatListParts` exists so `Confirm` can style
+  the items and the separators differently. `text.ts#formatToolList` is now a
+  thin delegate kept for the non-UI callers.
+- **Plurals** are explicit `<key>_one` / `<key>_other` pairs read through
+  `tCount`. Vietnamese does not inflect, so both halves match there; that is
+  intentional, not a copy-paste slip. No plural-rules engine until a locale with
+  a real `few`/`many` category arrives.
+- **No module-level resolved strings.** A `const` label is correct at runtime
+  (the locale never changes mid-process) but freezes before `resetLocaleCache()`
+  can reach it in a test. Hold message *keys* at module level and call `t()`
+  during render — see `ToolSelect`, `AdminLogin`, `ManualCredentials`,
+  `DoctorApp`'s `GROUP_TITLE_KEYS`, `SkillPushApp`'s `STEP_LABEL_KEYS`.
+- **Width gutters derive from the active locale.** `CheckList`'s diagnosis
+  labels and both credential forms size their column from `t(...)` rather than a
+  hard-coded constant, and render it as an Ink `<Box width>` rather than
+  `String.padEnd` — Yoga measures display width, `padEnd` counts UTF-16 code
+  units. `.length` is accurate while the shipped locales are Latin-script
+  (Vietnamese is precomposed NFC and single-width); a CJK locale would need a
+  real `stringWidth()`, which Ink already carries transitively.
+- **Don't shadow `t`.** `tools.map((t) => …)` in a file that imports `t` compiles
+  fine and is a live trap for the next edit; use `tool`, `task`, `target`.
+
+`vitest.config.ts` pins `env: { CODEV_LANG: "en" }`. Hundreds of assertions
+match English literals, and without the pin a developer whose machine is
+`LANG=vi_VN` gets a red suite for no reason. Tests that exercise another locale
+stub `CODEV_LANG` themselves and call `resetLocaleCache()`.
+`tests/lib/locales.test.ts` covers what types cannot see: blank values,
+mismatched `{placeholder}` sets between locales, and half-declared plurals.
+
 ## Diagnostic logging
 
 `~/.codev-hub` has two log homes — don't mix them up:

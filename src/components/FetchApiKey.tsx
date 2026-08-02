@@ -5,6 +5,7 @@ import type { AuthData } from "@/lib/auth.js";
 import { fetchApiKey } from "@/lib/backend.js";
 import { BACKEND_URL } from "@/lib/const.js";
 import { describeFailure } from "@/lib/doctor.js";
+import { t } from "@/lib/i18n.js";
 
 interface FetchApiKeyProps {
 	auth: AuthData;
@@ -76,17 +77,17 @@ export function FetchApiKey({ auth, onDone, onFallback }: FetchApiKeyProps) {
 					<Text color="cyan">
 						<Spinner />
 					</Text>
-					<Text> Fetching API key from gateway...</Text>
+					<Text>{` ${t("fetch_key.pending")}`}</Text>
 				</Box>
 			)}
-			{succeeded && (
-				<Text color="green">{"✓ API key obtained successfully."}</Text>
-			)}
+			{succeeded && <Text color="green">{t("fetch_key.success")}</Text>}
 			{error && (
 				<>
 					{/* One-line reasons stay inline; a multi-line transport
 					    diagnosis keeps its structure on following lines. */}
-					<Text color="red">{`Failed to fetch API key: ${error.split("\n")[0] ?? ""}`}</Text>
+					<Text color="red">
+						{t("fetch_key.failed", { reason: error.split("\n")[0] ?? "" })}
+					</Text>
 					{error
 						.split("\n")
 						.slice(1)
@@ -95,23 +96,19 @@ export function FetchApiKey({ auth, onDone, onFallback }: FetchApiKeyProps) {
 								{line}
 							</Text>
 						))}
-					<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
+					<Text dimColor>{t("common.retry_hint")}</Text>
 				</>
 			)}
 			{!pending && !error && emptyCount === 1 && (
 				<>
-					<Text color="yellow">{"Gateway returned an empty API key."}</Text>
-					<Text dimColor>{"Press Enter to retry, Ctrl-C to quit"}</Text>
+					<Text color="yellow">{t("fetch_key.empty")}</Text>
+					<Text dimColor>{t("common.retry_hint")}</Text>
 				</>
 			)}
 			{!pending && !error && emptyCount >= 2 && (
 				<>
-					<Text color="yellow">
-						{"Gateway returned an empty API key again."}
-					</Text>
-					<Text dimColor>
-						{"Press Enter to enter credentials manually, Ctrl-C to quit"}
-					</Text>
+					<Text color="yellow">{t("fetch_key.empty_again")}</Text>
+					<Text dimColor>{t("fetch_key.manual_hint")}</Text>
 				</>
 			)}
 		</Box>
@@ -119,5 +116,5 @@ export function FetchApiKey({ auth, onDone, onFallback }: FetchApiKeyProps) {
 }
 
 export function fetchApiKeyTitle() {
-	return <Text bold>{"Fetching new API Key"}</Text>;
+	return <Text bold>{t("fetch_key.title")}</Text>;
 }

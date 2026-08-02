@@ -62,6 +62,7 @@ import {
 	PREFLIGHT_CHECKS,
 	runChecks,
 } from "@/lib/doctor.js";
+import { t } from "@/lib/i18n.js";
 import { logApiKeyConfigured, logDebug, logError, logWarn } from "@/lib/log.js";
 import { providerFromName } from "@/lib/provider.js";
 import { installRipgrep } from "@/lib/ripgrep.js";
@@ -284,7 +285,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 	const handleConfirmProceed = useCallback(
 		(proceed: boolean) => {
 			if (!proceed) {
-				process.stderr.write("Abort.\n");
+				process.stderr.write(`${t("setup.abort")}\n`);
 				exit(new Error("aborted"));
 				return;
 			}
@@ -306,13 +307,13 @@ export function SetupApp({ mode }: SetupAppProps) {
 				if (ok) {
 					setExistingValid(true);
 				} else {
-					setExistingMessage(
-						"Saved API key is no longer valid; choose another method.",
-					);
+					setExistingMessage(t("setup.saved_key.invalid"));
 				}
 			})
 			.catch((err: Error) => {
-				setExistingMessage(`Could not verify saved API key: ${err.message}`);
+				setExistingMessage(
+					t("setup.saved_key.unverifiable", { error: err.message }),
+				);
 			})
 			.finally(() => {
 				setStep("key-choice");
@@ -489,7 +490,10 @@ export function SetupApp({ mode }: SetupAppProps) {
 			extra: { fallback_model: FALLBACK_MODEL },
 		});
 		setModelWarning(
-			`Couldn't fetch the model list (${err.message}); using fallback model ${FALLBACK_MODEL}.`,
+			t("setup.model_list.fallback", {
+				error: err.message,
+				model: FALLBACK_MODEL,
+			}),
 		);
 	}, []);
 
@@ -606,9 +610,9 @@ export function SetupApp({ mode }: SetupAppProps) {
 				? installRipgrep().catch((err: unknown) => {
 						logError("ripgrep staging failed during finalize", { err });
 						setRipgrepWarning(
-							`Could not stage ripgrep for CoDev Code: ${
-								err instanceof Error ? err.message : String(err)
-							}. File search may be empty on Windows — install ripgrep (winget install BurntSushi.ripgrep.MSVC) and restart the agent.`,
+							t("setup.ripgrep.failed", {
+								error: err instanceof Error ? err.message : String(err),
+							}),
 						);
 					})
 				: Promise.resolve();
@@ -648,7 +652,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 				{preflight.length > 0 && (
 					<Step
 						active={step === "preflight"}
-						title={<Text bold>Checking your environment</Text>}
+						title={<Text bold>{t("setup.preflight.title")}</Text>}
 					>
 						{/* A clean environment costs one line; only warnings
 						    expand. `codevhub doctor` shows every row. */}
@@ -659,11 +663,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 							collapsePasses
 						/>
 						{preflight.some((o) => o.status !== "pass") && (
-							<Text dimColor>
-								{
-									"Run `codevhub doctor` for the full check — npm, network, sign-in and LLM access — plus setup instructions."
-								}
-							</Text>
+							<Text dimColor>{t("setup.preflight.hint")}</Text>
 						)}
 					</Step>
 				)}
@@ -714,9 +714,11 @@ export function SetupApp({ mode }: SetupAppProps) {
 									active={step === "installing"}
 									title={
 										<Text bold>
-											{mode === "install"
-												? "Installing packages"
-												: "Installing CodeGraph"}
+											{t(
+												mode === "install"
+													? "setup.installing.packages"
+													: "setup.installing.codegraph",
+											)}
 										</Text>
 									}
 								>
@@ -728,7 +730,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 								</Step>
 							)}
 						{POST_REFRESH.includes(step) && refreshWarning && (
-							<Step title={<Text bold>Refresh CoDev config</Text>}>
+							<Step title={<Text bold>{t("setup.refresh.title")}</Text>}>
 								<Box>
 									<Text color="yellow">▲</Text>
 									<Text color="yellow">{` ${refreshWarning}`}</Text>
@@ -738,19 +740,19 @@ export function SetupApp({ mode }: SetupAppProps) {
 						{POST_REFRESH.includes(step) && savedCreds && (
 							<Step
 								active={step === "validating-existing"}
-								title={<Text bold>Checking saved API key</Text>}
+								title={<Text bold>{t("setup.saved_key.title")}</Text>}
 							>
 								{step === "validating-existing" ? (
 									<Box>
 										<Text color="cyan">
 											<Spinner />
 										</Text>
-										<Text> Verifying with gateway...</Text>
+										<Text>{` ${t("setup.saved_key.verifying")}`}</Text>
 									</Box>
 								) : (
 									<Text dimColor>
 										{existingValid
-											? "Saved API key is valid."
+											? t("setup.saved_key.valid")
 											: (existingMessage ?? "")}
 									</Text>
 								)}
@@ -794,7 +796,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 						{POST_KEY_CHOICE.includes(step) &&
 							authMethod !== "skip" &&
 							modelWarning && (
-								<Step title={<Text bold>Model list</Text>}>
+								<Step title={<Text bold>{t("setup.model_list.title")}</Text>}>
 									<Box>
 										<Text color="yellow">▲</Text>
 										<Text color="yellow">{` ${modelWarning}`}</Text>
@@ -824,14 +826,18 @@ export function SetupApp({ mode }: SetupAppProps) {
 						{POST_VERIFY_GATEWAY.includes(step) && creds && (
 							<Step
 								active={step === "verifying-gateway"}
-								title={<Text bold>Verifying gateway access</Text>}
+								title={<Text bold>{t("setup.gateway.title")}</Text>}
 							>
 								{step === "verifying-gateway" ? (
 									<Box>
 										<Text color="cyan">
 											<Spinner />
 										</Text>
-										<Text>{` Sending a test request to ${chosenModel ?? "the model"}…`}</Text>
+										<Text>
+											{` ${t("setup.gateway.sending", {
+												model: chosenModel ?? t("setup.gateway.the_model"),
+											})}`}
+										</Text>
 									</Box>
 								) : smokeWarning ? (
 									<Box flexDirection="column">
@@ -839,14 +845,10 @@ export function SetupApp({ mode }: SetupAppProps) {
 											<Text color="yellow">▲</Text>
 											<Text color="yellow">{` ${smokeWarning}`}</Text>
 										</Box>
-										<Text dimColor>
-											{
-												"Config was still written, but your agents will hit this same error — fix gateway access (model entitlement, budget, or region/IP), then relaunch."
-											}
-										</Text>
+										<Text dimColor>{t("setup.gateway.warning_hint")}</Text>
 									</Box>
 								) : (
-									<Text dimColor>{"Gateway accepted a test request."}</Text>
+									<Text dimColor>{t("setup.gateway.ok")}</Text>
 								)}
 							</Step>
 						)}
@@ -876,31 +878,35 @@ export function SetupApp({ mode }: SetupAppProps) {
 							codegraphResult?.status !== "skipped" && (
 								<Step
 									active={step === "finalizing"}
-									title={<Text bold>Set up CodeGraph</Text>}
+									title={<Text bold>{t("setup.codegraph.title")}</Text>}
 								>
 									{codegraphResult === null ? (
 										<Box>
 											<Text color="cyan">
 												<Spinner />
 											</Text>
-											<Text> Setting up CodeGraph…</Text>
+											<Text>{` ${t("setup.codegraph.running")}`}</Text>
 										</Box>
 									) : codegraphResult.status === "warning" ? (
 										<Box>
 											<Text color="yellow">▲</Text>
 											<Text color="yellow">
-												{` ${codegraphResult.message ?? "CodeGraph setup did not complete."}`}
+												{` ${codegraphResult.message ?? t("setup.codegraph.incomplete")}`}
 											</Text>
 										</Box>
 									) : (
 										<Text dimColor>
-											{`Wired CodeGraph into ${formatCodegraphTargets(codegraphResult.targets)}.`}
+											{t("setup.codegraph.wired", {
+												targets: formatCodegraphTargets(
+													codegraphResult.targets,
+												),
+											})}
 										</Text>
 									)}
 								</Step>
 							)}
 						{(step === "finalizing" || step === "done") && ripgrepWarning && (
-							<Step title={<Text bold>File search</Text>}>
+							<Step title={<Text bold>{t("setup.ripgrep.title")}</Text>}>
 								<Box>
 									<Text color="yellow">▲</Text>
 									<Text color="yellow">{` ${ripgrepWarning}`}</Text>

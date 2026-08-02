@@ -7,6 +7,7 @@ import {
 	useState,
 } from "react";
 import { useCanType } from "@/components/useCanType.js";
+import { t } from "@/lib/i18n.js";
 
 // Shared no-browser paste-back affordance for the SSO login flow. A remote or
 // headless user finishes login in a browser on another device and lands on the
@@ -118,12 +119,8 @@ export function PasteBackPrompt({
 		<Box flexDirection="column" marginTop={1}>
 			{caption ?? (
 				<>
-					<Text dimColor>
-						{"After you sign in, the page shows an authorization code."}
-					</Text>
-					<Text dimColor>
-						{'Use its "Copy code" button, then paste the code here:'}
-					</Text>
+					<Text dimColor>{t("paste_back.caption_1")}</Text>
+					<Text dimColor>{t("paste_back.caption_2")}</Text>
 				</>
 			)}
 			<Box>
@@ -133,7 +130,7 @@ export function PasteBackPrompt({
 			</Box>
 			{pasteError && <Text color="red">{pasteError}</Text>}
 			<Text dimColor>
-				{submitting ? "Completing sign-in..." : "Press Enter to submit."}
+				{submitting ? t("paste_back.completing") : t("paste_back.submit_hint")}
 			</Text>
 		</Box>
 	);

@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 import type { Tool } from "@/lib/configure.js";
+import { t } from "@/lib/i18n.js";
 
 // Sentinel values emitted when the user picks an editor-extension row.
 // InstallApp expands them via the merged EditorSelect sub-step into the
@@ -37,13 +38,13 @@ const TOOLS: {
 
 // Rows actually rendered and navigable. Hidden tools are dropped from the UI
 // only; everything downstream (Configure, restore, update) is untouched.
-const VISIBLE_TOOLS = TOOLS.filter((t) => !t.hidden);
+const VISIBLE_TOOLS = TOOLS.filter((tool) => !tool.hidden);
 
 // Locked tools are emitted on every confirm regardless of the mutable
 // selection, and always lead the emitted list.
 const LOCKED_VALUES: ToolSelectValue[] = VISIBLE_TOOLS.filter(
-	(t) => t.locked,
-).map((t) => t.value);
+	(tool) => tool.locked,
+).map((tool) => tool.value);
 
 interface ToolSelectProps {
 	onConfirm: (tools: ToolSelectValue[]) => void;
@@ -87,8 +88,13 @@ export function ToolSelect({
 		{ isActive: !readOnly },
 	);
 
-	const lockedSuffix =
-		mode === "config" ? " (always configured)" : " (always installed)";
+	// The rows themselves are brand names and stay untranslated in every locale;
+	// only this suffix and the title below are message keys.
+	const lockedSuffix = ` ${t(
+		mode === "config"
+			? "tool_select.locked.config"
+			: "tool_select.locked.install",
+	)}`;
 
 	return (
 		<Box flexDirection="column">
@@ -116,12 +122,18 @@ export function toolSelectTitle(
 	readOnly = false,
 	mode: "install" | "config" = "install",
 ) {
-	const verb = mode === "install" ? "install" : "configure";
+	// One complete sentence per mode rather than an English verb dropped into a
+	// shared frame — the frame does not survive translation.
+	const title = t(
+		mode === "install"
+			? "tool_select.title.install"
+			: "tool_select.title.config",
+	);
 	return (
 		<Text bold>
-			{`Select the AI agent(s) to ${verb} `}
+			{`${title} `}
 			{!readOnly && (
-				<Text dimColor>(↑/↓ to move, Space to select, Enter to confirm)</Text>
+				<Text dimColor>{t("common.hint.move_select_confirm")}</Text>
 			)}
 		</Text>
 	);
