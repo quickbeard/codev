@@ -18,6 +18,7 @@ import {
 	clearSkillhubCookie,
 	loadApiKey,
 	loadAuth,
+	loadModelLimits,
 	loadSkillhubCookie,
 	login,
 	logout,
@@ -242,6 +243,48 @@ describe("logout", () => {
 			apiKey: "sk-keep-me",
 			baseUrl: "https://gw.example.com/v1",
 			model: "m1",
+		});
+	});
+
+	// The provider pair identifies a manually-named provider and is what every
+	// config writer keys off. Losing it here reverts the user to the netGate
+	// default on the next model switch or launch-time key refresh, silently.
+	test("preserves the provider pair alongside the key it belongs to", async () => {
+		const dir = join(tempDir, ".codev-hub");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({
+				...VALID_AUTH,
+				api_key: "sk-keep-me",
+				model: "m1",
+				provider_id: "my-corp-gw",
+				provider_name: "My Corp GW",
+			}),
+		);
+		expect(await logout()).toBe(true);
+		expect(loadApiKey()).toEqual({
+			apiKey: "sk-keep-me",
+			baseUrl: undefined,
+			model: "m1",
+			providerId: "my-corp-gw",
+			providerName: "My Corp GW",
+		});
+	});
+
+	test("preserves cached per-model windows", async () => {
+		const dir = join(tempDir, ".codev-hub");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({
+				...VALID_AUTH,
+				model_limits: { "a/model": { context: 500000, trigger: 400000 } },
+			}),
+		);
+		expect(await logout()).toBe(true);
+		expect(loadModelLimits()).toEqual({
+			"a/model": { context: 500000, trigger: 400000 },
 		});
 	});
 

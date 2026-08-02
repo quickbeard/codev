@@ -1,7 +1,13 @@
 import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
 import { useEffect, useRef, useState } from "react";
-import { fetchModels, isInvalidKeyError } from "@/lib/backend.js";
+import { saveModelLimits } from "@/lib/auth.js";
+import {
+	fetchModels,
+	fetchModelWindows,
+	isInvalidKeyError,
+} from "@/lib/backend.js";
+import { limitsFromWindow, resetModelLimitsCache } from "@/lib/model-limits.js";
 
 interface ModelSelectProps {
 	apiKey: string;
@@ -58,6 +64,22 @@ export function ModelSelect({
 		errorReported.current = false;
 		setPhase("loading");
 		setError(null);
+		// Refresh the cached per-model windows alongside the list. Fire-and-forget
+		// and deliberately not awaited: fetchModelWindows never rejects, an empty
+		// result is the norm (the gateway leaves max_input_tokens unset), and
+		// lib/model-limits.ts falls back to its static table either way — so
+		// nothing here should delay the picker or fail the flow. The cache reset
+		// makes a fresh map visible to configure*, which runs later in the flow.
+		fetchModelWindows(apiKey, baseUrl).then((windows) => {
+			const limits = Object.fromEntries(
+				Object.entries(windows).map(([id, w]) => [
+					id,
+					limitsFromWindow(w.context, w.output),
+				]),
+			);
+			saveModelLimits(limits);
+			resetModelLimitsCache();
+		});
 		fetchModels(apiKey, baseUrl)
 			.then((ids) => {
 				if (cancelled) return;

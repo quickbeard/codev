@@ -17,6 +17,9 @@ beforeEach(() => {
 	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
 	// hit the temp home on every platform.
 	vi.stubEnv("USERPROFILE", tempHome);
+	// ModelSelect refreshes the cached per-model windows alongside the model
+	// list; unmocked it would issue a real request.
+	vi.spyOn(backend, "fetchModelWindows").mockResolvedValue({});
 });
 
 afterEach(() => {

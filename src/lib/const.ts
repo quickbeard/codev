@@ -12,24 +12,13 @@ export const SKILLHUB_URL = `${BASE_URL}/netmindhub`;
 // binaries) from its public/ dir under the site's /codev base path.
 export const CODE_DOWNLOADS_URL = `${BASE_URL}/codev/docs/code/downloads`;
 
-export const FALLBACK_MODEL = atob("TWluaU1heC9NaW5pTWF4LU0yLjc=");
+export const FALLBACK_MODEL = atob("TWluaU1heC9NaW5pTWF4LU0z");
 
-// The self-hosted gateway model has a 196608-token window. Each agent is told
-// to treat that as its effective window and to fire auto-compaction at ~85% of
-// it (≈167K), keeping compaction well below the hard limit.
-export const GATEWAY_CONTEXT_WINDOW = 196608;
-export const GATEWAY_COMPACT_PCT = 85;
-// Compaction trigger and reserve, derived from the window and percentage above.
-// Codex's `model_auto_compact_token_limit` is an absolute token threshold (≈167K);
-// OpenCode has no percentage knob — it compacts at `context − reserved`, so the
-// reserve is the headroom that lands the trigger at the same ~85% point.
-export const GATEWAY_COMPACT_TRIGGER = Math.round(
-	GATEWAY_CONTEXT_WINDOW * (GATEWAY_COMPACT_PCT / 100),
-);
-export const GATEWAY_COMPACT_RESERVED =
-	GATEWAY_CONTEXT_WINDOW - GATEWAY_COMPACT_TRIGGER;
-// Max output tokens advertised to OpenCode (required whenever `limit` is set).
-export const GATEWAY_MAX_OUTPUT_TOKENS = 65536;
+// Context windows and auto-compaction triggers are per-model and live in
+// lib/model-limits.ts. They used to be the flat GATEWAY_CONTEXT_WINDOW /
+// GATEWAY_COMPACT_* constants here, which assumed every gateway model shared
+// one 196608-token window — untrue once the gateway served both a 1M-token and
+// a 200K-token model.
 
 export const VERSION: string = pkg.version;
 

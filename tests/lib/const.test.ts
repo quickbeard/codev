@@ -8,10 +8,6 @@ import {
 	ANALYSIS_BACKEND_ANON_KEY,
 	ANALYSIS_BACKEND_URL,
 	FALLBACK_MODEL,
-	GATEWAY_COMPACT_RESERVED,
-	GATEWAY_COMPACT_TRIGGER,
-	GATEWAY_CONTEXT_WINDOW,
-	GATEWAY_MAX_OUTPUT_TOKENS,
 	MIN_NODE_STRING,
 	nodeVersionMeets,
 	parseNodeVersion,
@@ -114,20 +110,7 @@ describe("gateway URL accessors", () => {
 
 describe("FALLBACK_MODEL", () => {
 	test("decodes to the expected model id", () => {
-		expect(FALLBACK_MODEL).toBe("MiniMax/MiniMax-M2.7");
-	});
-});
-
-describe("gateway compaction constants", () => {
-	test("window and percentage are the gateway's real values", () => {
-		expect(GATEWAY_CONTEXT_WINDOW).toBe(196608);
-		expect(GATEWAY_MAX_OUTPUT_TOKENS).toBe(65536);
-	});
-
-	test("trigger is ~85% of the window and reserve is the remaining headroom", () => {
-		expect(GATEWAY_COMPACT_TRIGGER).toBe(167117);
-		expect(GATEWAY_COMPACT_RESERVED).toBe(GATEWAY_CONTEXT_WINDOW - 167117);
-		expect(GATEWAY_COMPACT_RESERVED).toBe(29491);
+		expect(FALLBACK_MODEL).toBe("MiniMax/MiniMax-M3");
 	});
 });
 

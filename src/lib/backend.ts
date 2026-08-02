@@ -185,6 +185,78 @@ export async function fetchModels(
 	return ids;
 }
 
+// LiteLLM's aggregated per-model-name view. Lives at the gateway root next to
+// /key/info, not under /v1, so it reuses the root-stripping join rather than
+// gatewayV1Url.
+function modelGroupInfoUrl(baseUrl?: string): string {
+	const base = baseUrl ?? AI_GATEWAY_URL();
+	const stripped = base.replace(/\/?v1\/?$/, "");
+	const trailing = stripped.endsWith("/") ? stripped : `${stripped}/`;
+	return `${trailing}model_group/info`;
+}
+
+interface ModelGroupInfo {
+	model_group?: string;
+	max_input_tokens?: number | null;
+	max_output_tokens?: number | null;
+}
+
+// A window as the gateway reports it. Deliberately NOT lib/model-limits.ts's
+// ModelLimits: that module reads auth.json, which imports this one, and taking
+// its type as a value import would close a require cycle. Callers convert with
+// limitsFromWindow.
+export interface ModelWindow {
+	context: number;
+	output?: number;
+}
+
+// Per-model context windows, straight from the gateway. Entries whose
+// max_input_tokens the gateway hasn't been told are skipped, which today is all
+// of them — the field is nullable in LiteLLM and only populated when an admin
+// sets it on the model. So this returns {} on the current deployment and the
+// static table in lib/model-limits.ts carries every model; the moment an admin
+// fills the field in, that model becomes gateway-driven with no CoDev release.
+//
+// Unlike fetchModels, this NEVER throws and never fail-stops the caller: a
+// window is an optimization over a sane default, and install must not break
+// because a metadata endpoint 404s on some other gateway build.
+export async function fetchModelWindows(
+	apiKey: string,
+	baseUrl?: string,
+): Promise<Record<string, ModelWindow>> {
+	try {
+		const res = await loggedFetch(
+			"gateway.model-limits",
+			modelGroupInfoUrl(baseUrl),
+			{
+				method: "GET",
+				headers: {
+					accept: "application/json",
+					Authorization: `Bearer ${apiKey}`,
+				},
+				signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
+			},
+		);
+		if (!res.ok) return {};
+		const data = (await res.json()) as { data?: ModelGroupInfo[] };
+		const out: Record<string, ModelWindow> = {};
+		for (const entry of data.data ?? []) {
+			const id = entry.model_group;
+			const context = entry.max_input_tokens;
+			if (!id || typeof context !== "number" || context <= 0) continue;
+			const output =
+				typeof entry.max_output_tokens === "number" &&
+				entry.max_output_tokens > 0
+					? entry.max_output_tokens
+					: undefined;
+			out[id] = { context, ...(output ? { output } : {}) };
+		}
+		return out;
+	} catch {
+		return {};
+	}
+}
+
 // Confirms the configured key can actually RUN the chosen model through the
 // gateway. validateApiKey (/key/info) and fetchModels (/v1/models) only prove
 // the key exists and that models are listable — neither proves inference is
