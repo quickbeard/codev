@@ -142,7 +142,7 @@ Every agent CoDev configures has to be *told* the window of the model it's talki
 
 Each agent takes a different shape, and the differences are the whole reason this module exists:
 
-- **Claude Code** — `CLAUDE_CODE_AUTO_COMPACT_WINDOW` + `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, via `compactPct()`. A percentage works for any window, and Claude Code pins one model, so this is exact.
+- **Claude Code** — `CLAUDE_CODE_AUTO_COMPACT_WINDOW` + `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, via `claudeWindow()` / `claudeCompactPct()`. The one agent that will **not** accept an arbitrary window; see below.
 - **Codex** — `model_context_window` + `model_auto_compact_token_limit` (an absolute count). Also single-model, also exact.
 - **Continue** — per-model `defaultCompletionOptions.contextLength` / `maxTokens`. Continue has no compaction of its own; it prunes history to fit `contextLength`, so the window is all it needs and there is no trigger to express.
 - **OpenCode / CoDev Code** — the hard one, below.
@@ -159,6 +159,18 @@ return model.limit.input
 Two consequences. First, **`compaction.reserved` is dead unless `limit.input` is present** — CoDev wrote `{context, output}` for a while and the configured reserve did nothing; the real trigger was `context − maxOutputTokens`, ~36K tokens earlier than intended. Second, `reserved` is a single **top-level** value with no per-model variant in the config schema, so it alone cannot put a 1M model and a 200K model on different triggers: sized for the big one it drives the small one's trigger negative, sized for the small one the big one fires at ~96%.
 
 `declaredInput()` resolves this by solving `input − reserved = trigger`, i.e. `input = trigger + reserved`, per model, against one global reserve. `limit.context` therefore stays the **true** window — the TUI's "% context used" gauge divides by it, so understating it there would misreport every session. The result is clamped to `context`: `trigger + reserved` above the real window would overstate the budget and let a session run past the model's ceiling before compacting, and clamping can only move a trigger earlier, never later.
+
+**Claude Code cannot be told a window larger than 200000, and three separate ceilings enforce it.** All three were read out of the shipped binary (2.1.220); none is documented.
+
+1. `nc()` resolves the window as `Math.min(nativeWindow, envValue)`, so `CLAUDE_CODE_AUTO_COMPACT_WINDOW` can only ever **shrink** it. For a model Claude Code doesn't recognize — every gateway model — `w37()` falls through to `_Z_ = 200000`. A 1M-token model is a 200K-token model to Claude Code, and there is no way around it: `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is read only when `DISABLE_COMPACT` is set, which turns compaction off.
+2. `Rzq = Math.min(T − round(T × precomputeBufferFraction), qB6(T, opts))` with `precomputeBufferFraction` defaulting to `0.2`, so the trigger is capped at **80% of the effective window**. `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` above 80 is inert — the `Math.min` discards it. Hence `CLAUDE_MAX_COMPACT_PCT`.
+3. **Pinning a window *below* 200000 disables auto-compaction outright.** Setting the variable makes `nc()` report `source: "env"`, which puts `aiK` on the branch reading `if (window < 200000) return false`. Omitting it leaves `source: "auto"`, which skips that gate and resolves to the same 200000 anyway. So `claudeWindow()` returns `null` below the ceiling and the writer omits the variable — the pre-existing `196608` was tripping exactly this.
+
+The percentage is therefore taken against the **clamped** window, not the model's true one (`800000/1000000` = 80 is a coincidence; `800000/200000` = 400 is what the raw ratio would give), and bounded to `[1, 80]` — Claude Code's own guard is `K > 0 && K <= 100`, so a 0 would be ignored silently.
+
+Net effect: Claude Code compacts at `0.8 × (200000 − min(modelMaxOutput, 20000))`, i.e. **~144–160K regardless of the model**. `S$H` (the model's max output) is not statically resolvable in the binary, so the exact point inside that range is unverified. Claude Code is the one agent where CoDev's per-model windows genuinely cannot take effect — don't "fix" it by raising the numbers.
+
+`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is also read into a field named **`testPctOverride`**. It is honored on the production path, but the name says test hook: treat it as unsupported and expect it to disappear.
 
 **Verify OpenCode-family behavior against the shipped binary, not the published schema.** `https://opencode.ai/config.json` documents `reserved` only as "token buffer for compaction" and says nothing about the `limit.input` branch that decides whether it is read at all. The threshold function is greppable in the binary (`grep -aob "cfg.compaction?.reserved"`, then read the surrounding bytes).
 

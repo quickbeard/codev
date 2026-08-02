@@ -287,13 +287,17 @@ describe("configureClaudeCode", () => {
 			ANTHROPIC_DEFAULT_HAIKU_MODEL: "chosen-model",
 			CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1",
 			// "chosen-model" isn't in the model table, so it takes the 200K
-			// default and its 80% trigger.
+			// default — which is also Claude Code's own ceiling — at 80%.
 			CLAUDE_CODE_AUTO_COMPACT_WINDOW: "200000",
 			CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80",
 		});
 	});
 
-	test("writes the chosen model's own window, not a shared constant", async () => {
+	// Claude Code clamps the window env var to the model's native window (200000
+	// for anything it doesn't recognize), so a 1M model cannot be described to
+	// it honestly — writing 1000000 would be silently reduced. See
+	// claudeWindow/claudeCompactPct.
+	test("pins Claude Code's own 200K ceiling even for a 1M model", async () => {
 		const { configureClaudeCode } = await import("@/lib/configure.js");
 		const read = () =>
 			JSON.parse(
@@ -301,7 +305,7 @@ describe("configureClaudeCode", () => {
 			).env;
 
 		configureClaudeCode({ apiKey: "sk", model: "MiniMax/MiniMax-M3" });
-		expect(read().CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("1000000");
+		expect(read().CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("200000");
 		expect(read().CLAUDE_AUTOCOMPACT_PCT_OVERRIDE).toBe("80");
 
 		configureClaudeCode({ apiKey: "sk", model: "zai-org/GLM-4.7-cc" });

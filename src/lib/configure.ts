@@ -16,7 +16,8 @@ import { AI_GATEWAY_OPENAI_URL, AI_GATEWAY_URL } from "@/lib/const.js";
 import { logInfo } from "@/lib/log.js";
 import {
 	COMPACT_RESERVED,
-	compactPct,
+	claudeCompactPct,
+	claudeWindow,
 	declaredInput,
 	limitsFor,
 	outputTokens,
@@ -669,7 +670,14 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 	// Claude Code pins one model (ANTHROPIC_MODEL, just below), so its window
 	// and trigger are simply that model's — no reconciling across a model list
 	// the way the OpenCode family needs.
+	//
+	// It is also the one agent that will not accept an arbitrary window: it
+	// clamps to what it believes the model's native window is (200000 for
+	// anything it doesn't recognize, i.e. all of them) and caps the trigger at
+	// 80% of that. claudeWindow/claudeCompactPct encode both ceilings, and the
+	// window is omitted entirely when pinning it would disable compaction.
 	const limits = limitsFor(model);
+	const claudeCompactWindow = claudeWindow(limits);
 
 	writeJson(sourcePath, {
 		[CLAUDE_K.schema]: CLAUDE_SCHEMA_URL,
@@ -682,8 +690,10 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 			[CLAUDE_K.haiku]: model,
 			[CLAUDE_K.agentTeams]: "1",
 			// Env-var values are strings; the window/percentage are numeric.
-			[CLAUDE_K.autoCompactWindow]: String(limits.context),
-			[CLAUDE_K.autoCompactPct]: String(compactPct(limits)),
+			...(claudeCompactWindow !== null
+				? { [CLAUDE_K.autoCompactWindow]: String(claudeCompactWindow) }
+				: {}),
+			[CLAUDE_K.autoCompactPct]: String(claudeCompactPct(limits)),
 		},
 	});
 

@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+	CLAUDE_MAX_COMPACT_PCT,
 	COMPACT_RESERVED,
+	claudeCompactPct,
+	claudeWindow,
 	compactPct,
 	DEFAULT_LIMITS,
 	DEFAULT_OUTPUT_TOKENS,
@@ -121,6 +124,56 @@ describe("compactPct", () => {
 
 	test("rounds a trigger that isn't a whole percentage of its window", () => {
 		expect(compactPct({ context: 196608, trigger: 167117 })).toBe(85);
+	});
+});
+
+// Claude Code will not accept an arbitrary window. Its `nc()` resolves the
+// window as `Math.min(nativeWindow, envValue)` — 200000 for a model it doesn't
+// recognize — and `Rzq` caps the trigger at 80% of that via
+// precomputeBufferFraction. Both were verified against the shipped binary.
+describe("claudeWindow / claudeCompactPct", () => {
+	test("a 1M model is pinned at Claude Code's 200K ceiling, not its true window", () => {
+		const m3 = limitsFor("MiniMax/MiniMax-M3");
+		expect(m3.context).toBe(1000000);
+		// Writing 1000000 would be silently clamped to 200000 anyway.
+		expect(claudeWindow(m3)).toBe(200000);
+	});
+
+	test("the percentage is taken against the clamped window, not the true one", () => {
+		// 800000/1000000 would be 80, but 800000/200000 is 400 — the raw ratio is
+		// meaningless once the window is clamped, so it must be bounded.
+		expect(claudeCompactPct(limitsFor("MiniMax/MiniMax-M3"))).toBe(80);
+		expect(claudeCompactPct(limitsFor("zai-org/GLM-4.7-cc"))).toBe(80);
+	});
+
+	test("never exceeds 80%, which Claude Code's Rzq discards anything above", () => {
+		expect(claudeCompactPct({ context: 200000, trigger: 195000 })).toBe(
+			CLAUDE_MAX_COMPACT_PCT,
+		);
+	});
+
+	test("a below-target trigger is still honored", () => {
+		// The ceiling is a cap, not a fixed value: asking to compact earlier works.
+		expect(claudeCompactPct({ context: 200000, trigger: 100000 })).toBe(50);
+	});
+
+	test("never returns 0, which Claude Code's `K > 0` guard would ignore", () => {
+		expect(claudeCompactPct({ context: 1000000, trigger: 100 })).toBe(1);
+	});
+
+	// The trap: with source "env", Claude Code's `aiK` takes the branch that
+	// reads `if (window < 200000) return false` — pinning a smaller window turns
+	// auto-compaction OFF rather than tightening it. Omitting the variable
+	// leaves source "auto", which skips that gate.
+	test("omits the window for a model below the ceiling rather than disabling compaction", () => {
+		expect(claudeWindow({ context: 128000, trigger: 100000 })).toBeNull();
+		// The percentage still applies, against the model's own window.
+		expect(claudeCompactPct({ context: 128000, trigger: 100000 })).toBe(78);
+	});
+
+	test("pins exactly at the boundary", () => {
+		expect(claudeWindow({ context: 200000, trigger: 160000 })).toBe(200000);
+		expect(claudeWindow({ context: 199999, trigger: 160000 })).toBeNull();
 	});
 });
 

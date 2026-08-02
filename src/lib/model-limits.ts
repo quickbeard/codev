@@ -99,6 +99,45 @@ export function compactPct(limits: ModelLimits): number {
 	return Math.round((limits.trigger / limits.context) * 100);
 }
 
+// Claude Code's native window for a model it doesn't recognize — which is every
+// model the gateway serves. From its `nc()`: the window is
+// `Math.min(nativeWindow, envValue)`, so CLAUDE_CODE_AUTO_COMPACT_WINDOW can
+// only ever SHRINK the window, never raise it. A 1M-token model is therefore a
+// 200000-token model as far as Claude Code is concerned, and there is no way to
+// tell it otherwise (CLAUDE_CODE_MAX_CONTEXT_TOKENS is read only when
+// DISABLE_COMPACT is set, which turns compaction off).
+export const CLAUDE_MAX_WINDOW = 200000;
+
+// Claude Code caps its own trigger at 80% of the effective window:
+// `Rzq = Math.min(T − round(T × precomputeBufferFraction), qB6(T, opts))`, with
+// precomputeBufferFraction defaulting to 0.2. A percentage above this is inert
+// — the Math.min discards it — so 80 is the highest reachable trigger, not a
+// preference.
+export const CLAUDE_MAX_COMPACT_PCT = 80;
+
+// The value for CLAUDE_CODE_AUTO_COMPACT_WINDOW, or null to omit the variable.
+//
+// Below CLAUDE_MAX_WINDOW the variable is actively harmful. Setting it makes
+// `nc()` report `source: "env"`, which puts `aiK` on the branch that reads
+// `if (window < 200000) return false` — auto-compaction stops firing at all.
+// Omitting it leaves the source as "auto", which skips that gate and already
+// resolves to the same 200000 window. So we pin only when the pin is a no-op
+// against Claude Code's own default, and stay out of the way otherwise.
+export function claudeWindow(limits: ModelLimits): number | null {
+	return limits.context >= CLAUDE_MAX_WINDOW ? CLAUDE_MAX_WINDOW : null;
+}
+
+// The trigger percentage, taken against the window Claude Code will actually
+// use rather than the model's true one — for a 1M model those differ by 5x, and
+// a percentage of the true window would ask for a trigger beyond the clamped
+// ceiling. Bounded by CLAUDE_MAX_COMPACT_PCT above and 1 below (0 or a negative
+// value fails Claude Code's `K > 0` guard and would be ignored outright).
+export function claudeCompactPct(limits: ModelLimits): number {
+	const window = claudeWindow(limits) ?? limits.context;
+	const pct = Math.round((limits.trigger / window) * 100);
+	return Math.min(Math.max(pct, 1), CLAUDE_MAX_COMPACT_PCT);
+}
+
 // OpenCode's trigger is `limit.input − compaction.reserved`, falling back to
 // `limit.context − maxOutputTokens` when `limit.input` is absent — in which
 // case `reserved` is computed and then discarded. So `input` is what makes the
