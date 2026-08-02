@@ -26,6 +26,10 @@ import {
 } from "@/lib/vscode-settings.js";
 
 function stubModels() {
+	// ModelSelect also refreshes the cached per-model windows. Unmocked it would
+	// issue a real request and, on a non-empty result, write to the developer's
+	// real ~/.codev-hub/auth.json.
+	vi.spyOn(backend, "fetchModelWindows").mockResolvedValue({});
 	return vi
 		.spyOn(backend, "fetchModels")
 		.mockResolvedValue(["m-alpha", "m-beta"]);

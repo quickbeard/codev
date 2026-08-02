@@ -32,6 +32,8 @@ import * as shims from "@/lib/shims.js";
 // already covered by InstallApp.test.tsx against the same component.
 
 function stubModels() {
+	// See InstallApp.test.tsx — ModelSelect refreshes cached model windows too.
+	vi.spyOn(backend, "fetchModelWindows").mockResolvedValue({});
 	return vi
 		.spyOn(backend, "fetchModels")
 		.mockResolvedValue(["m-alpha", "m-beta"]);

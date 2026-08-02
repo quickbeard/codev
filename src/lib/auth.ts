@@ -16,6 +16,9 @@ import open from "open";
 import { fetchCodevConfig } from "@/lib/backend.js";
 import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
 import { logDebug, logError, loggedFetch, logWarn } from "@/lib/log.js";
+// Type-only: lib/model-limits.ts imports loadModelLimits from here, so a value
+// import would close a runtime cycle. `import type` is erased at compile time.
+import type { ModelLimits } from "@/lib/model-limits.js";
 
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
 const REVOKE_TIMEOUT_MS = 3_000;
@@ -99,6 +102,12 @@ interface AuthFileContents {
 	supabase_url?: string;
 	supabase_anon_key?: string;
 	gateway_url?: string;
+	// Per-model context windows as reported by the gateway, cached at the
+	// model-choice step. Its own block rather than a field on the api-key block
+	// above, precisely because saveApiKey rewrites that block wholesale — a
+	// field there would be cleared by every re-save site that didn't thread it
+	// through. Absent ⇒ lib/model-limits.ts falls back to its static table.
+	model_limits?: Record<string, ModelLimits>;
 	// SkillHub session cookie (`skill-hub-session=…`), captured by
 	// `codevhub login --admin` for local ADMIN/SUPERADMIN accounts that can't use
 	// SSO. SSO users don't have one — skillhubFetch falls back to a Bearer token.
@@ -233,6 +242,19 @@ export function saveCodevConfig(config: CodevConfig): void {
 	});
 }
 
+// Cache the gateway's per-model windows. Skips the write entirely for an empty
+// map so a gateway that reports nothing (every max_input_tokens null, which is
+// the case today) doesn't churn auth.json on every model-choice step.
+export function saveModelLimits(limits: Record<string, ModelLimits>): void {
+	if (Object.keys(limits).length === 0) return;
+	const existing = readAuthFile() ?? {};
+	writeAuthFile({ ...existing, model_limits: limits });
+}
+
+export function loadModelLimits(): Record<string, ModelLimits> | null {
+	return readAuthFile()?.model_limits ?? null;
+}
+
 export function loadApiKey(): ApiKeyCreds | null {
 	const raw = readAuthFile();
 	if (!raw?.api_key) return null;
@@ -287,10 +309,18 @@ export async function logout(): Promise<boolean> {
 			api_key: raw.api_key,
 			base_url: raw.base_url,
 			model: raw.model,
+			// The provider pair belongs to the api-key block above and must travel
+			// with it. Dropping it here silently re-labels a manually-named
+			// provider as the netGate default on the next config write — the same
+			// failure saveApiKey's whole-block rewrite is documented to cause,
+			// reached by a different route.
+			provider_id: raw.provider_id,
+			provider_name: raw.provider_name,
 			supabase_url: raw.supabase_url,
 			supabase_anon_key: raw.supabase_anon_key,
 			gateway_url: raw.gateway_url,
 			skillhub_cookie: raw.skillhub_cookie,
+			model_limits: raw.model_limits,
 		};
 		const hasAnything = Object.values(preserved).some((v) => v !== undefined);
 		if (hasAnything) {

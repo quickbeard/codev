@@ -1,7 +1,17 @@
 import { cleanup, render } from "ink-testing-library";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ModelSelect } from "@/components/ModelSelect.js";
+import * as auth from "@/lib/auth.js";
 import * as backend from "@/lib/backend.js";
+
+beforeEach(() => {
+	// The component refreshes the cached per-model windows alongside the model
+	// list. Left unmocked these tests would issue a real HTTPS request (the
+	// baseUrl case below points at a domain that doesn't exist) and could write
+	// to the developer's real ~/.codev-hub/auth.json, which no test stubs here.
+	vi.spyOn(backend, "fetchModelWindows").mockResolvedValue({});
+	vi.spyOn(auth, "saveModelLimits").mockImplementation(() => {});
+});
 
 afterEach(() => {
 	cleanup();
@@ -95,6 +105,43 @@ describe("ModelSelect", () => {
 		);
 		await tick(50);
 		expect(spy).toHaveBeenCalledWith("sk-x", "https://my-gw.example.com/v1");
+	});
+
+	test("caches the gateway's per-model windows alongside the list", async () => {
+		vi.spyOn(backend, "fetchModels").mockResolvedValue(["alpha"]);
+		vi.spyOn(backend, "fetchModelWindows").mockResolvedValue({
+			alpha: { context: 500000 },
+		});
+		const saved = vi
+			.spyOn(auth, "saveModelLimits")
+			.mockImplementation(() => {});
+
+		render(
+			<ModelSelect
+				apiKey="sk-x"
+				baseUrl="https://my-gw.example.com/v1"
+				onSelect={() => {}}
+				onError={() => {}}
+			/>,
+		);
+		await tick(50);
+		// The window is stored with a trigger derived at 80%, which is what
+		// configure* consumes — a bare window would not be usable.
+		expect(saved).toHaveBeenCalledWith({
+			alpha: { context: 500000, trigger: 400000 },
+		});
+	});
+
+	// The window refresh is an optimization over a static table, so it must
+	// never gate or fail the picker.
+	test("still renders the list when the window refresh fails", async () => {
+		vi.spyOn(backend, "fetchModels").mockResolvedValue(["alpha", "beta"]);
+		vi.spyOn(backend, "fetchModelWindows").mockResolvedValue({});
+		const { lastFrame } = render(
+			<ModelSelect apiKey="sk-x" onSelect={() => {}} onError={() => {}} />,
+		);
+		await tick(50);
+		expect(lastFrame() ?? "").toContain("alpha");
 	});
 
 	test("readOnly ignores Enter even after the list is ready", async () => {
