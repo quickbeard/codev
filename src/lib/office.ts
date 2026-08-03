@@ -251,12 +251,18 @@ export async function runSkillOffice(
 	console.error(
 		`MiniMax-DOCX offline bundle, version ${manifest.version} (${platform})`,
 	);
+	const { bundle, script } = manifest.platforms[platform];
+	const bundleSize = manifest.files[bundle]?.size;
+	console.error(
+		`Heads-up: the bundle is ${
+			bundleSize ? `~${formatMb(bundleSize)} MB` : "large (up to ~1.1 GB)"
+		} — downloading might take a while. An interrupted run picks up where it left off.`,
+	);
 	logInfo("office bundle download starting", {
 		action: "office.install",
 		extra: { platform, version: manifest.version, dir, downloadOnly },
 	});
 
-	const { bundle, script } = manifest.platforms[platform];
 	for (const name of [script, bundle]) {
 		const meta = manifest.files[name];
 		if (!meta) {
