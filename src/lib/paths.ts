@@ -17,6 +17,13 @@ export function cliLogsDir(): string {
 	return join(homedir(), ".codev-hub", "logs");
 }
 
+// Where `codevhub skill office` stages the offline bundle + setup script
+// (up to ~1.1GB). Kept between runs so a re-run resumes an interrupted
+// download or verifies the existing files instead of re-downloading.
+export function officeDownloadsDir(): string {
+	return join(homedir(), ".codev-hub", "office");
+}
+
 // The machine-readable result of the last `codevhub doctor` run. Deliberately a
 // single file rather than a dated series: it is a snapshot of "how is this
 // machine right now", and a stale one is worse than none when someone attaches

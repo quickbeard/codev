@@ -19,6 +19,7 @@ import { doctorOutcome, rerunDoctorWithProxy } from "@/lib/doctor.js";
 import { printHelp, printVersion } from "@/lib/help.js";
 import { initLogging, logWarn } from "@/lib/log.js";
 import { runLogs } from "@/lib/logs.js";
+import { runSkillOffice } from "@/lib/office.js";
 import { applyEnvProxy } from "@/lib/proxy.js";
 import { ensureNodeSqliteOrReexec } from "@/lib/reexec.js";
 import { ensureFreshGatewayKey } from "@/lib/refresh.js";
@@ -387,11 +388,16 @@ switch (command) {
 	// `skill <subcommand>`: operations against the SkillHub registry. Namespaced
 	// so it doesn't collide with `codevhub install` (which installs agents).
 	// `pull` downloads/installs a skill (not `install`, to avoid that confusion);
-	// `push` publishes one; whoami migrates here next.
+	// `push` publishes one; whoami migrates here next. `office` fetches the
+	// MiniMax-DOCX offline bundle from codev-storage (anonymous — unlike the
+	// other skill subcommands it must never force a login).
 	case "skill": {
 		const [sub, ...rest] = args;
 		if (sub === "search") {
 			process.exit(await runSkillSearch(rest));
+		}
+		if (sub === "office") {
+			process.exit(await runSkillOffice(rest));
 		}
 		if (sub === "push") {
 			const parsed = parsePublishArgs(rest);
@@ -465,8 +471,8 @@ switch (command) {
 		}
 		console.error(
 			sub === undefined
-				? "Usage: codevhub skill <search|pull|push> ..."
-				: `Unknown skill subcommand: ${sub}. Valid: search, pull, push.`,
+				? "Usage: codevhub skill <search|pull|push|office> ..."
+				: `Unknown skill subcommand: ${sub}. Valid: search, pull, push, office.`,
 		);
 		process.exit(1);
 		break;
