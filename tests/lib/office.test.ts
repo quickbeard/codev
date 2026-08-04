@@ -26,6 +26,7 @@ describe("parseOfficeArgs", () => {
 			downloadOnly: false,
 			minimal: false,
 			skipVerify: false,
+			forceSkills: false,
 		});
 	});
 
@@ -38,6 +39,7 @@ describe("parseOfficeArgs", () => {
 			"--download-only",
 			"--minimal",
 			"--skip-verify",
+			"--force-skills",
 		]);
 		expect(parsed).toEqual({
 			platform: "windows",
@@ -45,6 +47,7 @@ describe("parseOfficeArgs", () => {
 			downloadOnly: true,
 			minimal: true,
 			skipVerify: true,
+			forceSkills: true,
 		});
 	});
 

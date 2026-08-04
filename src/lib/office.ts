@@ -15,7 +15,7 @@ import { officeDownloadsDir } from "@/lib/paths.js";
 // installer that prompts for sudo/UAC, which an Ink render would fight over.
 
 export const OFFICE_USAGE =
-	"Usage: codevhub skill office [--platform ubuntu|macos|windows] [--dir <path>] [--download-only] [--minimal] [--skip-verify]";
+	"Usage: codevhub skill office [--platform ubuntu|macos|windows] [--dir <path>] [--download-only] [--minimal] [--skip-verify] [--force-skills]";
 
 export type OfficePlatform = "ubuntu" | "macos" | "windows";
 
@@ -36,6 +36,7 @@ export interface OfficeArgs {
 	downloadOnly: boolean;
 	minimal: boolean;
 	skipVerify: boolean;
+	forceSkills: boolean;
 	error?: string;
 }
 
@@ -44,6 +45,7 @@ export function parseOfficeArgs(argv: string[]): OfficeArgs {
 		downloadOnly: false,
 		minimal: false,
 		skipVerify: false,
+		forceSkills: false,
 	};
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -83,6 +85,9 @@ export function parseOfficeArgs(argv: string[]): OfficeArgs {
 				break;
 			case "--skip-verify":
 				parsed.skipVerify = true;
+				break;
+			case "--force-skills":
+				parsed.forceSkills = true;
 				break;
 			default:
 				parsed.error = `unknown option: ${arg}`;
@@ -162,16 +167,18 @@ export function installerArgs(
 	platform: OfficePlatform,
 ): string[] {
 	// The bash scripts take GNU-style flags; the PowerShell script takes
-	// -Minimal / -SkipVerify switches.
+	// -Minimal / -SkipVerify / -ForceSkills switches.
 	if (platform === "windows") {
 		return [
 			...(parsed.minimal ? ["-Minimal"] : []),
 			...(parsed.skipVerify ? ["-SkipVerify"] : []),
+			...(parsed.forceSkills ? ["-ForceSkills"] : []),
 		];
 	}
 	return [
 		...(parsed.minimal ? ["--minimal"] : []),
 		...(parsed.skipVerify ? ["--skip-verify"] : []),
+		...(parsed.forceSkills ? ["--force-skills"] : []),
 	];
 }
 
@@ -231,7 +238,8 @@ export async function runSkillOffice(
 	console.error(
 		`Heads-up: the bundle is ~${APPROX_BUNDLE_MB[platform]} MB — downloading might ` +
 			"take a while. An interrupted run picks up where it left off; an " +
-			"already-downloaded file is reused (delete it to force a fresh download).",
+			"already-downloaded bundle is reused after checking with the server " +
+			"that it is still the published version.",
 	);
 	logInfo("office bundle download starting", {
 		action: "office.install",
