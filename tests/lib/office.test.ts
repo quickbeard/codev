@@ -4,6 +4,7 @@ import {
 	formatSize,
 	officeBundleName,
 	officeScriptName,
+	officeUninstallScriptName,
 	parseOfficeArgs,
 } from "@/lib/office.js";
 
@@ -27,6 +28,10 @@ describe("parseOfficeArgs", () => {
 			minimal: false,
 			skipVerify: false,
 			forceSkills: false,
+			uninstall: false,
+			yes: false,
+			skillsOnly: false,
+			purgeDownloads: false,
 		});
 	});
 
@@ -48,7 +53,35 @@ describe("parseOfficeArgs", () => {
 			minimal: true,
 			skipVerify: true,
 			forceSkills: true,
+			uninstall: false,
+			yes: false,
+			skillsOnly: false,
+			purgeDownloads: false,
 		});
+	});
+
+	test("uninstall mode with its passthrough flags (unadvertised)", () => {
+		const parsed = parseOfficeArgs([
+			"--uninstall",
+			"--yes",
+			"--skills-only",
+			"--purge-downloads",
+		]);
+		expect(parsed.error).toBeUndefined();
+		expect(parsed.uninstall).toBe(true);
+		expect(parsed.yes).toBe(true);
+		expect(parsed.skillsOnly).toBe(true);
+		expect(parsed.purgeDownloads).toBe(true);
+	});
+
+	test("rejects install flags combined with --uninstall", () => {
+		expect(parseOfficeArgs(["--uninstall", "--minimal"]).error).toMatch(
+			/do not apply with --uninstall/,
+		);
+	});
+
+	test("rejects uninstall passthroughs without --uninstall", () => {
+		expect(parseOfficeArgs(["--yes"]).error).toMatch(/require --uninstall/);
 	});
 
 	test("--platform=value form", () => {
@@ -84,6 +117,18 @@ describe("office file names", () => {
 		expect(officeScriptName("ubuntu")).toBe("codev-office-ubuntu-setup.sh");
 		expect(officeScriptName("macos")).toBe("codev-office-macos-setup.sh");
 		expect(officeScriptName("windows")).toBe("codev-office-windows-setup.ps1");
+	});
+
+	test("uninstall script names", () => {
+		expect(officeUninstallScriptName("ubuntu")).toBe(
+			"codev-office-ubuntu-uninstall.sh",
+		);
+		expect(officeUninstallScriptName("macos")).toBe(
+			"codev-office-macos-uninstall.sh",
+		);
+		expect(officeUninstallScriptName("windows")).toBe(
+			"codev-office-windows-uninstall.ps1",
+		);
 	});
 });
 

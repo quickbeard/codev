@@ -13,7 +13,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { downloadFile } from "@/lib/download.js";
-import { installerArgs, runSkillOffice } from "@/lib/office.js";
+import {
+	installerArgs,
+	runSkillOffice,
+	uninstallerArgs,
+} from "@/lib/office.js";
 
 const sha256 = (data: Buffer | string) =>
 	createHash("sha256").update(data).digest("hex");
@@ -438,11 +442,44 @@ describe("runSkillOffice", () => {
 		);
 		expect(code).toBe(1);
 	});
+
+	test("--uninstall fetches only the uninstall script and runs it with passthroughs", async () => {
+		const uninstallName = `codev-office-${hostPlatform}-uninstall.sh`;
+		objects.set(`/${uninstallName}`, SCRIPT);
+		const dir = join(tempDir, "office");
+		let spawned: { command: string; args: string[] } | null = null;
+		const code = await runSkillOffice(
+			["--uninstall", "--yes", "--skills-only", "--dir", dir],
+			baseUrl,
+			async (command, args) => {
+				spawned = { command, args };
+				return 0;
+			},
+		);
+		expect(code).toBe(0);
+		expect(spawned).toEqual({
+			command: "bash",
+			args: [join(dir, uninstallName), "--yes", "--skills-only"],
+		});
+		// The bundle is never touched in uninstall mode.
+		expect(existsSync(join(dir, bundleName))).toBe(false);
+	});
 });
+
+const NO_FLAGS = {
+	downloadOnly: false,
+	minimal: false,
+	skipVerify: false,
+	forceSkills: false,
+	uninstall: false,
+	yes: false,
+	skillsOnly: false,
+	purgeDownloads: false,
+};
 
 describe("installerArgs", () => {
 	const base = {
-		downloadOnly: false,
+		...NO_FLAGS,
 		minimal: true,
 		skipVerify: true,
 		forceSkills: true,
@@ -465,16 +502,32 @@ describe("installerArgs", () => {
 	});
 
 	test("no flags when none requested", () => {
-		expect(
-			installerArgs(
-				{
-					downloadOnly: false,
-					minimal: false,
-					skipVerify: false,
-					forceSkills: false,
-				},
-				"windows",
-			),
-		).toEqual([]);
+		expect(installerArgs(NO_FLAGS, "windows")).toEqual([]);
+	});
+});
+
+describe("uninstallerArgs", () => {
+	const base = {
+		...NO_FLAGS,
+		uninstall: true,
+		yes: true,
+		skillsOnly: true,
+		purgeDownloads: true,
+	};
+
+	test("bash platforms get GNU-style flags", () => {
+		expect(uninstallerArgs(base, "ubuntu")).toEqual([
+			"--yes",
+			"--skills-only",
+			"--purge-downloads",
+		]);
+	});
+
+	test("windows gets PowerShell switches", () => {
+		expect(uninstallerArgs(base, "windows")).toEqual([
+			"-Yes",
+			"-SkillsOnly",
+			"-PurgeDownloads",
+		]);
 	});
 });
