@@ -114,7 +114,7 @@ codevhub skill office --dir /media/usb/codev-office   # download somewhere else
 
 Both files land side by side, and the command prints the exact line to run from that folder (`bash codev-office-<os>-setup.sh`, or `powershell -ExecutionPolicy Bypass -File .\codev-office-windows-setup.ps1`). A bundle downloaded for another OS is never executed on this machine.
 
-Two flags are passed straight through to the setup script: `--minimal` (skip the optional extras) and `--skip-verify` (skip the bundle's own SHA-256 check).
+Two flags are passed straight through to the setup script: `--skip-verify` (skip the bundle's own SHA-256 check) and `--force-skills` (replace already-installed skills with the bundled versions).
 
 ## Switching between self-hosted and proprietary models
 

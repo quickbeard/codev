@@ -317,7 +317,7 @@ describe("runSkillOffice", () => {
 		const dir = join(tempDir, "office");
 		let spawned: { command: string; args: string[]; cwd: string } | null = null;
 		const code = await runSkillOffice(
-			["--dir", dir, "--minimal", "--skip-verify"],
+			["--dir", dir, "--skip-verify"],
 			baseUrl,
 			async (command, args, cwd) => {
 				spawned = { command, args, cwd };
@@ -327,7 +327,7 @@ describe("runSkillOffice", () => {
 		expect(code).toBe(0);
 		expect(spawned).toEqual({
 			command: "bash",
-			args: [join(dir, scriptName), "--minimal", "--skip-verify"],
+			args: [join(dir, scriptName), "--skip-verify"],
 			cwd: dir,
 		});
 	});
@@ -398,7 +398,7 @@ describe("runSkillOffice", () => {
 		let spawned: { command: string; args: string[]; cwd: string } | null = null;
 		const code = await withPlatform("win32", () =>
 			runSkillOffice(
-				["--dir", dir, "--minimal", "--skip-verify"],
+				["--dir", dir, "--skip-verify"],
 				baseUrl,
 				async (command, args, cwd) => {
 					spawned = { command, args, cwd };
@@ -414,7 +414,6 @@ describe("runSkillOffice", () => {
 				"Bypass",
 				"-File",
 				join(dir, "codev-office-windows-setup.ps1"),
-				"-Minimal",
 				"-SkipVerify",
 			],
 			cwd: dir,
@@ -468,7 +467,6 @@ describe("runSkillOffice", () => {
 
 const NO_FLAGS = {
 	downloadOnly: false,
-	minimal: false,
 	skipVerify: false,
 	forceSkills: false,
 	uninstall: false,
@@ -480,14 +478,12 @@ const NO_FLAGS = {
 describe("installerArgs", () => {
 	const base = {
 		...NO_FLAGS,
-		minimal: true,
 		skipVerify: true,
 		forceSkills: true,
 	};
 
 	test("bash platforms get GNU-style flags", () => {
 		expect(installerArgs(base, "ubuntu")).toEqual([
-			"--minimal",
 			"--skip-verify",
 			"--force-skills",
 		]);
@@ -495,7 +491,6 @@ describe("installerArgs", () => {
 
 	test("windows gets PowerShell switches", () => {
 		expect(installerArgs(base, "windows")).toEqual([
-			"-Minimal",
 			"-SkipVerify",
 			"-ForceSkills",
 		]);
