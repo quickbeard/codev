@@ -8,7 +8,7 @@ import { officeDownloadsDir } from "@/lib/paths.js";
 
 // `codevhub skill office`: fetch the CoDev Office offline bundle (published by
 // the codev-storage MinIO backend) for this OS and run the bundled setup
-// script, which installs the Office skills (minimax-docx, minimax-xlsx, …).
+// script, which installs the Office skills (DOCX/XLSX authoring, …).
 // File names are deterministic per platform — no manifest fetch — and each
 // bundle carries its own SHA256SUMS.txt that the setup flow can verify.
 // Non-interactive on purpose — the second half hands the terminal to an

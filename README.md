@@ -94,7 +94,7 @@ codevhub init        # initialize + index the current project (one time)
 
 ## CoDev Office skills (offline bundle)
 
-`codevhub skill office` installs the CoDev Office skills (`minimax-docx`, `minimax-xlsx`) so your agents can produce and edit real DOCX/XLSX files. Everything ships in one offline bundle — no login and no per-skill downloads:
+`codevhub skill office` installs the CoDev Office skills so your agents can produce and edit real DOCX and XLSX files. Everything ships in one offline bundle — no login and no per-skill downloads:
 
 ```bash
 codevhub skill office
