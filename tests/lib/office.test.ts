@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
 	detectPlatform,
+	formatSize,
 	officeBundleName,
 	officeScriptName,
 	parseOfficeArgs,
@@ -80,5 +81,17 @@ describe("office file names", () => {
 		expect(officeScriptName("ubuntu")).toBe("codev-office-ubuntu-setup.sh");
 		expect(officeScriptName("macos")).toBe("codev-office-macos-setup.sh");
 		expect(officeScriptName("windows")).toBe("codev-office-windows-setup.ps1");
+	});
+});
+
+describe("formatSize", () => {
+	test("KB below 1 MB — a 13 KB script must not render as 0.0 MB", () => {
+		expect(formatSize(13 * 1024)).toBe("13.0 KB");
+		expect(formatSize(0)).toBe("0.0 KB");
+	});
+
+	test("MB from 1 MB up", () => {
+		expect(formatSize(1024 * 1024)).toBe("1.0 MB");
+		expect(formatSize(637_252_608)).toBe("607.7 MB");
 	});
 });

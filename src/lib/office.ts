@@ -113,8 +113,11 @@ const APPROX_BUNDLE_MB: Record<OfficePlatform, number> = {
 	macos: 1400,
 };
 
-function formatMb(bytes: number): string {
-	return (bytes / (1024 * 1024)).toFixed(1);
+// Adaptive size for progress lines: the setup script is ~13 KB and rendered
+// "0.0/0.0 MB (100%)" under a fixed-MB format. Exported for tests.
+export function formatSize(bytes: number): string {
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // Single rewriting progress line on a TTY; on pipes/CI, a line roughly every
@@ -128,11 +131,11 @@ function makeProgressPrinter(name: string): {
 	return {
 		print(received, total) {
 			if (total === null) {
-				if (tty) process.stderr.write(`\r${name}  ${formatMb(received)} MB`);
+				if (tty) process.stderr.write(`\r${name}  ${formatSize(received)}`);
 				return;
 			}
 			const percent = Math.floor((received / total) * 100);
-			const line = `${name}  ${formatMb(received)}/${formatMb(total)} MB (${percent}%)`;
+			const line = `${name}  ${formatSize(received)}/${formatSize(total)} (${percent}%)`;
 			if (tty) {
 				process.stderr.write(`\r${line}`);
 			} else if (percent >= lastPercent + 5) {
