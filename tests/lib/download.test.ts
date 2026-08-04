@@ -18,6 +18,23 @@ import { installerArgs, runSkillOffice } from "@/lib/office.js";
 const sha256 = (data: Buffer | string) =>
 	createHash("sha256").update(data).digest("hex");
 
+// runSkillOffice reads process.platform to pick the bundle and to decide whether
+// the installer may run here. Restores the original descriptor rather than
+// re-defining a value, so nothing leaks into the files that share this worker.
+async function withPlatform<T>(
+	value: NodeJS.Platform,
+	fn: () => Promise<T>,
+): Promise<T> {
+	const original = Object.getOwnPropertyDescriptor(process, "platform");
+	Object.defineProperty(process, "platform", { value, configurable: true });
+	try {
+		return await fn();
+	} finally {
+		if (original) Object.defineProperty(process, "platform", original);
+		else delete (process as { platform?: unknown }).platform;
+	}
+}
+
 // 1 MiB of deterministic bytes — big enough to flow through the stream
 // pipeline in multiple chunks.
 const PAYLOAD = Buffer.alloc(1024 * 1024, "codev-office-test-");
@@ -30,6 +47,9 @@ let baseUrl: string;
 let rangeLog: (string | undefined)[];
 // When true the server ignores Range and always sends the full body with 200.
 let ignoreRange = false;
+// When true the server sends no Content-Length (chunked), as a proxy or a
+// streaming origin may.
+let omitContentLength = false;
 // Extra objects (path -> body) the server should serve.
 let objects: Map<string, Buffer>;
 
@@ -37,6 +57,7 @@ beforeEach(async () => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-download-"));
 	rangeLog = [];
 	ignoreRange = false;
+	omitContentLength = false;
 	objects = new Map([["/payload.bin", PAYLOAD]]);
 	server = createServer((req, res) => {
 		const body = objects.get(req.url ?? "");
@@ -58,6 +79,11 @@ beforeEach(async () => {
 				"Content-Range": `bytes ${start}-${body.length - 1}/${body.length}`,
 			});
 			res.end(rest);
+			return;
+		}
+		if (omitContentLength) {
+			res.writeHead(200);
+			res.end(body);
 			return;
 		}
 		res.writeHead(200, { "Content-Length": String(body.length) });
@@ -154,6 +180,42 @@ describe("downloadFile", () => {
 			endpoint: "test.download",
 		});
 		expect(readFileSync(dest).equals(PAYLOAD)).toBe(true);
+	});
+
+	// `Number(res.headers.get("content-length"))` is `Number(null)` === 0 when the
+	// header is absent, and 0 is finite — reading it straight makes the opts.size
+	// fallback unreachable and reports a total of `offset` (0 on a fresh
+	// download), which renders as Infinity%.
+	test("falls back to the declared size when the server omits content-length", async () => {
+		omitContentLength = true;
+		const dest = join(tempDir, "payload.bin");
+		const totals: (number | null)[] = [];
+		await downloadFile({
+			url: `${baseUrl}/payload.bin`,
+			dest,
+			size: PAYLOAD.length,
+			endpoint: "test.download",
+			onProgress: (p) => totals.push(p.total),
+		});
+		expect(readFileSync(dest).equals(PAYLOAD)).toBe(true);
+		expect(totals.length).toBeGreaterThan(0);
+		expect(totals.every((t) => t === PAYLOAD.length)).toBe(true);
+	});
+
+	test("reports an unknown total when neither side gives a size", async () => {
+		omitContentLength = true;
+		const dest = join(tempDir, "payload.bin");
+		const totals: (number | null)[] = [];
+		await downloadFile({
+			url: `${baseUrl}/payload.bin`,
+			dest,
+			endpoint: "test.download",
+			onProgress: (p) => totals.push(p.total),
+		});
+		expect(readFileSync(dest).equals(PAYLOAD)).toBe(true);
+		// null, not 0 — the progress printer branches on it to drop the percentage
+		// rather than dividing by zero.
+		expect(totals.every((t) => t === null)).toBe(true);
 	});
 
 	test("fails with the HTTP status on a missing object", async () => {
@@ -255,6 +317,69 @@ describe("runSkillOffice", () => {
 		expect(readFileSync(join(dir, scriptName)).equals(SCRIPT)).toBe(true);
 		// No checksum to disagree with, so the existing bundle is trusted as-is.
 		expect(readFileSync(join(dir, bundleName), "utf8")).toBe("stale-bundle");
+	});
+
+	// The other half of "always refetch the script": deleting the finished file
+	// alone still leaves downloadFile resuming from a leftover .partial via Range,
+	// and no checksum is passed that could catch the splice.
+	test("drops a stale .partial for the script instead of resuming onto it", async () => {
+		const dir = join(tempDir, "office");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, `${scriptName}.partial`), "##");
+		const code = await runSkillOffice(
+			["--download-only", "--dir", dir],
+			baseUrl,
+		);
+		expect(code).toBe(0);
+		expect(readFileSync(join(dir, scriptName)).equals(SCRIPT)).toBe(true);
+		// Both requests went out without a Range header.
+		expect(rangeLog).toEqual([undefined, undefined]);
+	});
+
+	// The PowerShell branch is unreachable from a non-Windows host — a
+	// cross-platform --platform forces download-only — so the host is stubbed to
+	// keep the argv shape pinned on the Linux/macOS machines that run this suite.
+	test("runs the PowerShell installer on a Windows host", async () => {
+		objects.set("/codev-office-windows.zip", BUNDLE);
+		objects.set("/codev-office-windows-setup.ps1", SCRIPT);
+		const dir = join(tempDir, "office");
+		let spawned: { command: string; args: string[]; cwd: string } | null = null;
+		const code = await withPlatform("win32", () =>
+			runSkillOffice(
+				["--dir", dir, "--minimal", "--skip-verify"],
+				baseUrl,
+				async (command, args, cwd) => {
+					spawned = { command, args, cwd };
+					return 0;
+				},
+			),
+		);
+		expect(code).toBe(0);
+		expect(spawned).toEqual({
+			command: "powershell.exe",
+			args: [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				join(dir, "codev-office-windows-setup.ps1"),
+				"-Minimal",
+				"-SkipVerify",
+			],
+			cwd: dir,
+		});
+	});
+
+	test("exits 1 on an OS with no bundle and downloads nothing", async () => {
+		const code = await withPlatform("freebsd", () =>
+			runSkillOffice(["--dir", join(tempDir, "office")], baseUrl),
+		);
+		expect(code).toBe(1);
+		expect(rangeLog).toEqual([]);
+	});
+
+	test("exits 1 on an unknown flag and downloads nothing", async () => {
+		expect(await runSkillOffice(["--wat"], baseUrl)).toBe(1);
+		expect(rangeLog).toEqual([]);
 	});
 
 	test("fails cleanly when the bundle is not published", async () => {

@@ -130,7 +130,9 @@ function makeProgressPrinter(name: string): {
 	let lastPercent = -5;
 	return {
 		print(received, total) {
-			if (total === null) {
+			// `0` as well as `null`: a zero total is either an unknown length or an
+			// empty body, and dividing by it renders NaN%/Infinity%.
+			if (total === null || total === 0) {
 				if (tty) process.stderr.write(`\r${name}  ${formatSize(received)}`);
 				return;
 			}
@@ -238,8 +240,12 @@ export async function runSkillOffice(
 
 	// Without per-file checksums an existing file is reused as-is. That's the
 	// point for the GB-scale bundle, but the setup script is tiny and must
-	// track the published version — always refetch it.
+	// track the published version — always refetch it. The `.partial` goes too:
+	// downloadFile resumes from it via Range, so a leftover from an interrupted
+	// run would splice stale bytes onto a script that has since been republished
+	// — and with no expected checksum, nothing would catch it.
 	rmSync(join(dir, script), { force: true });
+	rmSync(join(dir, `${script}.partial`), { force: true });
 
 	for (const name of [script, bundle]) {
 		const progress = makeProgressPrinter(name);
