@@ -389,8 +389,8 @@ switch (command) {
 	// so it doesn't collide with `codevhub install` (which installs agents).
 	// `pull` downloads/installs a skill (not `install`, to avoid that confusion);
 	// `push` publishes one; whoami migrates here next. `office` fetches the
-	// MiniMax-DOCX offline bundle from codev-storage (anonymous — unlike the
-	// other skill subcommands it must never force a login).
+	// CoDev Office offline skills bundle from codev-storage (anonymous — unlike
+	// the other skill subcommands it must never force a login).
 	case "skill": {
 		const [sub, ...rest] = args;
 		if (sub === "search") {

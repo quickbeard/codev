@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -168,38 +169,15 @@ describe("downloadFile", () => {
 
 // End-to-end through runSkillOffice against the local server. The test host is
 // linux/macos in CI, so the detected platform maps to one of the bash bundles.
+// File names are the deterministic per-platform contract — no manifest.
 describe("runSkillOffice", () => {
 	const hostPlatform = process.platform === "darwin" ? "macos" : "ubuntu";
-	const bundleName = `minimax-docx-${hostPlatform}.zip`;
+	const bundleName = `codev-office-${hostPlatform}.zip`;
 	const scriptName = `codev-office-${hostPlatform}-setup.sh`;
 	const BUNDLE = Buffer.from("fake-bundle-bytes");
 	const SCRIPT = Buffer.from("#!/bin/sh\nexit 0\n");
 
-	const manifest = () => ({
-		schema: 1,
-		version: "test-1",
-		platforms: {
-			ubuntu: {
-				bundle: "minimax-docx-ubuntu.zip",
-				script: "codev-office-ubuntu-setup.sh",
-			},
-			macos: {
-				bundle: "minimax-docx-macos.zip",
-				script: "codev-office-macos-setup.sh",
-			},
-			windows: {
-				bundle: "minimax-docx-windows.zip",
-				script: "codev-office-windows-setup.ps1",
-			},
-		},
-		files: {
-			[bundleName]: { size: BUNDLE.length, sha256: sha256(BUNDLE) },
-			[scriptName]: { size: SCRIPT.length, sha256: sha256(SCRIPT) },
-		},
-	});
-
 	beforeEach(() => {
-		objects.set("/manifest.json", Buffer.from(JSON.stringify(manifest())));
 		objects.set(`/${bundleName}`, BUNDLE);
 		objects.set(`/${scriptName}`, SCRIPT);
 	});
@@ -247,28 +225,8 @@ describe("runSkillOffice", () => {
 	});
 
 	test("a cross-platform --platform forces download-only", async () => {
-		// The windows files are not even published on the test server: proving
-		// they were requested-and-downloaded but the installer never ran.
-		objects.set("/minimax-docx-windows.zip", BUNDLE);
+		objects.set("/codev-office-windows.zip", BUNDLE);
 		objects.set("/codev-office-windows-setup.ps1", SCRIPT);
-		objects.set(
-			"/manifest.json",
-			Buffer.from(
-				JSON.stringify({
-					...manifest(),
-					files: {
-						"minimax-docx-windows.zip": {
-							size: BUNDLE.length,
-							sha256: sha256(BUNDLE),
-						},
-						"codev-office-windows-setup.ps1": {
-							size: SCRIPT.length,
-							sha256: sha256(SCRIPT),
-						},
-					},
-				}),
-			),
-		);
 		const dir = join(tempDir, "office");
 		const spawns: string[] = [];
 		const code = await runSkillOffice(
@@ -281,11 +239,26 @@ describe("runSkillOffice", () => {
 		);
 		expect(code).toBe(0);
 		expect(spawns).toEqual([]);
-		expect(existsSync(join(dir, "minimax-docx-windows.zip"))).toBe(true);
+		expect(existsSync(join(dir, "codev-office-windows.zip"))).toBe(true);
 	});
 
-	test("fails cleanly when the manifest is missing", async () => {
-		objects.delete("/manifest.json");
+	test("always refetches the setup script, but reuses a finished bundle", async () => {
+		const dir = join(tempDir, "office");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, scriptName), "stale-script");
+		writeFileSync(join(dir, bundleName), "stale-bundle");
+		const code = await runSkillOffice(
+			["--download-only", "--dir", dir],
+			baseUrl,
+		);
+		expect(code).toBe(0);
+		expect(readFileSync(join(dir, scriptName)).equals(SCRIPT)).toBe(true);
+		// No checksum to disagree with, so the existing bundle is trusted as-is.
+		expect(readFileSync(join(dir, bundleName), "utf8")).toBe("stale-bundle");
+	});
+
+	test("fails cleanly when the bundle is not published", async () => {
+		objects.delete(`/${bundleName}`);
 		const code = await runSkillOffice(
 			["--dir", join(tempDir, "office")],
 			baseUrl,

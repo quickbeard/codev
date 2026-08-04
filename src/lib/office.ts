@@ -1,16 +1,18 @@
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { OFFICE_DOWNLOADS_URL } from "@/lib/const.js";
 import { downloadFile } from "@/lib/download.js";
-import { loggedFetch, logInfo } from "@/lib/log.js";
+import { logInfo } from "@/lib/log.js";
 import { officeDownloadsDir } from "@/lib/paths.js";
 
-// `codevhub skill office`: fetch the MiniMax-DOCX offline bundle (published by
-// the codev-storage MinIO backend) for this OS, verify it against the bucket's
-// manifest, and run the bundled setup script. Non-interactive on purpose — the
-// second half hands the terminal to an installer that prompts for sudo/UAC,
-// which an Ink render would fight over.
+// `codevhub skill office`: fetch the CoDev Office offline bundle (published by
+// the codev-storage MinIO backend) for this OS and run the bundled setup
+// script, which installs the Office skills (minimax-docx, minimax-xlsx, …).
+// File names are deterministic per platform — no manifest fetch — and each
+// bundle carries its own SHA256SUMS.txt that the setup flow can verify.
+// Non-interactive on purpose — the second half hands the terminal to an
+// installer that prompts for sudo/UAC, which an Ink render would fight over.
 
 export const OFFICE_USAGE =
 	"Usage: codevhub skill office [--platform ubuntu|macos|windows] [--dir <path>] [--download-only] [--minimal] [--skip-verify]";
@@ -90,39 +92,26 @@ export function parseOfficeArgs(argv: string[]): OfficeArgs {
 	return parsed;
 }
 
-export interface OfficeManifest {
-	schema: number;
-	version: string;
-	platforms: Record<OfficePlatform, { bundle: string; script: string }>;
-	files: Record<string, { size: number; sha256: string }>;
+// Bundle and script names are a naming contract with the codev-scripts repo
+// (codev-office/*) — deterministic per platform, so no manifest round-trip is
+// needed before downloading.
+export function officeBundleName(platform: OfficePlatform): string {
+	return `codev-office-${platform}.zip`;
 }
 
-export function parseOfficeManifest(json: unknown): OfficeManifest {
-	const bad = (why: string): never => {
-		throw new Error(
-			`unexpected manifest.json shape (${why}) — the published bundle layout may have changed; update codevhub`,
-		);
-	};
-	if (typeof json !== "object" || json === null) bad("not an object");
-	const m = json as Record<string, unknown>;
-	if (m.schema !== 1) bad(`schema ${String(m.schema)}`);
-	if (typeof m.version !== "string") bad("missing version");
-	const platforms = m.platforms as OfficeManifest["platforms"];
-	if (typeof platforms !== "object" || platforms === null)
-		bad("missing platforms");
-	for (const p of OFFICE_PLATFORMS) {
-		const entry = platforms[p];
-		if (typeof entry?.bundle !== "string" || typeof entry?.script !== "string")
-			bad(`platform ${p}`);
-	}
-	const files = m.files as OfficeManifest["files"];
-	if (typeof files !== "object" || files === null) bad("missing files");
-	for (const [name, meta] of Object.entries(files)) {
-		if (typeof meta?.size !== "number" || typeof meta?.sha256 !== "string")
-			bad(`file ${name}`);
-	}
-	return m as unknown as OfficeManifest;
+export function officeScriptName(platform: OfficePlatform): string {
+	return platform === "windows"
+		? "codev-office-windows-setup.ps1"
+		: `codev-office-${platform}-setup.sh`;
 }
+
+// Rough bundle sizes for the pre-download heads-up only; progress totals come
+// from the server's content-length.
+const APPROX_BUNDLE_MB: Record<OfficePlatform, number> = {
+	ubuntu: 610,
+	windows: 820,
+	macos: 1400,
+};
 
 function formatMb(bytes: number): string {
 	return (bytes / (1024 * 1024)).toFixed(1);
@@ -231,60 +220,42 @@ export async function runSkillOffice(
 	const dir = parsed.dir ?? officeDownloadsDir();
 	mkdirSync(dir, { recursive: true });
 
-	let manifest: OfficeManifest;
-	try {
-		const res = await loggedFetch(
-			"office.manifest",
-			`${baseUrl}/manifest.json`,
-			{
-				signal: AbortSignal.timeout(30_000),
-			},
-		);
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
-		manifest = parseOfficeManifest(await res.json());
-	} catch (err) {
-		console.error(
-			`Could not fetch the bundle manifest from ${baseUrl}/manifest.json: ${err instanceof Error ? err.message : String(err)}`,
-		);
-		return 1;
-	}
+	const bundle = officeBundleName(platform);
+	const script = officeScriptName(platform);
+	console.error(`CoDev Office offline skills bundle (${platform})`);
 	console.error(
-		`MiniMax-DOCX offline bundle, version ${manifest.version} (${platform})`,
-	);
-	const { bundle, script } = manifest.platforms[platform];
-	const bundleSize = manifest.files[bundle]?.size;
-	console.error(
-		`Heads-up: the bundle is ${
-			bundleSize ? `~${formatMb(bundleSize)} MB` : "large (up to ~1.1 GB)"
-		} — downloading might take a while. An interrupted run picks up where it left off.`,
+		`Heads-up: the bundle is ~${APPROX_BUNDLE_MB[platform]} MB — downloading might ` +
+			"take a while. An interrupted run picks up where it left off; an " +
+			"already-downloaded file is reused (delete it to force a fresh download).",
 	);
 	logInfo("office bundle download starting", {
 		action: "office.install",
-		extra: { platform, version: manifest.version, dir, downloadOnly },
+		extra: { platform, dir, downloadOnly },
 	});
 
+	// Without per-file checksums an existing file is reused as-is. That's the
+	// point for the GB-scale bundle, but the setup script is tiny and must
+	// track the published version — always refetch it.
+	rmSync(join(dir, script), { force: true });
+
 	for (const name of [script, bundle]) {
-		const meta = manifest.files[name];
-		if (!meta) {
-			console.error(
-				`manifest.json does not list ${name} — re-publish the bundle`,
-			);
-			return 1;
-		}
 		const progress = makeProgressPrinter(name);
 		try {
 			await downloadFile({
 				url: `${baseUrl}/${name}`,
 				dest: join(dir, name),
-				sha256: meta.sha256,
-				size: meta.size,
 				endpoint: name === bundle ? "office.bundle" : "office.script",
 				onProgress: (p) => progress.print(p.received, p.total),
 			});
-		} finally {
+		} catch (err) {
 			progress.done();
+			console.error(
+				`Could not download ${baseUrl}/${name}: ${err instanceof Error ? err.message : String(err)}`,
+			);
+			return 1;
 		}
-		console.error(`✓ ${name} verified (SHA-256)`);
+		progress.done();
+		console.error(`✓ ${name} downloaded`);
 	}
 	if (process.platform !== "win32") {
 		chmodSync(join(dir, script), 0o755);
