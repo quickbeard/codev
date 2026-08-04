@@ -25,7 +25,6 @@ describe("parseOfficeArgs", () => {
 	test("defaults", () => {
 		expect(parseOfficeArgs([])).toEqual({
 			downloadOnly: false,
-			minimal: false,
 			skipVerify: false,
 			forceSkills: false,
 			uninstall: false,
@@ -42,7 +41,6 @@ describe("parseOfficeArgs", () => {
 			"--dir",
 			"/tmp/x",
 			"--download-only",
-			"--minimal",
 			"--skip-verify",
 			"--force-skills",
 		]);
@@ -50,7 +48,6 @@ describe("parseOfficeArgs", () => {
 			platform: "windows",
 			dir: "/tmp/x",
 			downloadOnly: true,
-			minimal: true,
 			skipVerify: true,
 			forceSkills: true,
 			uninstall: false,
@@ -75,7 +72,7 @@ describe("parseOfficeArgs", () => {
 	});
 
 	test("rejects install flags combined with --uninstall", () => {
-		expect(parseOfficeArgs(["--uninstall", "--minimal"]).error).toMatch(
+		expect(parseOfficeArgs(["--uninstall", "--skip-verify"]).error).toMatch(
 			/do not apply with --uninstall/,
 		);
 	});

@@ -15,7 +15,7 @@ import { officeDownloadsDir } from "@/lib/paths.js";
 // installer that prompts for sudo/UAC, which an Ink render would fight over.
 
 export const OFFICE_USAGE =
-	"Usage: codevhub skill office [--platform ubuntu|macos|windows] [--dir <path>] [--download-only] [--minimal] [--skip-verify] [--force-skills]";
+	"Usage: codevhub skill office [--platform ubuntu|macos|windows] [--dir <path>] [--download-only] [--skip-verify] [--force-skills]";
 
 export type OfficePlatform = "ubuntu" | "macos" | "windows";
 
@@ -34,7 +34,6 @@ export interface OfficeArgs {
 	platform?: OfficePlatform;
 	dir?: string;
 	downloadOnly: boolean;
-	minimal: boolean;
 	skipVerify: boolean;
 	forceSkills: boolean;
 	// Deliberately unadvertised (absent from OFFICE_USAGE and `codevhub help`):
@@ -50,7 +49,6 @@ export interface OfficeArgs {
 export function parseOfficeArgs(argv: string[]): OfficeArgs {
 	const parsed: OfficeArgs = {
 		downloadOnly: false,
-		minimal: false,
 		skipVerify: false,
 		forceSkills: false,
 		uninstall: false,
@@ -91,9 +89,6 @@ export function parseOfficeArgs(argv: string[]): OfficeArgs {
 			case "--download-only":
 				parsed.downloadOnly = true;
 				break;
-			case "--minimal":
-				parsed.minimal = true;
-				break;
 			case "--skip-verify":
 				parsed.skipVerify = true;
 				break;
@@ -120,9 +115,9 @@ export function parseOfficeArgs(argv: string[]): OfficeArgs {
 	// The two modes take disjoint flag sets — reject mixtures loudly rather
 	// than silently forwarding a flag the target script would choke on.
 	if (parsed.uninstall) {
-		if (parsed.minimal || parsed.skipVerify || parsed.forceSkills) {
+		if (parsed.skipVerify || parsed.forceSkills) {
 			parsed.error =
-				"--minimal/--skip-verify/--force-skills do not apply with --uninstall";
+				"--skip-verify/--force-skills do not apply with --uninstall";
 		}
 	} else if (parsed.yes || parsed.skillsOnly || parsed.purgeDownloads) {
 		parsed.error = "--yes/--skills-only/--purge-downloads require --uninstall";
@@ -206,16 +201,14 @@ export function installerArgs(
 	platform: OfficePlatform,
 ): string[] {
 	// The bash scripts take GNU-style flags; the PowerShell script takes
-	// -Minimal / -SkipVerify / -ForceSkills switches.
+	// -SkipVerify / -ForceSkills switches.
 	if (platform === "windows") {
 		return [
-			...(parsed.minimal ? ["-Minimal"] : []),
 			...(parsed.skipVerify ? ["-SkipVerify"] : []),
 			...(parsed.forceSkills ? ["-ForceSkills"] : []),
 		];
 	}
 	return [
-		...(parsed.minimal ? ["--minimal"] : []),
 		...(parsed.skipVerify ? ["--skip-verify"] : []),
 		...(parsed.forceSkills ? ["--force-skills"] : []),
 	];
