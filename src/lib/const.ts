@@ -13,8 +13,8 @@ export const SKILLHUB_URL = `${BASE_URL}/netmindhub`;
 export const CODE_DOWNLOADS_URL = `${BASE_URL}/codev/docs/code/downloads`;
 // The codev-storage MinIO backend (codev-storage repo), reached through the
 // shared reverse proxy's /codev-storage route. The codev-office bucket holds
-// the MiniMax-DOCX offline bundles + setup scripts + manifest.json, all
-// anonymous read-only.
+// the CoDev Office offline skill bundles + setup scripts (deterministic names,
+// see office.ts), all anonymous read-only.
 export const OFFICE_DOWNLOADS_URL = `${BASE_URL}/codev-storage/codev-office`;
 
 export const FALLBACK_MODEL = atob("TWluaU1heC9NaW5pTWF4LU0z");

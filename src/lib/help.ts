@@ -49,8 +49,9 @@ Skill hub:
   skill push <path>      Publish a skill (a directory with SKILL.md, or a .zip)
                          (previews and confirms before upload; --draft-only to stop
                          at DRAFT, --auto-approve for admins, --json for output)
-  skill office           Download the MiniMax-DOCX offline bundle for this OS,
-                         verify its checksum, and run its setup script
+  skill office           Download the CoDev Office offline skills bundle
+                         (minimax-docx, minimax-xlsx) for this OS and run its
+                         setup script
                          (--platform ubuntu|macos|windows to fetch for another OS
                          [implies --download-only], --dir <path> for the download
                          folder, --download-only to skip running the installer,

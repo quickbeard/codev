@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
 	detectPlatform,
-	type OfficeManifest,
+	formatSize,
+	officeBundleName,
+	officeScriptName,
 	parseOfficeArgs,
-	parseOfficeManifest,
 } from "@/lib/office.js";
 
 describe("detectPlatform", () => {
@@ -66,57 +67,31 @@ describe("parseOfficeArgs", () => {
 	});
 });
 
-const VALID_MANIFEST: OfficeManifest = {
-	schema: 1,
-	version: "2026-08-03",
-	platforms: {
-		ubuntu: {
-			bundle: "minimax-docx-ubuntu.zip",
-			script: "codev-office-ubuntu-setup.sh",
-		},
-		macos: {
-			bundle: "minimax-docx-macos.zip",
-			script: "codev-office-macos-setup.sh",
-		},
-		windows: {
-			bundle: "minimax-docx-windows.zip",
-			script: "codev-office-windows-setup.ps1",
-		},
-	},
-	files: {
-		"minimax-docx-ubuntu.zip": { size: 123, sha256: "ab".repeat(32) },
-	},
-};
-
-describe("parseOfficeManifest", () => {
-	test("accepts a valid manifest", () => {
-		expect(parseOfficeManifest(VALID_MANIFEST)).toEqual(VALID_MANIFEST);
+// The names are a contract with the codev-scripts repo (codev-office/*) and
+// the codev-storage bucket layout — a drift here is a broken download for
+// every user, so the full set is spelled out.
+describe("office file names", () => {
+	test("bundle names", () => {
+		expect(officeBundleName("ubuntu")).toBe("codev-office-ubuntu.zip");
+		expect(officeBundleName("macos")).toBe("codev-office-macos.zip");
+		expect(officeBundleName("windows")).toBe("codev-office-windows.zip");
 	});
 
-	test("rejects a wrong schema", () => {
-		expect(() => parseOfficeManifest({ ...VALID_MANIFEST, schema: 2 })).toThrow(
-			/manifest.json shape/,
-		);
+	test("script names", () => {
+		expect(officeScriptName("ubuntu")).toBe("codev-office-ubuntu-setup.sh");
+		expect(officeScriptName("macos")).toBe("codev-office-macos-setup.sh");
+		expect(officeScriptName("windows")).toBe("codev-office-windows-setup.ps1");
+	});
+});
+
+describe("formatSize", () => {
+	test("KB below 1 MB — a 13 KB script must not render as 0.0 MB", () => {
+		expect(formatSize(13 * 1024)).toBe("13.0 KB");
+		expect(formatSize(0)).toBe("0.0 KB");
 	});
 
-	test("rejects a missing platform entry", () => {
-		const { windows: _, ...platforms } = VALID_MANIFEST.platforms;
-		expect(() => parseOfficeManifest({ ...VALID_MANIFEST, platforms })).toThrow(
-			/platform windows/,
-		);
-	});
-
-	test("rejects malformed file entries", () => {
-		expect(() =>
-			parseOfficeManifest({
-				...VALID_MANIFEST,
-				files: { "x.zip": { size: "big", sha256: "ab" } },
-			}),
-		).toThrow(/file x.zip/);
-	});
-
-	test("rejects non-objects", () => {
-		expect(() => parseOfficeManifest(null)).toThrow(/not an object/);
-		expect(() => parseOfficeManifest("[]")).toThrow(/manifest.json shape/);
+	test("MB from 1 MB up", () => {
+		expect(formatSize(1024 * 1024)).toBe("1.0 MB");
+		expect(formatSize(637_252_608)).toBe("607.7 MB");
 	});
 });
