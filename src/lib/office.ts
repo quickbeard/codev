@@ -37,6 +37,13 @@ export interface OfficeArgs {
 	minimal: boolean;
 	skipVerify: boolean;
 	forceSkills: boolean;
+	// Deliberately unadvertised (absent from OFFICE_USAGE and `codevhub help`):
+	// fetches and runs the published uninstall script instead of the installer.
+	uninstall: boolean;
+	// Uninstall-only passthroughs, equally unadvertised.
+	yes: boolean;
+	skillsOnly: boolean;
+	purgeDownloads: boolean;
 	error?: string;
 }
 
@@ -46,6 +53,10 @@ export function parseOfficeArgs(argv: string[]): OfficeArgs {
 		minimal: false,
 		skipVerify: false,
 		forceSkills: false,
+		uninstall: false,
+		yes: false,
+		skillsOnly: false,
+		purgeDownloads: false,
 	};
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -89,10 +100,32 @@ export function parseOfficeArgs(argv: string[]): OfficeArgs {
 			case "--force-skills":
 				parsed.forceSkills = true;
 				break;
+			case "--uninstall":
+				parsed.uninstall = true;
+				break;
+			case "--yes":
+				parsed.yes = true;
+				break;
+			case "--skills-only":
+				parsed.skillsOnly = true;
+				break;
+			case "--purge-downloads":
+				parsed.purgeDownloads = true;
+				break;
 			default:
 				parsed.error = `unknown option: ${arg}`;
 				return parsed;
 		}
+	}
+	// The two modes take disjoint flag sets — reject mixtures loudly rather
+	// than silently forwarding a flag the target script would choke on.
+	if (parsed.uninstall) {
+		if (parsed.minimal || parsed.skipVerify || parsed.forceSkills) {
+			parsed.error =
+				"--minimal/--skip-verify/--force-skills do not apply with --uninstall";
+		}
+	} else if (parsed.yes || parsed.skillsOnly || parsed.purgeDownloads) {
+		parsed.error = "--yes/--skills-only/--purge-downloads require --uninstall";
 	}
 	return parsed;
 }
@@ -108,6 +141,12 @@ export function officeScriptName(platform: OfficePlatform): string {
 	return platform === "windows"
 		? "codev-office-windows-setup.ps1"
 		: `codev-office-${platform}-setup.sh`;
+}
+
+export function officeUninstallScriptName(platform: OfficePlatform): string {
+	return platform === "windows"
+		? "codev-office-windows-uninstall.ps1"
+		: `codev-office-${platform}-uninstall.sh`;
 }
 
 // Rough bundle sizes for the pre-download heads-up only; progress totals come
@@ -182,6 +221,24 @@ export function installerArgs(
 	];
 }
 
+export function uninstallerArgs(
+	parsed: OfficeArgs,
+	platform: OfficePlatform,
+): string[] {
+	if (platform === "windows") {
+		return [
+			...(parsed.yes ? ["-Yes"] : []),
+			...(parsed.skillsOnly ? ["-SkillsOnly"] : []),
+			...(parsed.purgeDownloads ? ["-PurgeDownloads"] : []),
+		];
+	}
+	return [
+		...(parsed.yes ? ["--yes"] : []),
+		...(parsed.skillsOnly ? ["--skills-only"] : []),
+		...(parsed.purgeDownloads ? ["--purge-downloads"] : []),
+	];
+}
+
 // Exposed for tests (mocked); production always uses the default.
 export type OfficeSpawner = (
 	command: string,
@@ -233,29 +290,40 @@ export async function runSkillOffice(
 	mkdirSync(dir, { recursive: true });
 
 	const bundle = officeBundleName(platform);
-	const script = officeScriptName(platform);
-	console.error(`CoDev Office offline skills bundle (${platform})`);
-	console.error(
-		`Heads-up: the bundle is ~${APPROX_BUNDLE_MB[platform]} MB — downloading might ` +
-			"take a while. An interrupted run picks up where it left off; an " +
-			"already-downloaded bundle is reused after checking with the server " +
-			"that it is still the published version.",
+	const script = parsed.uninstall
+		? officeUninstallScriptName(platform)
+		: officeScriptName(platform);
+	if (parsed.uninstall) {
+		console.error(`CoDev Office offline skills uninstaller (${platform})`);
+	} else {
+		console.error(`CoDev Office offline skills bundle (${platform})`);
+		console.error(
+			`Heads-up: the bundle is ~${APPROX_BUNDLE_MB[platform]} MB — downloading might ` +
+				"take a while. An interrupted run picks up where it left off; an " +
+				"already-downloaded bundle is reused after checking with the server " +
+				"that it is still the published version.",
+		);
+	}
+	logInfo(
+		parsed.uninstall
+			? "office uninstall starting"
+			: "office bundle download starting",
+		{
+			action: parsed.uninstall ? "office.uninstall" : "office.install",
+			extra: { platform, dir, downloadOnly },
+		},
 	);
-	logInfo("office bundle download starting", {
-		action: "office.install",
-		extra: { platform, dir, downloadOnly },
-	});
 
-	// Without per-file checksums an existing file is reused as-is. That's the
-	// point for the GB-scale bundle, but the setup script is tiny and must
-	// track the published version — always refetch it. The `.partial` goes too:
-	// downloadFile resumes from it via Range, so a leftover from an interrupted
-	// run would splice stale bytes onto a script that has since been republished
-	// — and with no expected checksum, nothing would catch it.
+	// The scripts are tiny and must track the published version — always
+	// refetch them (belt and braces on top of the ETag revalidation). The
+	// `.partial` goes too: downloadFile resumes from it via Range, so a
+	// leftover from an interrupted run would splice stale bytes onto a script
+	// that has since been republished.
 	rmSync(join(dir, script), { force: true });
 	rmSync(join(dir, `${script}.partial`), { force: true });
 
-	for (const name of [script, bundle]) {
+	// Uninstall needs no bundle — only the script.
+	for (const name of parsed.uninstall ? [script] : [script, bundle]) {
 		const progress = makeProgressPrinter(name);
 		try {
 			await downloadFile({
@@ -279,12 +347,19 @@ export async function runSkillOffice(
 	}
 
 	if (downloadOnly) {
-		console.error(`\nFiles are in ${dir}. To install, run from that folder:`);
+		console.error(
+			`\nFiles are in ${dir}. To ${parsed.uninstall ? "uninstall" : "install"}, run from that folder:`,
+		);
 		console.error(`  ${manualRunCommand(platform, script)}`);
 		return 0;
 	}
 
-	console.error(`\nRunning the installer (${script})...\n`);
+	const scriptArgs = parsed.uninstall
+		? uninstallerArgs(parsed, platform)
+		: installerArgs(parsed, platform);
+	console.error(
+		`\nRunning the ${parsed.uninstall ? "uninstaller" : "installer"} (${script})...\n`,
+	);
 	const [command, args] =
 		platform === "windows"
 			? [
@@ -294,16 +369,21 @@ export async function runSkillOffice(
 						"Bypass",
 						"-File",
 						join(dir, script),
-						...installerArgs(parsed, platform),
+						...scriptArgs,
 					],
 				]
-			: ["bash", [join(dir, script), ...installerArgs(parsed, platform)]];
+			: ["bash", [join(dir, script), ...scriptArgs]];
 	// cwd = download dir: the scripts locate their bundle zip next to
-	// themselves/CWD, and both files were just staged there.
+	// themselves/CWD, and the staged files are there.
 	const code = await spawner(command, args, dir);
-	logInfo("office installer finished", {
-		action: "office.install",
-		extra: { platform, exitCode: code },
-	});
+	logInfo(
+		parsed.uninstall
+			? "office uninstaller finished"
+			: "office installer finished",
+		{
+			action: parsed.uninstall ? "office.uninstall" : "office.install",
+			extra: { platform, exitCode: code },
+		},
+	);
 	return code;
 }
