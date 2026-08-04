@@ -41,14 +41,21 @@ export const DEFAULT_COMPACT_PCT = 80;
 // capacity, too large overruns the model and 400s mid-session.
 export const DEFAULT_LIMITS: ModelLimits = { context: 200000, trigger: 160000 };
 
+// The 1M-window model's id, encoded for the same reason FALLBACK_MODEL is in
+// const.ts: the upstream vendor's name stays out of the shipped bundle. Decodes
+// to the exact id `/v1/models` reports; kept separate from FALLBACK_MODEL (which
+// happens to be the same string today) so retargeting the fallback can't
+// silently move this window onto another model.
+const M3_ID = atob("TWluaU1heC9NaW5pTWF4LU0z");
+
 // Known gateway models. Keyed by the exact id `/v1/models` reports, which is
 // what lands in every agent config.
 //
-// MiniMax/MiniMax-M2.7 is deliberately absent: DEFAULT_LIMITS already describes
-// it correctly, and an entry that merely restates the default is one more thing
-// to keep in sync.
+// The 200K sibling of M3_ID is deliberately absent: DEFAULT_LIMITS already
+// describes it correctly, and an entry that merely restates the default is one
+// more thing to keep in sync.
 const TABLE: Record<string, ModelLimits> = {
-	"MiniMax/MiniMax-M3": { context: 1000000, trigger: 800000 },
+	[M3_ID]: { context: 1000000, trigger: 800000 },
 	"zai-org/GLM-4.7-cc": { context: 200000, trigger: 160000 },
 };
 

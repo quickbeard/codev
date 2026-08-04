@@ -50,7 +50,7 @@ Skill hub:
                          (previews and confirms before upload; --draft-only to stop
                          at DRAFT, --auto-approve for admins, --json for output)
   skill office           Download the CoDev Office offline skills bundle
-                         (minimax-docx, minimax-xlsx) for this OS and run its
+                         (DOCX and XLSX authoring) for this OS and run its
                          setup script
                          (--platform ubuntu|macos|windows to fetch for another OS
                          [implies --download-only], --dir <path> for the download

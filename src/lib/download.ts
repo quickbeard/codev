@@ -97,7 +97,12 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
 	}
 	if (res.body === null) throw new Error(`download had no body: ${url}`);
 
-	const contentLength = Number(res.headers.get("content-length"));
+	// A missing header must fall through to opts.size. `Number(null)` is 0, which
+	// is finite — reading it straight would make the fallback unreachable and
+	// report a total of `offset` (0 on a fresh download) for every chunked
+	// response.
+	const header = res.headers.get("content-length");
+	const contentLength = header === null ? Number.NaN : Number(header);
 	const total = Number.isFinite(contentLength)
 		? offset + contentLength
 		: (opts.size ?? null);

@@ -92,6 +92,30 @@ cd your-project
 codevhub init        # initialize + index the current project (one time)
 ```
 
+## CoDev Office skills (offline bundle)
+
+`codevhub skill office` installs the CoDev Office skills so your agents can produce and edit real DOCX and XLSX files. Everything ships in one offline bundle — no login and no per-skill downloads:
+
+```bash
+codevhub skill office
+```
+
+It picks the bundle for your OS, downloads it into `~/.codev-hub/office`, and runs the bundled setup script, which may prompt for `sudo` (macOS/Linux) or UAC (Windows).
+
+**The bundle is large — roughly 610 MB (Linux), 820 MB (Windows) or 1.4 GB (macOS).** The download folder is kept between runs, so an interrupted transfer resumes where it left off and an already-downloaded bundle is reused. To force a completely fresh download, delete `~/.codev-hub/office`.
+
+To fetch the bundle now and install later — or to stage it for a machine that has no internet access:
+
+```bash
+codevhub skill office --download-only                 # download for this OS, don't install
+codevhub skill office --platform windows              # download another OS's bundle (implies --download-only)
+codevhub skill office --dir /media/usb/codev-office   # download somewhere else
+```
+
+Both files land side by side, and the command prints the exact line to run from that folder (`bash codev-office-<os>-setup.sh`, or `powershell -ExecutionPolicy Bypass -File .\codev-office-windows-setup.ps1`). A bundle downloaded for another OS is never executed on this machine.
+
+Two flags are passed straight through to the setup script: `--minimal` (skip the optional extras) and `--skip-verify` (skip the bundle's own SHA-256 check).
+
 ## Switching between self-hosted and proprietary models
 
 CoDev points your agents at a self-hosted AI gateway, but you can flip any agent back to its own provider (Anthropic for Claude Code, OpenAI for Codex, and so on) — and back to the gateway again — whenever you like. Because CoDev backs up your original config before it changes anything, the round-trip is safe and repeatable.

@@ -16,6 +16,7 @@ import * as log from "@/lib/log.js";
 import { PROXY_APPLIED_ENV } from "@/lib/proxy.js";
 import * as reexec from "@/lib/reexec.js";
 import * as tls from "@/lib/tls.js";
+import { renderWithoutRawMode } from "./helpers/raw-mode.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:child_process")>();
@@ -264,14 +265,10 @@ describe("DoctorApp", () => {
 		);
 		stubHappyPath();
 
-		// ink-testing-library's stdin always reports isTTY true and takes no
-		// options; Ink recomputes isRawModeSupported every render, so flipping the
-		// flag and re-rendering reproduces that terminal. This lands before the
-		// async environment group resolves, so the network phase reads the new
-		// value.
-		const instance = render(<DoctorApp />);
-		instance.stdin.isTTY = false;
-		instance.rerender(<DoctorApp />);
+		// A terminal that can't supply keystrokes — see helpers/raw-mode.tsx for
+		// why the flag has to be false before DoctorApp mounts rather than flipped
+		// underneath it.
+		const instance = renderWithoutRawMode(<DoctorApp />);
 
 		await waitForFrame(instance.frames, "check(s) failed");
 		const output = instance.frames.join("\n");

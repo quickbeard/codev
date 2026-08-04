@@ -4,6 +4,7 @@ import * as auth from "@/lib/auth.js";
 import * as publish from "@/lib/skill-publish.js";
 import * as skillhub from "@/lib/skillhub.js";
 import { SkillPushApp } from "@/SkillPushApp.js";
+import { lastNonEmptyFrame, renderWithoutRawMode } from "./helpers/raw-mode.js";
 
 const ESC = String.fromCharCode(27);
 const stripAnsi = (s: string) =>
@@ -189,11 +190,9 @@ describe("SkillPushApp login gate", () => {
 		expect(pub).not.toHaveBeenCalled();
 	});
 
-	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts). The
-	// confirm step is the last thing between the user and an upload, so silence
-	// must never be read as consent. ink-testing-library's stdin reports isTTY
-	// true and takes no options, so the flag is flipped and the tree re-rendered
-	// — Ink recomputes `isRawModeSupported` every render.
+	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts and
+	// helpers/raw-mode.tsx). The confirm step is the last thing between the user
+	// and an upload, so silence must never be read as consent.
 	test("without raw mode: refuses rather than publishing unconfirmed", async () => {
 		const authSpy = vi
 			.spyOn(skillhub, "hasSkillhubAuth")
@@ -202,23 +201,23 @@ describe("SkillPushApp login gate", () => {
 		vi.spyOn(publish, "preparePublishArchive").mockResolvedValue(ARCHIVE);
 		const onDone = vi.fn();
 
-		const node = (
+		const instance = renderWithoutRawMode(
 			<SkillPushApp
 				path="./pg-tuner"
 				json={false}
 				draftOnly={false}
 				autoApprove={false}
 				onDone={onDone}
-			/>
+			/>,
 		);
-		const instance = render(node);
-		instance.stdin.isTTY = false;
-		instance.rerender(node);
 
-		await waitFor(() =>
-			frameText(instance.lastFrame).includes("cannot supply keystrokes"),
-		);
-		expect(frameText(instance.lastFrame)).toContain("--json");
+		// The last *non-empty* frame, not lastFrame(): the refusal is shown and the
+		// app then exits ~20ms later, and Ink writes an empty frame on unmount. A
+		// poll on lastFrame() has to sample inside that 20ms window or it sees ""
+		// for the rest of the run — which is how this test flaked under load.
+		const settled = () => stripAnsi(lastNonEmptyFrame(instance.frames));
+		await waitFor(() => settled().includes("cannot supply keystrokes"));
+		expect(settled()).toContain("--json");
 		expect(authSpy).not.toHaveBeenCalled();
 		expect(pub).not.toHaveBeenCalled();
 		await waitFor(() => onDone.mock.calls.length > 0);
