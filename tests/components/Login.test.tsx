@@ -6,6 +6,7 @@ import { Login, loginTitle } from "@/components/Login.js";
 import { Step } from "@/components/Step.js";
 import * as auth from "@/lib/auth.js";
 import { clipboard } from "@/lib/clipboard.js";
+import { renderWithoutRawMode } from "../helpers/raw-mode.js";
 
 const ESC = String.fromCharCode(27);
 const stripAnsi = (s: string) =>
@@ -496,18 +497,8 @@ describe("Login", () => {
 	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts). Ink
 	// throws from `useInput`'s mount effect there, which used to take down
 	// `codevhub doctor` — the one command that can still explain the problem.
-	// ink-testing-library's stdin reports isTTY true and takes no options, so the
-	// flag is flipped and the tree re-rendered: Ink recomputes
-	// `isRawModeSupported` on every render, so the second pass mounts the
-	// component exactly as it would in that terminal.
+	// helpers/raw-mode.tsx mounts the component as that terminal would.
 	describe("without raw mode", () => {
-		function renderNoRawMode(node: React.ReactElement) {
-			const instance = render(node);
-			instance.stdin.isTTY = false;
-			instance.rerender(node);
-			return instance;
-		}
-
 		test("still shows the sign-in URL, since the browser completes login", async () => {
 			const url = "https://sso.test/authorize?x=1";
 			vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
@@ -520,7 +511,7 @@ describe("Login", () => {
 			});
 
 			const onDone = vi.fn();
-			const { lastFrame } = renderNoRawMode(
+			const { lastFrame } = renderWithoutRawMode(
 				<Box padding={1}>
 					<Frame tag="CoDev">
 						<Step active title={loginTitle()}>
@@ -549,7 +540,7 @@ describe("Login", () => {
 			);
 
 			const onDone = vi.fn();
-			const { lastFrame } = renderNoRawMode(<Login onDone={onDone} />);
+			const { lastFrame } = renderWithoutRawMode(<Login onDone={onDone} />);
 
 			await waitFor(() =>
 				(lastFrame() ?? "").includes("Login failed: Connection refused"),

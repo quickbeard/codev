@@ -6,6 +6,7 @@ import type { SkillAgent } from "@/lib/skill-dirs.js";
 import * as install from "@/lib/skill-install.js";
 import * as skillhub from "@/lib/skillhub.js";
 import { SkillPullApp } from "@/SkillPullApp.js";
+import { lastNonEmptyFrame, renderWithoutRawMode } from "./helpers/raw-mode.js";
 
 const ESC = String.fromCharCode(27);
 const DOWN = `${ESC}[B`;
@@ -261,29 +262,30 @@ describe("SkillPullApp", () => {
 		});
 	});
 
-	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts). The
-	// dispatcher normally routes those to the plain runner, so this covers the
-	// case where Ink's stdin isn't the process's own. Unlike an ungated useInput
-	// (which throws), an unanswerable picker would just hang forever.
-	// ink-testing-library's stdin reports isTTY true and takes no options, so the
-	// flag is flipped and the tree re-rendered — Ink recomputes
-	// `isRawModeSupported` every render.
+	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts and
+	// helpers/raw-mode.tsx). The dispatcher normally routes those to the plain
+	// runner, so this covers the case where Ink's stdin isn't the process's own.
+	// Unlike an ungated useInput (which throws), an unanswerable picker would
+	// just hang forever.
 	test("without raw mode: explains the missing keyboard instead of prompting", async () => {
 		mockResolve();
 		const spy = vi.spyOn(install, "installResolvedSkill");
 		const onDone = vi.fn();
-		const node = (
-			<SkillPullApp target={ID} force={false} json={false} onDone={onDone} />
+
+		const instance = renderWithoutRawMode(
+			<SkillPullApp target={ID} force={false} json={false} onDone={onDone} />,
 		);
 
-		const instance = render(node);
-		instance.stdin.isTTY = false;
-		instance.rerender(node);
-
-		await waitFor(() =>
-			frameText(instance.lastFrame).includes("cannot supply keystrokes"),
-		);
-		const frame = frameText(instance.lastFrame);
+		// The last *non-empty* frame, not lastFrame(): the message is shown and the
+		// app then exits ~20ms later, and Ink writes an empty frame on unmount. A
+		// poll on lastFrame() has to sample inside that 20ms window or it sees ""
+		// for the rest of the run — which is how this test flaked under load. The
+		// whole history would be wrong here: the picker does render for one frame
+		// before the effect replaces it, so `not.toContain("❯ ")` is an assertion
+		// about what the user is left looking at.
+		const settled = () => stripAnsi(lastNonEmptyFrame(instance.frames));
+		await waitFor(() => settled().includes("cannot supply keystrokes"));
+		const frame = settled();
 		expect(frame).toContain("--here, --global, or --dir");
 		// Never falls back to a location the user didn't choose.
 		expect(frame).not.toContain("❯ ");
