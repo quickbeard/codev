@@ -55,6 +55,8 @@ Skill hub:
                          (--platform ubuntu|macos|windows to fetch for another OS
                          [implies --download-only], --dir <path> for the download
                          folder, --download-only to skip running the installer,
-                         --minimal / --skip-verify passed through to the installer)
+                         --minimal / --skip-verify / --force-skills passed
+                         through to the installer; --force-skills replaces
+                         already-installed skills with the bundled versions)
 `);
 }

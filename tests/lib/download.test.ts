@@ -65,9 +65,17 @@ beforeEach(async () => {
 			res.writeHead(404).end();
 			return;
 		}
+		// MinIO-style conditional semantics: a per-body ETag, 304 on a matching
+		// If-None-Match, and Range honored only when If-Range (if sent) matches.
+		const etag = `"${sha256(body).slice(0, 16)}"`;
 		const range = req.headers.range;
 		rangeLog.push(range);
-		if (range && !ignoreRange) {
+		if (req.headers["if-none-match"] === etag) {
+			res.writeHead(304, { ETag: etag }).end();
+			return;
+		}
+		const ifRange = req.headers["if-range"];
+		if (range && !ignoreRange && (ifRange === undefined || ifRange === etag)) {
 			const start = Number(/^bytes=(\d+)-$/.exec(range)?.[1]);
 			if (!Number.isFinite(start) || start >= body.length) {
 				res.writeHead(416).end();
@@ -77,16 +85,17 @@ beforeEach(async () => {
 			res.writeHead(206, {
 				"Content-Length": String(rest.length),
 				"Content-Range": `bytes ${start}-${body.length - 1}/${body.length}`,
+				ETag: etag,
 			});
 			res.end(rest);
 			return;
 		}
 		if (omitContentLength) {
-			res.writeHead(200);
+			res.writeHead(200, { ETag: etag });
 			res.end(body);
 			return;
 		}
-		res.writeHead(200, { "Content-Length": String(body.length) });
+		res.writeHead(200, { "Content-Length": String(body.length), ETag: etag });
 		res.end(body);
 	});
 	await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -226,6 +235,45 @@ describe("downloadFile", () => {
 				endpoint: "test.download",
 			}),
 		).rejects.toThrow(/download failed \(404\)/);
+	});
+});
+
+describe("downloadFile ETag revalidation", () => {
+	test("a finished file is kept when the server answers 304", async () => {
+		const dest = join(tempDir, "payload.bin");
+		await downloadFile({ url: `${baseUrl}/payload.bin`, dest, endpoint: "t" });
+		const before = rangeLog.length;
+		await downloadFile({ url: `${baseUrl}/payload.bin`, dest, endpoint: "t" });
+		expect(readFileSync(dest).equals(PAYLOAD)).toBe(true);
+		// Exactly one request: the conditional probe, no re-download.
+		expect(rangeLog.length).toBe(before + 1);
+	});
+
+	test("a republished object is re-downloaded (ETag mismatch)", async () => {
+		const dest = join(tempDir, "payload.bin");
+		await downloadFile({ url: `${baseUrl}/payload.bin`, dest, endpoint: "t" });
+		const NEW = Buffer.from("republished-bytes");
+		objects.set("/payload.bin", NEW);
+		await downloadFile({ url: `${baseUrl}/payload.bin`, dest, endpoint: "t" });
+		expect(readFileSync(dest).equals(NEW)).toBe(true);
+	});
+
+	test("a file with no ETag on record is trusted without any request", async () => {
+		const dest = join(tempDir, "payload.bin");
+		writeFileSync(dest, "manually-placed");
+		await downloadFile({ url: `${baseUrl}/payload.bin`, dest, endpoint: "t" });
+		expect(readFileSync(dest, "utf8")).toBe("manually-placed");
+		expect(rangeLog).toEqual([]);
+	});
+
+	test("a resume across a republish restarts instead of splicing (If-Range)", async () => {
+		const dest = join(tempDir, "payload.bin");
+		// A partial and ETag from an older publish of the object.
+		writeFileSync(`${dest}.partial`, Buffer.from("stale-old-bytes"));
+		writeFileSync(`${dest}.etag`, '"stale-etag"');
+		await downloadFile({ url: `${baseUrl}/payload.bin`, dest, endpoint: "t" });
+		// If-Range mismatched → server sent 200 → clean restart, correct bytes.
+		expect(readFileSync(dest).equals(PAYLOAD)).toBe(true);
 	});
 });
 
@@ -393,23 +441,38 @@ describe("runSkillOffice", () => {
 });
 
 describe("installerArgs", () => {
-	const base = { downloadOnly: false, minimal: true, skipVerify: true };
+	const base = {
+		downloadOnly: false,
+		minimal: true,
+		skipVerify: true,
+		forceSkills: true,
+	};
 
 	test("bash platforms get GNU-style flags", () => {
 		expect(installerArgs(base, "ubuntu")).toEqual([
 			"--minimal",
 			"--skip-verify",
+			"--force-skills",
 		]);
 	});
 
 	test("windows gets PowerShell switches", () => {
-		expect(installerArgs(base, "windows")).toEqual(["-Minimal", "-SkipVerify"]);
+		expect(installerArgs(base, "windows")).toEqual([
+			"-Minimal",
+			"-SkipVerify",
+			"-ForceSkills",
+		]);
 	});
 
 	test("no flags when none requested", () => {
 		expect(
 			installerArgs(
-				{ downloadOnly: false, minimal: false, skipVerify: false },
+				{
+					downloadOnly: false,
+					minimal: false,
+					skipVerify: false,
+					forceSkills: false,
+				},
 				"windows",
 			),
 		).toEqual([]);

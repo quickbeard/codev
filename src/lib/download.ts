@@ -4,9 +4,11 @@ import {
 	createWriteStream,
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	renameSync,
 	rmSync,
 	statSync,
+	writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
 import { Readable, Transform } from "node:stream";
@@ -18,6 +20,13 @@ import { loggedFetch } from "@/lib/log.js";
 // memory, which is fine at 5-100MB and hopeless at 1.1GB — this helper pipes
 // the body straight to disk, hashes it as it flows, and resumes interrupted
 // transfers from a `.partial` file via HTTP Range.
+//
+// Staleness without a manifest: the server's ETag is persisted next to the
+// file (`${dest}.etag`). A finished file is revalidated with If-None-Match
+// (304 = still the published object, anything else = republished, re-download)
+// and a resume is guarded with If-Range so stale partial bytes are never
+// spliced onto a republished object. The truth lives on the object itself, so
+// nothing on the publish side can drift.
 
 export interface DownloadProgress {
 	received: number;
@@ -50,15 +59,53 @@ async function fileSha256(path: string): Promise<string> {
 	return hash.digest("hex");
 }
 
+function readEtag(etagFile: string): string | null {
+	try {
+		const etag = readFileSync(etagFile, "utf8").trim();
+		return etag.length > 0 ? etag : null;
+	} catch {
+		return null;
+	}
+}
+
 export async function downloadFile(opts: DownloadOptions): Promise<void> {
 	const { url, dest, endpoint, onProgress, signal } = opts;
 	const partial = `${dest}.partial`;
+	const etagFile = `${dest}.etag`;
 
-	// A finished file that already verifies makes the whole call a no-op, so
-	// re-running after a crash between files never re-downloads.
+	// A finished file short-circuits the download. With an expected sha256 it
+	// must verify. Without one, a stored ETag lets us ask the server whether
+	// the published object changed; no ETag on record (a manually copied file,
+	// or a pre-ETag download) means the local file is trusted as-is.
 	if (existsSync(dest)) {
-		if (!opts.sha256 || (await fileSha256(dest)) === opts.sha256) return;
-		rmSync(dest);
+		if (opts.sha256) {
+			if ((await fileSha256(dest)) === opts.sha256) return;
+			rmSync(dest);
+		} else {
+			const etag = readEtag(etagFile);
+			if (!etag) return;
+			let probe: Response;
+			try {
+				probe = await loggedFetch(endpoint, url, {
+					headers: { "If-None-Match": etag },
+					signal,
+				});
+			} catch {
+				return; // server unreachable — keep what we have
+			}
+			if (probe.status === 304 || !probe.ok) {
+				// Still the published object (304), or a server hiccup — either
+				// way the local file is the best copy available.
+				await probe.body?.cancel();
+				return;
+			}
+			// Republished: drop the response (the fresh download below streams
+			// its own) and every local trace of the old object.
+			await probe.body?.cancel();
+			rmSync(dest, { force: true });
+			rmSync(partial, { force: true });
+			rmSync(etagFile, { force: true });
+		}
 	}
 
 	mkdirSync(dirname(dest), { recursive: true });
@@ -75,8 +122,17 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
 		});
 	}
 
+	// If-Range makes a resume safe across republishes: when the entity no
+	// longer matches the partial's ETag, the server ignores Range and answers
+	// 200, and the start-over branch below discards the stale partial bytes.
+	const headers: Record<string, string> = {};
+	if (offset > 0) {
+		headers.Range = `bytes=${offset}-`;
+		const etag = readEtag(etagFile);
+		if (etag) headers["If-Range"] = etag;
+	}
 	const res = await loggedFetch(endpoint, url, {
-		headers: offset > 0 ? { Range: `bytes=${offset}-` } : undefined,
+		headers: offset > 0 ? headers : undefined,
 		signal,
 	});
 
@@ -96,6 +152,13 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
 		throw new Error(`download failed (${res.status}): ${url}`);
 	}
 	if (res.body === null) throw new Error(`download had no body: ${url}`);
+
+	// Persist the entity tag of what we are about to write — before streaming,
+	// so an interrupted transfer leaves a partial+ETag pair the next resume can
+	// validate with If-Range. A server that sends no ETag clears the record.
+	const resEtag = res.headers.get("etag");
+	if (resEtag) writeFileSync(etagFile, resEtag);
+	else rmSync(etagFile, { force: true });
 
 	// A missing header must fall through to opts.size. `Number(null)` is 0, which
 	// is finite — reading it straight would make the fallback unreachable and
