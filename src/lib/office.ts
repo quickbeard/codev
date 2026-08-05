@@ -217,21 +217,17 @@ export function officeManualWindowsCommand(
 	return `powershell -ExecutionPolicy Bypass -File .\\${script}${argStr}`;
 }
 
-// Paths baked into the printed command so a UAC elevation with a DIFFERENT
-// admin account cannot strand the install on the admin's profile: the JS
-// module tree goes to the shared, account-independent %PUBLIC% dir, and the
-// skills root is pinned to the REAL user's profile — codevhub runs
-// unelevated as that user, so homedir() is authoritative here.
-// Cross-platform staging (--platform windows from another OS) cannot know
-// the target machine's user, so only the modules dir is baked there.
+// The one path baked into the printed command: the skills root, pinned to
+// the REAL user's profile so a UAC elevation with a DIFFERENT admin account
+// cannot strand the skills on the admin's profile — codevhub runs unelevated
+// as that user, so homedir() is authoritative here. (The JS module tree
+// needs no baking: the setup script's default is already the shared
+// %PUBLIC% dir.) Cross-platform staging (--platform windows from another OS)
+// cannot know the target machine's user, so nothing is baked there.
 // Exported for tests.
 export function officeBakedPathArgs(hostIsWindows: boolean): string[] {
-	const publicDir = process.env.PUBLIC ?? "C:\\Users\\Public";
-	const args = ["-ModulesDir", `${publicDir}\\codev-office\\node_modules`];
-	if (hostIsWindows) {
-		args.push("-SkillsRoot", `${homedir()}\\.config\\codev\\skills`);
-	}
-	return args;
+	if (!hostIsWindows) return [];
+	return ["-SkillsRoot", `${homedir()}\\.config\\codev\\skills`];
 }
 
 // One-time migration: move files staged under the old per-user dot-folder

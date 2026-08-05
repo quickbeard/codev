@@ -429,15 +429,11 @@ describe("runSkillOffice", () => {
 	test("the manual command carries flags and baked paths, quoted", () => {
 		const line = officeManualWindowsCommand("codev-office-windows-setup.ps1", [
 			"-SkipVerify",
-			...officeBakedPathArgs(false),
 			"-SkillsRoot",
 			"C:\\Users\\Van Phong\\.config\\codev\\skills",
 		]);
 		expect(line).toContain(
 			"powershell -ExecutionPolicy Bypass -File .\\codev-office-windows-setup.ps1 -SkipVerify",
-		);
-		expect(line).toContain(
-			"-ModulesDir C:\\Users\\Public\\codev-office\\node_modules",
 		);
 		// Space-containing paths are quoted so copy-paste survives them.
 		expect(line).toContain(
@@ -446,17 +442,12 @@ describe("runSkillOffice", () => {
 	});
 
 	test("baked args pin the real user's skills root on a Windows host", () => {
-		expect(officeBakedPathArgs(false)).toEqual([
-			"-ModulesDir",
-			"C:\\Users\\Public\\codev-office\\node_modules",
-		]);
+		// The modules dir is the setup script's own default now — nothing to
+		// bake; cross-platform staging bakes nothing at all.
+		expect(officeBakedPathArgs(false)).toEqual([]);
 		const onWindows = officeBakedPathArgs(true);
-		expect(onWindows.slice(0, 2)).toEqual([
-			"-ModulesDir",
-			"C:\\Users\\Public\\codev-office\\node_modules",
-		]);
-		expect(onWindows[2]).toBe("-SkillsRoot");
-		expect(onWindows[3]).toContain(".config");
+		expect(onWindows[0]).toBe("-SkillsRoot");
+		expect(onWindows[1]).toContain(".config");
 	});
 
 	test("ensureStagingDir falls back when the preferred dir is unwritable", () => {
