@@ -18,8 +18,8 @@ import {
 	ensureStagingDir,
 	installerArgs,
 	migrateLegacyOfficeDir,
+	officeBakedPathArgs,
 	officeManualWindowsCommand,
-	officeWrapperBakedArgs,
 	runSkillOffice,
 	uninstallerArgs,
 } from "@/lib/office.js";
@@ -398,10 +398,10 @@ describe("runSkillOffice", () => {
 		expect(existsSync(join(dir, "codev-office-windows.zip"))).toBe(true);
 	});
 
-	test("windows staging stages files only - no wrapper, no spawn", async () => {
-		// Endpoint protection kills installers codevhub launches AND quarantines
-		// the .ps1 a staged .cmd launches - the windows flow must only download
-		// and print the manual elevated-PowerShell command.
+	test("windows staging stages files only and never spawns", async () => {
+		// Endpoint protection kills or quarantines anything codevhub launches -
+		// the windows flow must only download and print the manual
+		// elevated-PowerShell command.
 		objects.set("/codev-office-windows.zip", BUNDLE);
 		objects.set("/codev-office-windows-setup.ps1", SCRIPT);
 		const dir = join(tempDir, "office");
@@ -424,13 +424,12 @@ describe("runSkillOffice", () => {
 		expect(code).toBe(0);
 		expect(spawns).toEqual([]);
 		expect(existsSync(join(dir, "codev-office-windows.zip"))).toBe(true);
-		expect(existsSync(join(dir, "Install-CoDev-Office.cmd"))).toBe(false);
 	});
 
 	test("the manual command carries flags and baked paths, quoted", () => {
 		const line = officeManualWindowsCommand("codev-office-windows-setup.ps1", [
 			"-SkipVerify",
-			...officeWrapperBakedArgs(false),
+			...officeBakedPathArgs(false),
 			"-SkillsRoot",
 			"C:\\Users\\Van Phong\\.config\\codev\\skills",
 		]);
@@ -447,11 +446,11 @@ describe("runSkillOffice", () => {
 	});
 
 	test("baked args pin the real user's skills root on a Windows host", () => {
-		expect(officeWrapperBakedArgs(false)).toEqual([
+		expect(officeBakedPathArgs(false)).toEqual([
 			"-ModulesDir",
 			"C:\\Users\\Public\\codev-office\\node_modules",
 		]);
-		const onWindows = officeWrapperBakedArgs(true);
+		const onWindows = officeBakedPathArgs(true);
 		expect(onWindows.slice(0, 2)).toEqual([
 			"-ModulesDir",
 			"C:\\Users\\Public\\codev-office\\node_modules",
@@ -548,7 +547,6 @@ describe("runSkillOffice", () => {
 		);
 		expect(code).toBe(0);
 		expect(spawned).toBeNull();
-		expect(existsSync(join(dir, "Install-CoDev-Office.cmd"))).toBe(false);
 	});
 
 	test("exits 1 on an OS with no bundle and downloads nothing", async () => {

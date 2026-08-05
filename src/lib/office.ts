@@ -205,11 +205,10 @@ function manualRunCommand(platform: OfficePlatform, script: string): string {
 }
 
 // The exact command the user types in an ELEVATED PowerShell — after field
-// testing every alternative (spawning from codevhub, a self-elevating .cmd),
-// this is the only launch mode the endpoint protection tolerates: it kills
-// installers codevhub launches and quarantines the .ps1 a .cmd launches,
-// while the same command typed interactively runs to "Verification passed".
-// Exported for tests.
+// testing every alternative launcher, this is the only launch mode the
+// endpoint protection tolerates: anything codevhub starts (directly or via a
+// staged launcher) gets killed or quarantined, while the same command typed
+// interactively runs to "Verification passed". Exported for tests.
 export function officeManualWindowsCommand(
 	script: string,
 	args: string[],
@@ -226,7 +225,7 @@ export function officeManualWindowsCommand(
 // Cross-platform staging (--platform windows from another OS) cannot know
 // the target machine's user, so only the modules dir is baked there.
 // Exported for tests.
-export function officeWrapperBakedArgs(hostIsWindows: boolean): string[] {
+export function officeBakedPathArgs(hostIsWindows: boolean): string[] {
 	const publicDir = process.env.PUBLIC ?? "C:\\Users\\Public";
 	const args = ["-ModulesDir", `${publicDir}\\codev-office\\node_modules`];
 	if (hostIsWindows) {
@@ -434,19 +433,18 @@ export async function runSkillOffice(
 		? uninstallerArgs(parsed, platform)
 		: installerArgs(parsed, platform);
 
-	// Windows: never run (or wrap) the installer from codevhub. Endpoint
-	// protection (Kaspersky Endpoint Security in the field) kills a powershell
-	// child of node.exe mid-install AND quarantines the .ps1 when a staged
-	// .cmd launches it — the only launch it tolerates is the user typing the
-	// command in an elevated PowerShell themselves, which is field-proven to
-	// run to "Verification passed". Print that exact command, with the
-	// profile-safe paths baked in so an elevation under a different admin
-	// account still installs to the real user's profile.
+	// Windows: never launch the installer from codevhub. Endpoint protection
+	// (Kaspersky Endpoint Security in the field) kills or quarantines any
+	// launch codevhub initiates — the only mode it tolerates is the user
+	// typing the command in an elevated PowerShell themselves, which is
+	// field-proven to run to "Verification passed". Print that exact command,
+	// with the profile-safe paths baked in so an elevation under a different
+	// admin account still installs to the real user's profile.
 	if (platform === "windows") {
 		const verb = parsed.uninstall ? "uninstaller" : "installer";
 		const commandLine = officeManualWindowsCommand(script, [
 			...scriptArgs,
-			...officeWrapperBakedArgs(hostPlatform === "windows"),
+			...officeBakedPathArgs(hostPlatform === "windows"),
 		]);
 		console.error(`\nFiles are in ${dir}.`);
 		console.error(
@@ -482,7 +480,7 @@ export async function runSkillOffice(
 	console.error(
 		`\nRunning the ${parsed.uninstall ? "uninstaller" : "installer"} (${script})...\n`,
 	);
-	// Windows returned above with the right-click wrapper — only the bash
+	// Windows returned above with the printed manual command — only the bash
 	// platforms reach the spawn.
 	const command = "bash";
 	const args = [join(dir, script), ...scriptArgs];
