@@ -54,6 +54,9 @@ let ignoreRange = false;
 // When true the server sends no Content-Length (chunked), as a proxy or a
 // streaming origin may.
 let omitContentLength = false;
+// Simulate a middlebox that honors Range but ignores If-Range semantics —
+// answering 206 (with the current entity's ETag) even when If-Range mismatches.
+let brokenIfRange = false;
 // Extra objects (path -> body) the server should serve.
 let objects: Map<string, Buffer>;
 
@@ -62,6 +65,7 @@ beforeEach(async () => {
 	rangeLog = [];
 	ignoreRange = false;
 	omitContentLength = false;
+	brokenIfRange = false;
 	objects = new Map([["/payload.bin", PAYLOAD]]);
 	server = createServer((req, res) => {
 		const body = objects.get(req.url ?? "");
@@ -79,7 +83,11 @@ beforeEach(async () => {
 			return;
 		}
 		const ifRange = req.headers["if-range"];
-		if (range && !ignoreRange && (ifRange === undefined || ifRange === etag)) {
+		if (
+			range &&
+			!ignoreRange &&
+			(brokenIfRange || ifRange === undefined || ifRange === etag)
+		) {
 			const start = Number(/^bytes=(\d+)-$/.exec(range)?.[1]);
 			if (!Number.isFinite(start) || start >= body.length) {
 				res.writeHead(416).end();
@@ -278,6 +286,35 @@ describe("downloadFile ETag revalidation", () => {
 		await downloadFile({ url: `${baseUrl}/payload.bin`, dest, endpoint: "t" });
 		// If-Range mismatched → server sent 200 → clean restart, correct bytes.
 		expect(readFileSync(dest).equals(PAYLOAD)).toBe(true);
+	});
+
+	test("refuses a bare-Range resume of an ETag-less partial without a sha256", async () => {
+		const dest = join(tempDir, "payload.bin");
+		// A partial with no `.etag` on record (pre-ETag download, or a cleared
+		// record). Without an expected sha256 nothing downstream would catch a
+		// splice, so the partial must be scrapped, not resumed.
+		writeFileSync(`${dest}.partial`, Buffer.from("stale-old-bytes"));
+		await downloadFile({ url: `${baseUrl}/payload.bin`, dest, endpoint: "t" });
+		// No Range header ever reached the server — a clean full download.
+		expect(rangeLog).toEqual([undefined]);
+		expect(readFileSync(dest).equals(PAYLOAD)).toBe(true);
+		expect(existsSync(`${dest}.partial`)).toBe(false);
+	});
+
+	test("scraps the partial when a broken hop answers 206 across a republish", async () => {
+		// A middlebox that honors Range while ignoring If-Range: it answers 206
+		// for a republished entity, which used to splice the halves together
+		// ("bad zipfile offset" on real bundle downloads).
+		brokenIfRange = true;
+		const dest = join(tempDir, "payload.bin");
+		writeFileSync(`${dest}.partial`, Buffer.from("stale-old-bytes"));
+		writeFileSync(`${dest}.etag`, '"stale-etag"');
+		await downloadFile({ url: `${baseUrl}/payload.bin`, dest, endpoint: "t" });
+		// The lying 206 carried the new object's ETag → partial scrapped, then
+		// a clean full refetch (no Range on the second request).
+		expect(rangeLog).toEqual(["bytes=15-", undefined]);
+		expect(readFileSync(dest).equals(PAYLOAD)).toBe(true);
+		expect(existsSync(`${dest}.partial`)).toBe(false);
 	});
 });
 
