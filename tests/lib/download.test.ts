@@ -18,7 +18,6 @@ import {
 	ensureStagingDir,
 	installerArgs,
 	migrateLegacyOfficeDir,
-	officeBakedPathArgs,
 	officeManualWindowsCommand,
 	runSkillOffice,
 	uninstallerArgs,
@@ -439,15 +438,6 @@ describe("runSkillOffice", () => {
 		expect(line).toContain(
 			'-SkillsRoot "C:\\Users\\Van Phong\\.config\\codev\\skills"',
 		);
-	});
-
-	test("baked args pin the real user's skills root on a Windows host", () => {
-		// The modules dir is the setup script's own default now — nothing to
-		// bake; cross-platform staging bakes nothing at all.
-		expect(officeBakedPathArgs(false)).toEqual([]);
-		const onWindows = officeBakedPathArgs(true);
-		expect(onWindows[0]).toBe("-SkillsRoot");
-		expect(onWindows[1]).toContain(".config");
 	});
 
 	test("ensureStagingDir falls back when the preferred dir is unwritable", () => {

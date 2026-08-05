@@ -7,7 +7,6 @@ import {
 	renameSync,
 	rmSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { OFFICE_DOWNLOADS_URL } from "@/lib/const.js";
 import { downloadFile } from "@/lib/download.js";
@@ -215,19 +214,6 @@ export function officeManualWindowsCommand(
 ): string {
 	const argStr = args.map((a) => ` ${/\s/.test(a) ? `"${a}"` : a}`).join("");
 	return `powershell -ExecutionPolicy Bypass -File .\\${script}${argStr}`;
-}
-
-// The one path baked into the printed command: the skills root, pinned to
-// the REAL user's profile so a UAC elevation with a DIFFERENT admin account
-// cannot strand the skills on the admin's profile — codevhub runs unelevated
-// as that user, so homedir() is authoritative here. (The JS module tree
-// needs no baking: the setup script's default is already the shared
-// %PUBLIC% dir.) Cross-platform staging (--platform windows from another OS)
-// cannot know the target machine's user, so nothing is baked there.
-// Exported for tests.
-export function officeBakedPathArgs(hostIsWindows: boolean): string[] {
-	if (!hostIsWindows) return [];
-	return ["-SkillsRoot", `${homedir()}\\.config\\codev\\skills`];
 }
 
 // One-time migration: move files staged under the old per-user dot-folder
@@ -438,10 +424,7 @@ export async function runSkillOffice(
 	// admin account still installs to the real user's profile.
 	if (platform === "windows") {
 		const verb = parsed.uninstall ? "uninstaller" : "installer";
-		const commandLine = officeManualWindowsCommand(script, [
-			...scriptArgs,
-			...officeBakedPathArgs(hostPlatform === "windows"),
-		]);
+		const commandLine = officeManualWindowsCommand(script, scriptArgs);
 		console.error(`\nFiles are in ${dir}.`);
 		console.error(
 			`codevhub does not auto-run the Windows ${verb}: endpoint protection ` +
