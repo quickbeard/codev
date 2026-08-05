@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -14,7 +15,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { downloadFile } from "@/lib/download.js";
 import {
+	ensureStagingDir,
 	installerArgs,
+	migrateLegacyOfficeDir,
+	officeWrapperBakedArgs,
 	officeWrapperContent,
 	officeWrapperName,
 	runSkillOffice,
@@ -433,6 +437,73 @@ describe("runSkillOffice", () => {
 		expect(wrapper).toContain("Start-Process -FilePath '%~f0' -Verb RunAs");
 		expect(wrapper).toContain(":run");
 		expect(wrapper).toContain("Continuing without administrator rights");
+		// Profile-safe path baking: the shared modules dir always, but no
+		// -SkillsRoot on cross-platform staging - this host's homedir says
+		// nothing about the target machine's user.
+		expect(wrapper).toContain(
+			"-ModulesDir C:\\Users\\Public\\codev-office\\node_modules",
+		);
+		expect(wrapper).not.toContain("-SkillsRoot");
+	});
+
+	test("baked args pin the real user's skills root on a Windows host", () => {
+		expect(officeWrapperBakedArgs(false)).toEqual([
+			"-ModulesDir",
+			"C:\\Users\\Public\\codev-office\\node_modules",
+		]);
+		const onWindows = officeWrapperBakedArgs(true);
+		expect(onWindows.slice(0, 2)).toEqual([
+			"-ModulesDir",
+			"C:\\Users\\Public\\codev-office\\node_modules",
+		]);
+		expect(onWindows[2]).toBe("-SkillsRoot");
+		expect(onWindows[3]).toContain(".config");
+	});
+
+	test("wrapper quotes arguments containing spaces", () => {
+		const content = officeWrapperContent("s.ps1", [
+			"-SkillsRoot",
+			"C:\\Users\\Van Phong\\.config\\codev\\skills",
+		]);
+		expect(content).toContain(
+			'-SkillsRoot "C:\\Users\\Van Phong\\.config\\codev\\skills"',
+		);
+	});
+
+	test("ensureStagingDir falls back when the preferred dir is unwritable", () => {
+		const locked = join(tempDir, "locked");
+		mkdirSync(locked, { recursive: true });
+		chmodSync(locked, 0o555);
+		const preferred = join(locked, "codev-office");
+		const fallback = join(tempDir, "fallback-office");
+		try {
+			const dir = ensureStagingDir(preferred, fallback);
+			expect(dir).toBe(fallback);
+			expect(existsSync(fallback)).toBe(true);
+		} finally {
+			chmodSync(locked, 0o755);
+		}
+		// Writable preferred dir wins; no fallback means errors propagate.
+		const fine = join(tempDir, "fine");
+		expect(ensureStagingDir(fine, fallback)).toBe(fine);
+		expect(() => ensureStagingDir(preferred, null)).not.toThrow(); // now writable again
+	});
+
+	test("migrateLegacyOfficeDir moves files without clobbering", () => {
+		const from = join(tempDir, "legacy-office");
+		const to = join(tempDir, "public-office");
+		mkdirSync(from, { recursive: true });
+		mkdirSync(to, { recursive: true });
+		writeFileSync(join(from, "bundle.zip"), "old-bundle");
+		writeFileSync(join(from, "kept.txt"), "from-legacy");
+		writeFileSync(join(to, "kept.txt"), "already-new");
+		migrateLegacyOfficeDir(from, to);
+		// Moved when absent at the destination, left alone when present.
+		expect(readFileSync(join(to, "bundle.zip"), "utf8")).toBe("old-bundle");
+		expect(readFileSync(join(to, "kept.txt"), "utf8")).toBe("already-new");
+		expect(existsSync(join(from, "bundle.zip"))).toBe(false);
+		// A missing source dir is a no-op, not an error.
+		migrateLegacyOfficeDir(join(tempDir, "nope"), to);
 	});
 
 	test("wrapper name and content cover the uninstall flow", () => {

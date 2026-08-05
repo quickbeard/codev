@@ -1,10 +1,19 @@
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { OFFICE_DOWNLOADS_URL } from "@/lib/const.js";
 import { downloadFile } from "@/lib/download.js";
 import { logInfo } from "@/lib/log.js";
-import { officeDownloadsDir } from "@/lib/paths.js";
+import { legacyOfficeDownloadsDir, officeDownloadsDir } from "@/lib/paths.js";
 
 // `codevhub skill office`: fetch the CoDev Office offline bundle (published by
 // the codev-storage MinIO backend) for this OS and run the bundled setup
@@ -207,6 +216,61 @@ export function officeWrapperName(uninstall: boolean): string {
 	return uninstall ? "Uninstall-CoDev-Office.cmd" : "Install-CoDev-Office.cmd";
 }
 
+// Paths baked into the wrapper so a UAC elevation with a DIFFERENT admin
+// account cannot strand the install on the admin's profile: the JS module
+// tree goes to the shared, account-independent %PUBLIC% dir, and the skills
+// root is pinned to the REAL user's profile — codevhub runs unelevated as
+// that user, so homedir() is authoritative here. Cross-platform staging
+// (--platform windows from another OS) cannot know the target machine's
+// user, so only the modules dir is baked there. Exported for tests.
+export function officeWrapperBakedArgs(hostIsWindows: boolean): string[] {
+	const publicDir = process.env.PUBLIC ?? "C:\\Users\\Public";
+	const args = ["-ModulesDir", `${publicDir}\\codev-office\\node_modules`];
+	if (hostIsWindows) {
+		args.push("-SkillsRoot", `${homedir()}\\.config\\codev\\skills`);
+	}
+	return args;
+}
+
+// One-time migration: move files staged under the old per-user dot-folder
+// into the new Public dir, so multi-GB bundles are not re-downloaded just
+// because the staging folder moved. Same-volume renames; anything locked or
+// cross-volume is left behind (the downloader treats it as absent and
+// re-fetches). Exported for tests.
+// Create the staging dir, falling back when the preferred location is not
+// writable (e.g. hardened ACLs on C:\Users\Public). Returns the dir that
+// actually exists. Exported for tests.
+export function ensureStagingDir(
+	preferred: string,
+	fallback: string | null,
+): string {
+	try {
+		mkdirSync(preferred, { recursive: true });
+		return preferred;
+	} catch (err) {
+		if (!fallback || fallback === preferred) throw err;
+		console.error(
+			`Could not create ${preferred} (${err instanceof Error ? err.message : String(err)}) - using ${fallback} instead`,
+		);
+		mkdirSync(fallback, { recursive: true });
+		return fallback;
+	}
+}
+
+export function migrateLegacyOfficeDir(fromDir: string, toDir: string): void {
+	if (fromDir === toDir || !existsSync(fromDir)) return;
+	mkdirSync(toDir, { recursive: true });
+	for (const name of readdirSync(fromDir)) {
+		const to = join(toDir, name);
+		if (existsSync(to)) continue;
+		try {
+			renameSync(join(fromDir, name), to);
+		} catch {
+			// Locked or cross-volume — leave it; the download layer copes.
+		}
+	}
+}
+
 export function officeWrapperContent(script: string, args: string[]): string {
 	// Self-elevating so a plain DOUBLE-CLICK is enough (some environments strip
 	// "Run as administrator" from the context menu): when not elevated, the
@@ -218,7 +282,7 @@ export function officeWrapperContent(script: string, args: string[]): string {
 	// %~dp0 = the .cmd's own folder (an elevated relaunch starts in System32);
 	// `pause` keeps the window open so the closing "Verification passed" (or a
 	// [FAIL] line) stays readable.
-	const argStr = args.map((a) => ` ${a}`).join("");
+	const argStr = args.map((a) => ` ${/\s/.test(a) ? `"${a}"` : a}`).join("");
 	return [
 		"@echo off",
 		'cd /d "%~dp0"',
@@ -320,8 +384,21 @@ export async function runSkillOffice(
 		downloadOnly = true;
 	}
 
-	const dir = parsed.dir ?? officeDownloadsDir();
-	mkdirSync(dir, { recursive: true });
+	// Windows staging prefers the profile-independent %PUBLIC% folder, but a
+	// hardened image can deny non-admin writes under C:\Users\Public — fall
+	// back to the old per-user folder rather than crashing.
+	const dir = ensureStagingDir(
+		parsed.dir ?? officeDownloadsDir(),
+		parsed.dir === undefined && hostPlatform === "windows"
+			? legacyOfficeDownloadsDir()
+			: null,
+	);
+	// Windows moved its default staging from ~/.codev-hub/office to the
+	// profile-independent %PUBLIC%\Downloads\codev-office — pull already
+	// downloaded files across so nothing multi-GB is fetched twice.
+	if (hostPlatform === "windows" && parsed.dir === undefined) {
+		migrateLegacyOfficeDir(legacyOfficeDownloadsDir(), dir);
+	}
 
 	const bundle = officeBundleName(platform);
 	const script = parsed.uninstall
@@ -387,7 +464,13 @@ export async function runSkillOffice(
 	// Windows: stage a right-click wrapper and stop — see officeWrapperName.
 	if (platform === "windows") {
 		const wrapper = officeWrapperName(parsed.uninstall);
-		writeFileSync(join(dir, wrapper), officeWrapperContent(script, scriptArgs));
+		writeFileSync(
+			join(dir, wrapper),
+			officeWrapperContent(script, [
+				...scriptArgs,
+				...officeWrapperBakedArgs(hostPlatform === "windows"),
+			]),
+		);
 		const verb = parsed.uninstall ? "uninstaller" : "installer";
 		console.error(`\nFiles are in ${dir}.`);
 		console.error(
