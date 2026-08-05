@@ -115,11 +115,20 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
 	let hash = createHash("sha256");
 	let offset = 0;
 	if (existsSync(partial)) {
-		offset = statSync(partial).size;
-		const h = hash;
-		await pipeline(createReadStream(partial), async (chunks) => {
-			for await (const chunk of chunks) h.update(chunk as Buffer);
-		});
+		// Without an expected sha256 there is nothing downstream to catch a bad
+		// splice, so a resume is only trustworthy when the partial's ETag is on
+		// record to send as If-Range. A bare Range answered with 206 would
+		// append the republished object's bytes onto stale ones — scrap such a
+		// partial and download from scratch instead.
+		if (!opts.sha256 && !readEtag(etagFile)) {
+			rmSync(partial, { force: true });
+		} else {
+			offset = statSync(partial).size;
+			const h = hash;
+			await pipeline(createReadStream(partial), async (chunks) => {
+				for await (const chunk of chunks) h.update(chunk as Buffer);
+			});
+		}
 	}
 
 	// If-Range makes a resume safe across republishes: when the entity no
@@ -138,6 +147,19 @@ export async function downloadFile(opts: DownloadOptions): Promise<void> {
 
 	let append = false;
 	if (res.status === 206 && offset > 0) {
+		// Belt and braces on top of If-Range: a middlebox that mishandles it
+		// can still answer 206 for a republished entity (this corrupted real
+		// bundle downloads — "bad zipfile offset" from spliced halves). When
+		// the 206 carries an ETag that differs from the partial's, the range
+		// is against a different object: scrap the partial and refetch clean.
+		const storedEtag = readEtag(etagFile);
+		const gotEtag = res.headers.get("etag");
+		if (storedEtag && gotEtag && gotEtag !== storedEtag) {
+			await res.body?.cancel();
+			rmSync(partial, { force: true });
+			rmSync(etagFile, { force: true });
+			return downloadFile(opts);
+		}
 		append = true;
 	} else if (res.ok) {
 		// 200 despite Range (server ignored it) or a fresh download: start over.
