@@ -6,7 +6,6 @@ import {
 	readdirSync,
 	renameSync,
 	rmSync,
-	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -205,24 +204,28 @@ function manualRunCommand(platform: OfficePlatform, script: string): string {
 		: `bash ${script}`;
 }
 
-// Windows installs are handed to the user as a right-click .cmd instead of
-// being spawned from codevhub: endpoint protection (Kaspersky Endpoint
-// Security in the field) silently kills a powershell child of node.exe
-// mid-install, while the very same script from the very same folder finishes
-// when the user launches it themselves. The wrapper reproduces that
-// verified-good ancestry (explorer -> cmd -> powershell) and needs nothing
-// typed. Exported for tests.
-export function officeWrapperName(uninstall: boolean): string {
-	return uninstall ? "Uninstall-CoDev-Office.cmd" : "Install-CoDev-Office.cmd";
+// The exact command the user types in an ELEVATED PowerShell — after field
+// testing every alternative (spawning from codevhub, a self-elevating .cmd),
+// this is the only launch mode the endpoint protection tolerates: it kills
+// installers codevhub launches and quarantines the .ps1 a .cmd launches,
+// while the same command typed interactively runs to "Verification passed".
+// Exported for tests.
+export function officeManualWindowsCommand(
+	script: string,
+	args: string[],
+): string {
+	const argStr = args.map((a) => ` ${/\s/.test(a) ? `"${a}"` : a}`).join("");
+	return `powershell -ExecutionPolicy Bypass -File .\\${script}${argStr}`;
 }
 
-// Paths baked into the wrapper so a UAC elevation with a DIFFERENT admin
-// account cannot strand the install on the admin's profile: the JS module
-// tree goes to the shared, account-independent %PUBLIC% dir, and the skills
-// root is pinned to the REAL user's profile — codevhub runs unelevated as
-// that user, so homedir() is authoritative here. Cross-platform staging
-// (--platform windows from another OS) cannot know the target machine's
-// user, so only the modules dir is baked there. Exported for tests.
+// Paths baked into the printed command so a UAC elevation with a DIFFERENT
+// admin account cannot strand the install on the admin's profile: the JS
+// module tree goes to the shared, account-independent %PUBLIC% dir, and the
+// skills root is pinned to the REAL user's profile — codevhub runs
+// unelevated as that user, so homedir() is authoritative here.
+// Cross-platform staging (--platform windows from another OS) cannot know
+// the target machine's user, so only the modules dir is baked there.
+// Exported for tests.
 export function officeWrapperBakedArgs(hostIsWindows: boolean): string[] {
 	const publicDir = process.env.PUBLIC ?? "C:\\Users\\Public";
 	const args = ["-ModulesDir", `${publicDir}\\codev-office\\node_modules`];
@@ -269,36 +272,6 @@ export function migrateLegacyOfficeDir(fromDir: string, toDir: string): void {
 			// Locked or cross-volume — leave it; the download layer copes.
 		}
 	}
-}
-
-export function officeWrapperContent(script: string, args: string[]): string {
-	// Self-elevating so a plain DOUBLE-CLICK is enough (some environments strip
-	// "Run as administrator" from the context menu): when not elevated, the
-	// .cmd relaunches itself elevated via a UAC prompt. If elevation is
-	// declined or unavailable (non-admin account), it continues non-elevated —
-	// the setup script supports that: each component installer raises its own
-	// permission prompt, and a declined one only skips that component (fatal
-	// for the .NET SDK alone).
-	// %~dp0 = the .cmd's own folder (an elevated relaunch starts in System32);
-	// `pause` keeps the window open so the closing "Verification passed" (or a
-	// [FAIL] line) stays readable.
-	const argStr = args.map((a) => ` ${/\s/.test(a) ? `"${a}"` : a}`).join("");
-	return [
-		"@echo off",
-		'cd /d "%~dp0"',
-		"net session >nul 2>&1",
-		"if not errorlevel 1 goto :run",
-		"echo Requesting administrator rights - choose Yes in the prompt...",
-		"powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\" >nul 2>&1",
-		"if not errorlevel 1 exit /b 0",
-		"echo Continuing without administrator rights - each installer will ask for permission separately.",
-		"echo.",
-		":run",
-		`powershell -ExecutionPolicy Bypass -File ".\\${script}"${argStr}`,
-		"echo.",
-		"pause",
-		"",
-	].join("\r\n");
 }
 
 export function installerArgs(
@@ -461,53 +434,41 @@ export async function runSkillOffice(
 		? uninstallerArgs(parsed, platform)
 		: installerArgs(parsed, platform);
 
-	// Windows: stage a right-click wrapper and stop — see officeWrapperName.
+	// Windows: never run (or wrap) the installer from codevhub. Endpoint
+	// protection (Kaspersky Endpoint Security in the field) kills a powershell
+	// child of node.exe mid-install AND quarantines the .ps1 when a staged
+	// .cmd launches it — the only launch it tolerates is the user typing the
+	// command in an elevated PowerShell themselves, which is field-proven to
+	// run to "Verification passed". Print that exact command, with the
+	// profile-safe paths baked in so an elevation under a different admin
+	// account still installs to the real user's profile.
 	if (platform === "windows") {
-		const wrapper = officeWrapperName(parsed.uninstall);
-		writeFileSync(
-			join(dir, wrapper),
-			officeWrapperContent(script, [
-				...scriptArgs,
-				...officeWrapperBakedArgs(hostPlatform === "windows"),
-			]),
-		);
 		const verb = parsed.uninstall ? "uninstaller" : "installer";
+		const commandLine = officeManualWindowsCommand(script, [
+			...scriptArgs,
+			...officeWrapperBakedArgs(hostPlatform === "windows"),
+		]);
 		console.error(`\nFiles are in ${dir}.`);
 		console.error(
 			`codevhub does not auto-run the Windows ${verb}: endpoint protection ` +
-				"(e.g. Kaspersky) is known to silently kill installers it launches. Instead:",
+				"(e.g. Kaspersky) is known to kill installers it launches. Run it " +
+				"yourself in an ELEVATED PowerShell:",
 		);
 		console.error(
-			`  1. Open that folder in File Explorer (opened for you if possible)`,
-		);
-		console.error(`  2. Double-click ${wrapper}`);
-		console.error(
-			`  3. Choose "Yes" when Windows asks for administrator permission`,
+			'  1. Press the Windows key, type "powershell", then press Ctrl+Shift+Enter',
 		);
 		console.error(
-			`     (no admin rights? choose "No" - the install continues and each component asks for permission separately)`,
+			"     (in the UAC dialog: More choices -> Use a different account -> enter the ADMIN username and password)",
 		);
+		console.error("  2. Copy-paste these two lines into that window:");
+		console.error(`       cd "${dir}"`);
+		console.error(`       ${commandLine}`);
 		console.error(
-			`  4. Wait for the closing message - the window stays open when done`,
+			'  3. Wait for the green "Verification passed" closing message',
 		);
-		if (hostPlatform === "windows") {
-			try {
-				const explorer = spawn("explorer.exe", [dir], {
-					detached: true,
-					stdio: "ignore",
-				});
-				// Best-effort convenience: spawn failures surface as an async
-				// "error" event (which would crash the process if unhandled),
-				// not as a throw — the printed path is enough either way.
-				explorer.on("error", () => {});
-				explorer.unref();
-			} catch {
-				// Same best-effort stance for synchronous spawn failures.
-			}
-		}
-		logInfo("office windows handoff staged", {
+		logInfo("office windows manual handoff", {
 			action: parsed.uninstall ? "office.uninstall" : "office.install",
-			extra: { platform, dir, wrapper },
+			extra: { platform, dir },
 		});
 		return 0;
 	}

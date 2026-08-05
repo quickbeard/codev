@@ -18,9 +18,8 @@ import {
 	ensureStagingDir,
 	installerArgs,
 	migrateLegacyOfficeDir,
+	officeManualWindowsCommand,
 	officeWrapperBakedArgs,
-	officeWrapperContent,
-	officeWrapperName,
 	runSkillOffice,
 	uninstallerArgs,
 } from "@/lib/office.js";
@@ -399,10 +398,10 @@ describe("runSkillOffice", () => {
 		expect(existsSync(join(dir, "codev-office-windows.zip"))).toBe(true);
 	});
 
-	test("windows staging writes the right-click wrapper, flags baked in, never spawns", async () => {
-		// Endpoint protection (KES) silently kills installers spawned by
-		// codevhub on Windows, so the windows flow must never spawn - it
-		// stages a .cmd the user runs via right-click -> Run as administrator.
+	test("windows staging stages files only - no wrapper, no spawn", async () => {
+		// Endpoint protection kills installers codevhub launches AND quarantines
+		// the .ps1 a staged .cmd launches - the windows flow must only download
+		// and print the manual elevated-PowerShell command.
 		objects.set("/codev-office-windows.zip", BUNDLE);
 		objects.set("/codev-office-windows-setup.ps1", SCRIPT);
 		const dir = join(tempDir, "office");
@@ -424,26 +423,27 @@ describe("runSkillOffice", () => {
 		);
 		expect(code).toBe(0);
 		expect(spawns).toEqual([]);
-		const wrapper = readFileSync(join(dir, "Install-CoDev-Office.cmd"), "utf8");
-		expect(wrapper).toContain(
-			'powershell -ExecutionPolicy Bypass -File ".\\codev-office-windows-setup.ps1" -SkipVerify -ForceSkills',
+		expect(existsSync(join(dir, "codev-office-windows.zip"))).toBe(true);
+		expect(existsSync(join(dir, "Install-CoDev-Office.cmd"))).toBe(false);
+	});
+
+	test("the manual command carries flags and baked paths, quoted", () => {
+		const line = officeManualWindowsCommand("codev-office-windows-setup.ps1", [
+			"-SkipVerify",
+			...officeWrapperBakedArgs(false),
+			"-SkillsRoot",
+			"C:\\Users\\Van Phong\\.config\\codev\\skills",
+		]);
+		expect(line).toContain(
+			"powershell -ExecutionPolicy Bypass -File .\\codev-office-windows-setup.ps1 -SkipVerify",
 		);
-		expect(wrapper).toContain("pause");
-		expect(wrapper).toContain('cd /d "%~dp0"');
-		// Self-elevation: a plain double-click must request admin rights itself
-		// (some environments strip "Run as administrator" from the context
-		// menu) and fall back to a non-elevated run when declined.
-		expect(wrapper).toContain("net session");
-		expect(wrapper).toContain("Start-Process -FilePath '%~f0' -Verb RunAs");
-		expect(wrapper).toContain(":run");
-		expect(wrapper).toContain("Continuing without administrator rights");
-		// Profile-safe path baking: the shared modules dir always, but no
-		// -SkillsRoot on cross-platform staging - this host's homedir says
-		// nothing about the target machine's user.
-		expect(wrapper).toContain(
+		expect(line).toContain(
 			"-ModulesDir C:\\Users\\Public\\codev-office\\node_modules",
 		);
-		expect(wrapper).not.toContain("-SkillsRoot");
+		// Space-containing paths are quoted so copy-paste survives them.
+		expect(line).toContain(
+			'-SkillsRoot "C:\\Users\\Van Phong\\.config\\codev\\skills"',
+		);
 	});
 
 	test("baked args pin the real user's skills root on a Windows host", () => {
@@ -458,16 +458,6 @@ describe("runSkillOffice", () => {
 		]);
 		expect(onWindows[2]).toBe("-SkillsRoot");
 		expect(onWindows[3]).toContain(".config");
-	});
-
-	test("wrapper quotes arguments containing spaces", () => {
-		const content = officeWrapperContent("s.ps1", [
-			"-SkillsRoot",
-			"C:\\Users\\Van Phong\\.config\\codev\\skills",
-		]);
-		expect(content).toContain(
-			'-SkillsRoot "C:\\Users\\Van Phong\\.config\\codev\\skills"',
-		);
 	});
 
 	test("ensureStagingDir falls back when the preferred dir is unwritable", () => {
@@ -506,20 +496,6 @@ describe("runSkillOffice", () => {
 		migrateLegacyOfficeDir(join(tempDir, "nope"), to);
 	});
 
-	test("wrapper name and content cover the uninstall flow", () => {
-		expect(officeWrapperName(false)).toBe("Install-CoDev-Office.cmd");
-		expect(officeWrapperName(true)).toBe("Uninstall-CoDev-Office.cmd");
-		const content = officeWrapperContent("codev-office-windows-uninstall.ps1", [
-			"-Yes",
-			"-SkillsOnly",
-		]);
-		expect(content).toContain(
-			'powershell -ExecutionPolicy Bypass -File ".\\codev-office-windows-uninstall.ps1" -Yes -SkillsOnly',
-		);
-		// CRLF line endings - the file must open cleanly in cmd.exe.
-		expect(content).toContain("\r\n");
-	});
-
 	test("always refetches the setup script, but reuses a finished bundle", async () => {
 		const dir = join(tempDir, "office");
 		mkdirSync(dir, { recursive: true });
@@ -555,11 +531,7 @@ describe("runSkillOffice", () => {
 	// The PowerShell branch is unreachable from a non-Windows host — a
 	// cross-platform --platform forces download-only — so the host is stubbed to
 	// keep the argv shape pinned on the Linux/macOS machines that run this suite.
-	test("a Windows host stages the right-click wrapper instead of spawning", async () => {
-		// Endpoint protection (KES in the field) silently kills a powershell
-		// child of node.exe mid-install, so the installer must never be
-		// spawned from codevhub on Windows — the user launches the staged
-		// .cmd via right-click -> Run as administrator instead.
+	test("a Windows host never spawns the installer", async () => {
 		objects.set("/codev-office-windows.zip", BUNDLE);
 		objects.set("/codev-office-windows-setup.ps1", SCRIPT);
 		const dir = join(tempDir, "office");
@@ -576,10 +548,7 @@ describe("runSkillOffice", () => {
 		);
 		expect(code).toBe(0);
 		expect(spawned).toBeNull();
-		const wrapper = readFileSync(join(dir, "Install-CoDev-Office.cmd"), "utf8");
-		expect(wrapper).toContain(
-			'powershell -ExecutionPolicy Bypass -File ".\\codev-office-windows-setup.ps1" -SkipVerify',
-		);
+		expect(existsSync(join(dir, "Install-CoDev-Office.cmd"))).toBe(false);
 	});
 
 	test("exits 1 on an OS with no bundle and downloads nothing", async () => {
