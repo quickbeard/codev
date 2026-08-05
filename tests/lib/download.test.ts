@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -14,6 +15,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { downloadFile } from "@/lib/download.js";
 import {
+	ensureStagingDir,
 	installerArgs,
 	migrateLegacyOfficeDir,
 	officeWrapperBakedArgs,
@@ -466,6 +468,25 @@ describe("runSkillOffice", () => {
 		expect(content).toContain(
 			'-SkillsRoot "C:\\Users\\Van Phong\\.config\\codev\\skills"',
 		);
+	});
+
+	test("ensureStagingDir falls back when the preferred dir is unwritable", () => {
+		const locked = join(tempDir, "locked");
+		mkdirSync(locked, { recursive: true });
+		chmodSync(locked, 0o555);
+		const preferred = join(locked, "codev-office");
+		const fallback = join(tempDir, "fallback-office");
+		try {
+			const dir = ensureStagingDir(preferred, fallback);
+			expect(dir).toBe(fallback);
+			expect(existsSync(fallback)).toBe(true);
+		} finally {
+			chmodSync(locked, 0o755);
+		}
+		// Writable preferred dir wins; no fallback means errors propagate.
+		const fine = join(tempDir, "fine");
+		expect(ensureStagingDir(fine, fallback)).toBe(fine);
+		expect(() => ensureStagingDir(preferred, null)).not.toThrow(); // now writable again
 	});
 
 	test("migrateLegacyOfficeDir moves files without clobbering", () => {

@@ -237,6 +237,26 @@ export function officeWrapperBakedArgs(hostIsWindows: boolean): string[] {
 // because the staging folder moved. Same-volume renames; anything locked or
 // cross-volume is left behind (the downloader treats it as absent and
 // re-fetches). Exported for tests.
+// Create the staging dir, falling back when the preferred location is not
+// writable (e.g. hardened ACLs on C:\Users\Public). Returns the dir that
+// actually exists. Exported for tests.
+export function ensureStagingDir(
+	preferred: string,
+	fallback: string | null,
+): string {
+	try {
+		mkdirSync(preferred, { recursive: true });
+		return preferred;
+	} catch (err) {
+		if (!fallback || fallback === preferred) throw err;
+		console.error(
+			`Could not create ${preferred} (${err instanceof Error ? err.message : String(err)}) - using ${fallback} instead`,
+		);
+		mkdirSync(fallback, { recursive: true });
+		return fallback;
+	}
+}
+
 export function migrateLegacyOfficeDir(fromDir: string, toDir: string): void {
 	if (fromDir === toDir || !existsSync(fromDir)) return;
 	mkdirSync(toDir, { recursive: true });
@@ -364,8 +384,15 @@ export async function runSkillOffice(
 		downloadOnly = true;
 	}
 
-	const dir = parsed.dir ?? officeDownloadsDir();
-	mkdirSync(dir, { recursive: true });
+	// Windows staging prefers the profile-independent %PUBLIC% folder, but a
+	// hardened image can deny non-admin writes under C:\Users\Public — fall
+	// back to the old per-user folder rather than crashing.
+	const dir = ensureStagingDir(
+		parsed.dir ?? officeDownloadsDir(),
+		parsed.dir === undefined && hostPlatform === "windows"
+			? legacyOfficeDownloadsDir()
+			: null,
+	);
 	// Windows moved its default staging from ~/.codev-hub/office to the
 	// profile-independent %PUBLIC%\Downloads\codev-office — pull already
 	// downloaded files across so nothing multi-GB is fetched twice.
