@@ -8,7 +8,7 @@ import { officeDownloadsDir } from "@/lib/paths.js";
 
 // `codevhub skill office`: fetch the CoDev Office offline bundle (published by
 // the codev-storage MinIO backend) for this OS and run the bundled setup
-// script, which installs the Office skills (DOCX/XLSX authoring, …).
+// script, which installs the Office skills (DOCX, XLSX, PPTX and PDF).
 // File names are deterministic per platform — no manifest fetch — and each
 // bundle carries its own SHA256SUMS.txt that the setup flow can verify.
 // Non-interactive on purpose — the second half hands the terminal to an
@@ -147,9 +147,9 @@ export function officeUninstallScriptName(platform: OfficePlatform): string {
 // Rough bundle sizes for the pre-download heads-up only; progress totals come
 // from the server's content-length.
 const APPROX_BUNDLE_MB: Record<OfficePlatform, number> = {
-	ubuntu: 610,
-	windows: 820,
-	macos: 1400,
+	ubuntu: 1200,
+	windows: 1400,
+	macos: 3100,
 };
 
 // Adaptive size for progress lines: the setup script is ~13 KB and rendered
