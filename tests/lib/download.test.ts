@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { downloadFile } from "@/lib/download.js";
 import {
 	installerArgs,
+	officeWrapperContent,
+	officeWrapperName,
 	runSkillOffice,
 	uninstallerArgs,
 } from "@/lib/office.js";
@@ -393,6 +395,53 @@ describe("runSkillOffice", () => {
 		expect(existsSync(join(dir, "codev-office-windows.zip"))).toBe(true);
 	});
 
+	test("windows staging writes the right-click wrapper, flags baked in, never spawns", async () => {
+		// Endpoint protection (KES) silently kills installers spawned by
+		// codevhub on Windows, so the windows flow must never spawn - it
+		// stages a .cmd the user runs via right-click -> Run as administrator.
+		objects.set("/codev-office-windows.zip", BUNDLE);
+		objects.set("/codev-office-windows-setup.ps1", SCRIPT);
+		const dir = join(tempDir, "office");
+		const spawns: string[] = [];
+		const code = await runSkillOffice(
+			[
+				"--platform",
+				"windows",
+				"--dir",
+				dir,
+				"--skip-verify",
+				"--force-skills",
+			],
+			baseUrl,
+			async (command) => {
+				spawns.push(command);
+				return 0;
+			},
+		);
+		expect(code).toBe(0);
+		expect(spawns).toEqual([]);
+		const wrapper = readFileSync(join(dir, "Install-CoDev-Office.cmd"), "utf8");
+		expect(wrapper).toContain(
+			'powershell -ExecutionPolicy Bypass -File ".\\codev-office-windows-setup.ps1" -SkipVerify -ForceSkills',
+		);
+		expect(wrapper).toContain("pause");
+		expect(wrapper).toContain('cd /d "%~dp0"');
+	});
+
+	test("wrapper name and content cover the uninstall flow", () => {
+		expect(officeWrapperName(false)).toBe("Install-CoDev-Office.cmd");
+		expect(officeWrapperName(true)).toBe("Uninstall-CoDev-Office.cmd");
+		const content = officeWrapperContent("codev-office-windows-uninstall.ps1", [
+			"-Yes",
+			"-SkillsOnly",
+		]);
+		expect(content).toContain(
+			'powershell -ExecutionPolicy Bypass -File ".\\codev-office-windows-uninstall.ps1" -Yes -SkillsOnly',
+		);
+		// CRLF line endings - the file must open cleanly in cmd.exe.
+		expect(content).toContain("\r\n");
+	});
+
 	test("always refetches the setup script, but reuses a finished bundle", async () => {
 		const dir = join(tempDir, "office");
 		mkdirSync(dir, { recursive: true });
@@ -428,7 +477,11 @@ describe("runSkillOffice", () => {
 	// The PowerShell branch is unreachable from a non-Windows host — a
 	// cross-platform --platform forces download-only — so the host is stubbed to
 	// keep the argv shape pinned on the Linux/macOS machines that run this suite.
-	test("runs the PowerShell installer on a Windows host", async () => {
+	test("a Windows host stages the right-click wrapper instead of spawning", async () => {
+		// Endpoint protection (KES in the field) silently kills a powershell
+		// child of node.exe mid-install, so the installer must never be
+		// spawned from codevhub on Windows — the user launches the staged
+		// .cmd via right-click -> Run as administrator instead.
 		objects.set("/codev-office-windows.zip", BUNDLE);
 		objects.set("/codev-office-windows-setup.ps1", SCRIPT);
 		const dir = join(tempDir, "office");
@@ -444,17 +497,11 @@ describe("runSkillOffice", () => {
 			),
 		);
 		expect(code).toBe(0);
-		expect(spawned).toEqual({
-			command: "powershell.exe",
-			args: [
-				"-ExecutionPolicy",
-				"Bypass",
-				"-File",
-				join(dir, "codev-office-windows-setup.ps1"),
-				"-SkipVerify",
-			],
-			cwd: dir,
-		});
+		expect(spawned).toBeNull();
+		const wrapper = readFileSync(join(dir, "Install-CoDev-Office.cmd"), "utf8");
+		expect(wrapper).toContain(
+			'powershell -ExecutionPolicy Bypass -File ".\\codev-office-windows-setup.ps1" -SkipVerify',
+		);
 	});
 
 	test("exits 1 on an OS with no bundle and downloads nothing", async () => {

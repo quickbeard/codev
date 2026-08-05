@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { OFFICE_DOWNLOADS_URL } from "@/lib/const.js";
 import { downloadFile } from "@/lib/download.js";
@@ -196,6 +196,31 @@ function manualRunCommand(platform: OfficePlatform, script: string): string {
 		: `bash ${script}`;
 }
 
+// Windows installs are handed to the user as a right-click .cmd instead of
+// being spawned from codevhub: endpoint protection (Kaspersky Endpoint
+// Security in the field) silently kills a powershell child of node.exe
+// mid-install, while the very same script from the very same folder finishes
+// when the user launches it themselves. The wrapper reproduces that
+// verified-good ancestry (explorer -> cmd -> powershell) and needs nothing
+// typed. Exported for tests.
+export function officeWrapperName(uninstall: boolean): string {
+	return uninstall ? "Uninstall-CoDev-Office.cmd" : "Install-CoDev-Office.cmd";
+}
+
+export function officeWrapperContent(script: string, args: string[]): string {
+	// %~dp0 = the .cmd's own folder; `pause` keeps the window open so the
+	// closing "Verification passed" (or a [FAIL] line) stays readable.
+	const argStr = args.map((a) => ` ${a}`).join("");
+	return [
+		"@echo off",
+		'cd /d "%~dp0"',
+		`powershell -ExecutionPolicy Bypass -File ".\\${script}"${argStr}`,
+		"echo.",
+		"pause",
+		"",
+	].join("\r\n");
+}
+
 export function installerArgs(
 	parsed: OfficeArgs,
 	platform: OfficePlatform,
@@ -339,6 +364,51 @@ export async function runSkillOffice(
 		chmodSync(join(dir, script), 0o755);
 	}
 
+	const scriptArgs = parsed.uninstall
+		? uninstallerArgs(parsed, platform)
+		: installerArgs(parsed, platform);
+
+	// Windows: stage a right-click wrapper and stop — see officeWrapperName.
+	if (platform === "windows") {
+		const wrapper = officeWrapperName(parsed.uninstall);
+		writeFileSync(join(dir, wrapper), officeWrapperContent(script, scriptArgs));
+		const verb = parsed.uninstall ? "uninstaller" : "installer";
+		console.error(`\nFiles are in ${dir}.`);
+		console.error(
+			`codevhub does not auto-run the Windows ${verb}: endpoint protection ` +
+				"(e.g. Kaspersky) is known to silently kill installers it launches. Instead:",
+		);
+		console.error(
+			`  1. Open that folder in File Explorer (opened for you if possible)`,
+		);
+		console.error(
+			`  2. Right-click ${wrapper} and choose "Run as administrator"`,
+		);
+		console.error(
+			`  3. Approve the prompt and wait for the closing message - the window stays open when done`,
+		);
+		if (hostPlatform === "windows") {
+			try {
+				const explorer = spawn("explorer.exe", [dir], {
+					detached: true,
+					stdio: "ignore",
+				});
+				// Best-effort convenience: spawn failures surface as an async
+				// "error" event (which would crash the process if unhandled),
+				// not as a throw — the printed path is enough either way.
+				explorer.on("error", () => {});
+				explorer.unref();
+			} catch {
+				// Same best-effort stance for synchronous spawn failures.
+			}
+		}
+		logInfo("office windows handoff staged", {
+			action: parsed.uninstall ? "office.uninstall" : "office.install",
+			extra: { platform, dir, wrapper },
+		});
+		return 0;
+	}
+
 	if (downloadOnly) {
 		console.error(
 			`\nFiles are in ${dir}. To ${parsed.uninstall ? "uninstall" : "install"}, run from that folder:`,
@@ -346,26 +416,13 @@ export async function runSkillOffice(
 		console.error(`  ${manualRunCommand(platform, script)}`);
 		return 0;
 	}
-
-	const scriptArgs = parsed.uninstall
-		? uninstallerArgs(parsed, platform)
-		: installerArgs(parsed, platform);
 	console.error(
 		`\nRunning the ${parsed.uninstall ? "uninstaller" : "installer"} (${script})...\n`,
 	);
-	const [command, args] =
-		platform === "windows"
-			? [
-					"powershell.exe",
-					[
-						"-ExecutionPolicy",
-						"Bypass",
-						"-File",
-						join(dir, script),
-						...scriptArgs,
-					],
-				]
-			: ["bash", [join(dir, script), ...scriptArgs]];
+	// Windows returned above with the right-click wrapper — only the bash
+	// platforms reach the spawn.
+	const command = "bash";
+	const args = [join(dir, script), ...scriptArgs];
 	// cwd = download dir: the scripts locate their bundle zip next to
 	// themselves/CWD, and the staged files are there.
 	const code = await spawner(command, args, dir);
