@@ -425,7 +425,7 @@ describe("runSkillOffice", () => {
 		expect(existsSync(join(dir, "codev-office-windows.zip"))).toBe(true);
 	});
 
-	test("the manual command carries flags and baked paths, quoted", () => {
+	test("the manual command carries flags, quoting space-containing values", () => {
 		const line = officeManualWindowsCommand("codev-office-windows-setup.ps1", [
 			"-SkipVerify",
 			"-SkillsRoot",

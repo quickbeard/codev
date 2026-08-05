@@ -420,8 +420,9 @@ export async function runSkillOffice(
 	// launch codevhub initiates — the only mode it tolerates is the user
 	// typing the command in an elevated PowerShell themselves, which is
 	// field-proven to run to "Verification passed". Print that exact command,
-	// with the profile-safe paths baked in so an elevation under a different
-	// admin account still installs to the real user's profile.
+	// bare: the setup script itself defaults to profile-safe paths (shared
+	// %PUBLIC% dirs, console-user detection), so an elevation under a
+	// different admin account still installs to the real user's profile.
 	if (platform === "windows") {
 		const verb = parsed.uninstall ? "uninstaller" : "installer";
 		const commandLine = officeManualWindowsCommand(script, scriptArgs);
