@@ -454,9 +454,8 @@ export async function runSkillOffice(
 				"(e.g. Kaspersky) is known to kill installers it launches. Run it " +
 				"yourself in an ELEVATED PowerShell:",
 		);
-		console.error(
-			'  1. Press the Windows key, type "powershell", then press Ctrl+Shift+Enter',
-		);
+		console.error("  1. In this (or any) PowerShell window, run:");
+		console.error("       Start-Process powershell -Verb RunAs");
 		console.error(
 			"     (in the UAC dialog: More choices -> Use a different account -> enter the ADMIN username and password)",
 		);
