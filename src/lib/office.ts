@@ -208,12 +208,28 @@ export function officeWrapperName(uninstall: boolean): string {
 }
 
 export function officeWrapperContent(script: string, args: string[]): string {
-	// %~dp0 = the .cmd's own folder; `pause` keeps the window open so the
-	// closing "Verification passed" (or a [FAIL] line) stays readable.
+	// Self-elevating so a plain DOUBLE-CLICK is enough (some environments strip
+	// "Run as administrator" from the context menu): when not elevated, the
+	// .cmd relaunches itself elevated via a UAC prompt. If elevation is
+	// declined or unavailable (non-admin account), it continues non-elevated —
+	// the setup script supports that: each component installer raises its own
+	// permission prompt, and a declined one only skips that component (fatal
+	// for the .NET SDK alone).
+	// %~dp0 = the .cmd's own folder (an elevated relaunch starts in System32);
+	// `pause` keeps the window open so the closing "Verification passed" (or a
+	// [FAIL] line) stays readable.
 	const argStr = args.map((a) => ` ${a}`).join("");
 	return [
 		"@echo off",
 		'cd /d "%~dp0"',
+		"net session >nul 2>&1",
+		"if not errorlevel 1 goto :run",
+		"echo Requesting administrator rights - choose Yes in the prompt...",
+		"powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\" >nul 2>&1",
+		"if not errorlevel 1 exit /b 0",
+		"echo Continuing without administrator rights - each installer will ask for permission separately.",
+		"echo.",
+		":run",
 		`powershell -ExecutionPolicy Bypass -File ".\\${script}"${argStr}`,
 		"echo.",
 		"pause",
@@ -381,11 +397,15 @@ export async function runSkillOffice(
 		console.error(
 			`  1. Open that folder in File Explorer (opened for you if possible)`,
 		);
+		console.error(`  2. Double-click ${wrapper}`);
 		console.error(
-			`  2. Right-click ${wrapper} and choose "Run as administrator"`,
+			`  3. Choose "Yes" when Windows asks for administrator permission`,
 		);
 		console.error(
-			`  3. Approve the prompt and wait for the closing message - the window stays open when done`,
+			`     (no admin rights? choose "No" - the install continues and each component asks for permission separately)`,
+		);
+		console.error(
+			`  4. Wait for the closing message - the window stays open when done`,
 		);
 		if (hostPlatform === "windows") {
 			try {

@@ -426,6 +426,13 @@ describe("runSkillOffice", () => {
 		);
 		expect(wrapper).toContain("pause");
 		expect(wrapper).toContain('cd /d "%~dp0"');
+		// Self-elevation: a plain double-click must request admin rights itself
+		// (some environments strip "Run as administrator" from the context
+		// menu) and fall back to a non-elevated run when declined.
+		expect(wrapper).toContain("net session");
+		expect(wrapper).toContain("Start-Process -FilePath '%~f0' -Verb RunAs");
+		expect(wrapper).toContain(":run");
+		expect(wrapper).toContain("Continuing without administrator rights");
 	});
 
 	test("wrapper name and content cover the uninstall flow", () => {
