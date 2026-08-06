@@ -20,11 +20,11 @@ export const spawner = {
 	spawn: nodeSpawn,
 };
 
-// Cheap PATH probe (no child process) used by the bare-`codevhub` dispatch to
-// decide between opening CoDev Code and falling back to the hub help. Skips
-// the shim dir, mirroring the spawn PATH below. Windows spawns go through the
-// shell (PATHEXT resolution), so probe the standard executable extensions.
-export function agentOnPath(cmd: string): boolean {
+// Cheap PATH lookup (no child process). Skips the shim dir, mirroring the spawn
+// PATH below, so callers get the real agent rather than our own shim — spawning
+// the shim would re-enter the hub. Windows spawns go through the shell (PATHEXT
+// resolution), so probe the standard executable extensions.
+export function resolveAgentPath(cmd: string): string | undefined {
 	const exts =
 		process.platform === "win32"
 			? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")
@@ -32,15 +32,22 @@ export function agentOnPath(cmd: string): boolean {
 	for (const dir of stripShimDirFromPath(process.env.PATH).split(delimiter)) {
 		if (!dir) continue;
 		for (const ext of exts) {
+			const candidate = join(dir, cmd + ext);
 			try {
-				accessSync(join(dir, cmd + ext), fsConstants.X_OK);
-				return true;
+				accessSync(candidate, fsConstants.X_OK);
+				return candidate;
 			} catch {
 				// Not here — keep scanning.
 			}
 		}
 	}
-	return false;
+	return undefined;
+}
+
+// Used by the bare-`codevhub` dispatch to decide between opening CoDev Code and
+// falling back to the hub help.
+export function agentOnPath(cmd: string): boolean {
+	return resolveAgentPath(cmd) !== undefined;
 }
 
 export function runAgent(cmd: string, args: string[]): Promise<number> {
