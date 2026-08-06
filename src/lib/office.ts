@@ -32,10 +32,9 @@ export type OfficePlatform = "ubuntu" | "macos" | "windows";
 export type OfficeArch = "arm64" | "x86_64";
 
 // The bundle identity in the codev-storage bucket. macOS publishes one bundle
-// per chip (~1.7 GB each) instead of one carrying both (~3.1 GB); ubuntu and
-// windows are x64-only, so their target is just the platform. There is still
-// ONE setup script per OS — the macOS script picks its bundle from `uname -m`,
-// so nothing below needs an arch to name a script.
+// per chip; ubuntu and windows are x64-only, so their target is just the
+// platform. There is still ONE setup script per OS — the macOS script picks its
+// bundle from `uname -m`, so nothing below needs an arch to name a script.
 export type OfficeTarget =
 	| "ubuntu"
 	| "windows"

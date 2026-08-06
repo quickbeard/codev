@@ -100,7 +100,7 @@ codevhub init        # initialize + index the current project (one time)
 codevhub skill office
 ```
 
-It picks the bundle for your OS — on macOS, for your chip: Apple Silicon and Intel get separate bundles (~1.7 GB each) rather than one carrying both (~3.1 GB) — and downloads it into `~/.codev-hub/office` (on Windows: `%PUBLIC%\Downloads\codev-office`). On macOS/Linux it then runs the bundled setup script, which may prompt for `sudo`; on Windows it prints the exact command to paste into an elevated PowerShell instead of launching the installer itself.
+It picks the bundle for your OS — on macOS, for your chip: Apple Silicon and Intel get separate bundles — and downloads it into `~/.codev-hub/office` (on Windows: `%PUBLIC%\Downloads\codev-office`). On macOS/Linux it then runs the bundled setup script, which may prompt for `sudo`; on Windows it prints the exact command to paste into an elevated PowerShell instead of launching the installer itself.
 
 **The bundle is large**, and the command prints its approximate size before downloading. The download folder is kept between runs, so an interrupted transfer resumes where it left off and an already-downloaded bundle is reused. To force a completely fresh download, delete that folder.
 
