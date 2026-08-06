@@ -94,15 +94,15 @@ codevhub init        # initialize + index the current project (one time)
 
 ## CoDev Office skills (offline bundle)
 
-`codevhub skill office` installs the CoDev Office skills so your agents can produce and edit real DOCX and XLSX files. Everything ships in one offline bundle — no login and no per-skill downloads:
+`codevhub skill office` installs the CoDev Office skills so your agents can create, read and edit real DOCX, XLSX, PPTX and PDF files. Everything ships in one offline bundle — no login and no per-skill downloads:
 
 ```bash
 codevhub skill office
 ```
 
-It picks the bundle for your OS, downloads it into `~/.codev-hub/office`, and runs the bundled setup script, which may prompt for `sudo` (macOS/Linux) or UAC (Windows).
+It picks the bundle for your OS and downloads it into `~/.codev-hub/office` (on Windows: `%PUBLIC%\Downloads\codev-office`). On macOS/Linux it then runs the bundled setup script, which may prompt for `sudo`; on Windows it prints the exact command to paste into an elevated PowerShell instead of launching the installer itself.
 
-**The bundle is large — roughly 610 MB (Linux), 820 MB (Windows) or 1.4 GB (macOS).** The download folder is kept between runs, so an interrupted transfer resumes where it left off and an already-downloaded bundle is reused. To force a completely fresh download, delete `~/.codev-hub/office`.
+**The bundle is large**, and the command prints its approximate size before downloading. The download folder is kept between runs, so an interrupted transfer resumes where it left off and an already-downloaded bundle is reused. To force a completely fresh download, delete that folder.
 
 To fetch the bundle now and install later — or to stage it for a machine that has no internet access:
 

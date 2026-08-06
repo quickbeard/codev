@@ -50,8 +50,8 @@ Skill hub:
                          (previews and confirms before upload; --draft-only to stop
                          at DRAFT, --auto-approve for admins, --json for output)
   skill office           Download the CoDev Office offline skills bundle
-                         (DOCX and XLSX authoring) for this OS and run its
-                         setup script
+                         (create, read and edit DOCX, XLSX, PPTX and PDF)
+                         for this OS and run its setup script
                          (--platform ubuntu|macos|windows to fetch for another OS
                          [implies --download-only], --dir <path> for the download
                          folder, --download-only to skip running the installer,
