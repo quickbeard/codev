@@ -95,16 +95,45 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 					})
 				: spawner.spawn(cmd, args, { stdio: "inherit", env });
 
-		// The child shares our process group, so the terminal already delivers
-		// SIGINT/SIGTERM to it. Swallow them in the parent so we don't exit
-		// before the child finishes its own cleanup.
-		const swallow = () => {};
-		process.on("SIGINT", swallow);
-		process.on("SIGTERM", swallow);
+		// The child shares our process group (POSIX) / console (Windows), so the
+		// terminal already delivers SIGINT/SIGTERM to it. Swallow the first one
+		// in the parent so we don't exit before the child finishes its cleanup.
+		//
+		// Never swallow indefinitely, though: an unconditional swallow makes the
+		// hub unkillable whenever the child fails to exit, and the user is left
+		// with a frozen terminal and no way out but closing the window. Windows
+		// is where this bites — the launch chain runs through several cmd.exe
+		// batch shims (our own .cmd shim, npm's codevhub.cmd, the shell:true
+		// wrapper below, npm's codev.cmd), and a batch host that catches a
+		// console break stops at "Terminate batch job (Y/N)?" instead of
+		// exiting. A second interrupt hands the terminal back.
+		//
+		// This does not fire during a normal agent session: interactive agents
+		// hold the terminal in raw mode, where ctrl+c is delivered as input
+		// rather than as a signal, so the count only moves once the terminal is
+		// generating real interrupts.
+		let interrupts = 0;
+		const onInterrupt = () => {
+			interrupts += 1;
+			if (interrupts < 2) return;
+			cleanup();
+			process.stderr.write(
+				`\nStopped waiting for ${label}; it may still be shutting down in the background.\n`,
+			);
+			logWarn(`abandoned ${label} after repeated interrupts`, {
+				action: "process.exit",
+				eventType: "end",
+				outcome: "failure",
+				extra: { agent: cmd, exit_code: 130 },
+			});
+			resolve(130);
+		};
+		process.on("SIGINT", onInterrupt);
+		process.on("SIGTERM", onInterrupt);
 
 		const cleanup = () => {
-			process.off("SIGINT", swallow);
-			process.off("SIGTERM", swallow);
+			process.off("SIGINT", onInterrupt);
+			process.off("SIGTERM", onInterrupt);
 		};
 
 		child.once("error", (err: NodeJS.ErrnoException) => {
