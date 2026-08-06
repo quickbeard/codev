@@ -104,6 +104,80 @@ describe("runAgent", () => {
 		},
 	);
 
+	// A fake child that never emits "exit" stands in for a wedged launch chain
+	// (on Windows, a cmd.exe shim sitting at "Terminate batch job (Y/N)?").
+	// `process.emit` invokes our listeners without asking the OS for a real
+	// signal, so these run identically on Windows.
+	function withWedgedChild(): {
+		child: ChildProcess;
+		restore: () => void;
+		stderr: string[];
+	} {
+		const child = new EventEmitter() as unknown as ChildProcess;
+		const spawnSpy = vi
+			.spyOn(spawner, "spawn")
+			.mockImplementation((() => child) as unknown as typeof spawner.spawn);
+		const original = process.stderr.write.bind(process.stderr);
+		const stderr: string[] = [];
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			stderr.push(typeof chunk === "string" ? chunk : chunk.toString());
+			return true;
+		}) as typeof process.stderr.write;
+		return {
+			child,
+			stderr,
+			restore: () => {
+				process.stderr.write = original;
+				spawnSpy.mockRestore();
+			},
+		};
+	}
+
+	test("swallows a single interrupt so the child can clean up", async () => {
+		const { child, restore } = withWedgedChild();
+		try {
+			const pending = runAgent("codev", []);
+			process.emit("SIGINT");
+			await new Promise((r) => setImmediate(r));
+			// Still waiting: the child's own exit code wins, not the interrupt.
+			child.emit("exit", 0, null);
+			expect(await pending).toBe(0);
+		} finally {
+			restore();
+		}
+	});
+
+	test("stops waiting for a wedged child after a second interrupt", async () => {
+		const { restore, stderr } = withWedgedChild();
+		try {
+			const pending = runAgent("codev", []);
+			process.emit("SIGINT");
+			await new Promise((r) => setImmediate(r));
+			process.emit("SIGINT");
+			expect(await pending).toBe(130);
+			expect(
+				stderr.some((m) => m.includes("Stopped waiting for CoDev Code")),
+			).toBe(true);
+		} finally {
+			restore();
+		}
+	});
+
+	test("removes its signal listeners once it stops waiting", async () => {
+		const before = process.listenerCount("SIGINT");
+		const { restore } = withWedgedChild();
+		try {
+			const pending = runAgent("codev", []);
+			process.emit("SIGINT");
+			await new Promise((r) => setImmediate(r));
+			process.emit("SIGINT");
+			await pending;
+			expect(process.listenerCount("SIGINT")).toBe(before);
+		} finally {
+			restore();
+		}
+	});
+
 	test("prints a startup banner to stderr before launching", async () => {
 		// vi.spyOn(process.stderr, 'write') doesn't reliably intercept under
 		// vitest's stdio handling, so swap the method directly. stdio:'inherit'
