@@ -15,7 +15,11 @@ import { legacyOfficeDownloadsDir, officeDownloadsDir } from "@/lib/paths.js";
 
 // `codevhub skill office`: fetch the CoDev Office offline bundle (published by
 // the codev-storage MinIO backend) for this OS and run the bundled setup
-// script, which installs the Office skills (DOCX, XLSX, PPTX and PDF).
+// script, which installs the Office skills (DOCX, XLSX, PPTX and PDF) into the
+// global ~/.claude/skills dir (read by Claude Code and CoDev Code). codevhub
+// passes no skills-root — the destination is the setup script's own default,
+// which also detects the signed-in user under a different-account Windows
+// elevation, so codevhub must not pin a path that would defeat that.
 // File names are deterministic per platform — no manifest fetch — and each
 // bundle carries its own SHA256SUMS.txt that the setup flow can verify.
 // Non-interactive on purpose — the second half hands the terminal to an
