@@ -36,7 +36,7 @@ describe("detectArch", () => {
 
 	// An x64 node under Rosetta reports "x64" on an Apple Silicon Mac. Believing
 	// it downloads the Intel bundle, which the native-bash setup script then
-	// refuses — and re-downloads the arm64 one. 3.4 GB to land 1.7.
+	// refuses — and re-downloads the arm64 one. 3.2 GB to land 1.6.
 	test("Rosetta translation overrides the reported x64", () => {
 		expect(detectArch("x64", true)).toBe("arm64");
 	});
@@ -54,7 +54,7 @@ describe("officeTarget", () => {
 		expect(officeTarget("macos", "x86_64")).toBe("macos-x86_64");
 	});
 
-	test("macOS without an arch has no target — never guess a 1.7 GB download", () => {
+	test("macOS without an arch has no target — never guess a 1.6 GB download", () => {
 		expect(officeTarget("macos", null)).toBeNull();
 	});
 });

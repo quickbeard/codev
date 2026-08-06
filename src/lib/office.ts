@@ -65,8 +65,8 @@ export function detectPlatform(
 // process.arch is the architecture of the NODE BINARY, not of the machine: an
 // x64 node running under Rosetta on Apple Silicon reports "x64". Trusting it
 // there would fetch the Intel bundle onto an M-series Mac, and the cost is not
-// just the wrong 1.7 GB — the setup script is native bash, sees `uname -m` =
-// arm64, finds no bundle it can use and downloads another 1.7 GB. The
+// just the wrong 1.6 GB — the setup script is native bash, sees `uname -m` =
+// arm64, finds no bundle it can use and downloads another 1.6 GB. The
 // sysctl.proc_translated flag is the supported way to detect the translation.
 function isRosettaTranslated(): boolean {
 	if (process.platform !== "darwin" || process.arch !== "x64") return false;
@@ -236,8 +236,8 @@ export function officeUninstallScriptName(platform: OfficePlatform): string {
 const APPROX_BUNDLE_MB: Record<OfficeTarget, number> = {
 	ubuntu: 1200,
 	windows: 1400,
-	"macos-arm64": 1700,
-	"macos-x86_64": 1700,
+	"macos-arm64": 1600,
+	"macos-x86_64": 1600,
 };
 
 // Adaptive size for progress lines: the setup script is ~13 KB and rendered
@@ -431,7 +431,7 @@ export async function runSkillOffice(
 	// macOS publishes one bundle per chip, so a macOS download needs an arch.
 	// The host's own arch may only stand in for it when the host IS the target:
 	// on a Linux/Windows x64 box, detectArch() would confidently answer x86_64
-	// for a `--platform macos` download and hand the user the wrong 1.7 GB.
+	// for a `--platform macos` download and hand the user the wrong 1.6 GB.
 	// --arch always wins, including on a Mac staging a bundle for the other chip.
 	const arch = parsed.arch ?? (crossPlatform ? null : detectArch());
 	const target = officeTarget(platform, arch);
