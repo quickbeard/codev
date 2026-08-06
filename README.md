@@ -100,7 +100,7 @@ codevhub init        # initialize + index the current project (one time)
 codevhub skill office
 ```
 
-It picks the bundle for your OS and downloads it into `~/.codev-hub/office` (on Windows: `%PUBLIC%\Downloads\codev-office`). On macOS/Linux it then runs the bundled setup script, which may prompt for `sudo`; on Windows it prints the exact command to paste into an elevated PowerShell instead of launching the installer itself.
+It picks the bundle for your OS — on macOS, for your chip: Apple Silicon and Intel get separate bundles (~1.7 GB each) rather than one carrying both (~3.1 GB) — and downloads it into `~/.codev-hub/office` (on Windows: `%PUBLIC%\Downloads\codev-office`). On macOS/Linux it then runs the bundled setup script, which may prompt for `sudo`; on Windows it prints the exact command to paste into an elevated PowerShell instead of launching the installer itself.
 
 **The bundle is large**, and the command prints its approximate size before downloading. The download folder is kept between runs, so an interrupted transfer resumes where it left off and an already-downloaded bundle is reused. To force a completely fresh download, delete that folder.
 
@@ -109,8 +109,11 @@ To fetch the bundle now and install later — or to stage it for a machine that 
 ```bash
 codevhub skill office --download-only                 # download for this OS, don't install
 codevhub skill office --platform windows              # download another OS's bundle (implies --download-only)
+codevhub skill office --platform macos --arch arm64   # macOS needs a chip: arm64 or x86_64
 codevhub skill office --dir /media/usb/codev-office   # download somewhere else
 ```
+
+Because macOS has one bundle per chip, `--platform macos` from a non-Mac also needs `--arch arm64` or `--arch x86_64` — nothing on a Linux or Windows host implies which Mac the bundle is for, and guessing costs a 1.7 GB download. On a Mac the chip is detected for you (including through Rosetta), and `--arch` is only needed to stage a bundle for the *other* chip. There is still a single macOS setup script: it resolves its own bundle from `uname -m`.
 
 Both files land side by side, and the command prints the exact line to run from that folder (`bash codev-office-<os>-setup.sh`, or `powershell -ExecutionPolicy Bypass -File .\codev-office-windows-setup.ps1`). A bundle downloaded for another OS is never executed on this machine.
 

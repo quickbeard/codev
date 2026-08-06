@@ -53,7 +53,9 @@ Skill hub:
                          (create, read and edit DOCX, XLSX, PPTX and PDF)
                          for this OS and run its setup script
                          (--platform ubuntu|macos|windows to fetch for another OS
-                         [implies --download-only], --dir <path> for the download
+                         [implies --download-only], --arch arm64|x86_64 to pick
+                         the macOS chip's bundle [required when fetching a macOS
+                         bundle from another OS], --dir <path> for the download
                          folder, --download-only to skip running the installer,
                          --skip-verify passed through to the installer,
                          --force-skills to replace already-installed skills

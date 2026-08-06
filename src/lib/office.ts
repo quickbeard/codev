@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
@@ -26,11 +26,33 @@ import { legacyOfficeDownloadsDir, officeDownloadsDir } from "@/lib/paths.js";
 // installer that prompts for sudo/UAC, which an Ink render would fight over.
 
 export const OFFICE_USAGE =
-	"Usage: codevhub skill office [--platform ubuntu|macos|windows] [--dir <path>] [--download-only] [--skip-verify] [--force-skills]";
+	"Usage: codevhub skill office [--platform ubuntu|macos|windows] [--arch arm64|x86_64] [--dir <path>] [--download-only] [--skip-verify] [--force-skills]";
 
 export type OfficePlatform = "ubuntu" | "macos" | "windows";
+export type OfficeArch = "arm64" | "x86_64";
+
+// The bundle identity in the codev-storage bucket. macOS publishes one bundle
+// per chip (~1.7 GB each) instead of one carrying both (~3.1 GB); ubuntu and
+// windows are x64-only, so their target is just the platform. There is still
+// ONE setup script per OS — the macOS script picks its bundle from `uname -m`,
+// so nothing below needs an arch to name a script.
+export type OfficeTarget =
+	| "ubuntu"
+	| "windows"
+	| "macos-arm64"
+	| "macos-x86_64";
 
 const OFFICE_PLATFORMS: OfficePlatform[] = ["ubuntu", "macos", "windows"];
+
+// Spellings people actually type, mapped to the `uname -m` names the bundles
+// are published under.
+const OFFICE_ARCH_ALIASES: Record<string, OfficeArch> = {
+	arm64: "arm64",
+	aarch64: "arm64",
+	x86_64: "x86_64",
+	x64: "x86_64",
+	intel: "x86_64",
+};
 
 export function detectPlatform(
 	p: NodeJS.Platform = process.platform,
@@ -41,8 +63,50 @@ export function detectPlatform(
 	return null;
 }
 
+// process.arch is the architecture of the NODE BINARY, not of the machine: an
+// x64 node running under Rosetta on Apple Silicon reports "x64". Trusting it
+// there would fetch the Intel bundle onto an M-series Mac, and the cost is not
+// just the wrong 1.7 GB — the setup script is native bash, sees `uname -m` =
+// arm64, finds no bundle it can use and downloads another 1.7 GB. The
+// sysctl.proc_translated flag is the supported way to detect the translation.
+function isRosettaTranslated(): boolean {
+	if (process.platform !== "darwin" || process.arch !== "x64") return false;
+	try {
+		const out = execFileSync("sysctl", ["-in", "sysctl.proc_translated"], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		return out.trim() === "1";
+	} catch {
+		// sysctl missing, or the key does not exist — a genuine Intel Mac.
+		return false;
+	}
+}
+
+export function detectArch(
+	arch: NodeJS.Architecture = process.arch,
+	translated: boolean = isRosettaTranslated(),
+): OfficeArch | null {
+	if (translated) return "arm64";
+	if (arch === "arm64") return "arm64";
+	if (arch === "x64") return "x86_64";
+	return null;
+}
+
+// The bundle a (platform, arch) pair resolves to. Only macOS consumes the arch.
+export function officeTarget(
+	platform: OfficePlatform,
+	arch: OfficeArch | null,
+): OfficeTarget | null {
+	if (platform !== "macos") return platform;
+	return arch === null ? null : `macos-${arch}`;
+}
+
 export interface OfficeArgs {
 	platform?: OfficePlatform;
+	// macOS only — which chip's bundle to fetch. Required when downloading a
+	// macOS bundle from a non-Mac, where nothing on the host can imply it.
+	arch?: OfficeArch;
 	dir?: string;
 	downloadOnly: boolean;
 	skipVerify: boolean;
@@ -86,6 +150,18 @@ export function parseOfficeArgs(argv: string[]): OfficeArgs {
 					return parsed;
 				}
 				parsed.platform = value as OfficePlatform;
+				break;
+			}
+			case "--arch": {
+				const value = takeValue();
+				const resolved = value
+					? OFFICE_ARCH_ALIASES[value.toLowerCase()]
+					: undefined;
+				if (!resolved) {
+					parsed.error = "--arch must be one of: arm64, x86_64";
+					return parsed;
+				}
+				parsed.arch = resolved;
 				break;
 			}
 			case "--dir": {
@@ -137,10 +213,11 @@ export function parseOfficeArgs(argv: string[]): OfficeArgs {
 }
 
 // Bundle and script names are a naming contract with the codev-scripts repo
-// (codev-office/*) — deterministic per platform, so no manifest round-trip is
-// needed before downloading.
-export function officeBundleName(platform: OfficePlatform): string {
-	return `codev-office-${platform}.zip`;
+// (codev-office/*) — deterministic per target, so no manifest round-trip is
+// needed before downloading. Bundles are named per TARGET (macOS is per chip),
+// scripts per PLATFORM (one macOS script, which picks its own bundle).
+export function officeBundleName(target: OfficeTarget): string {
+	return `codev-office-${target}.zip`;
 }
 
 export function officeScriptName(platform: OfficePlatform): string {
@@ -157,10 +234,11 @@ export function officeUninstallScriptName(platform: OfficePlatform): string {
 
 // Rough bundle sizes for the pre-download heads-up only; progress totals come
 // from the server's content-length.
-const APPROX_BUNDLE_MB: Record<OfficePlatform, number> = {
+const APPROX_BUNDLE_MB: Record<OfficeTarget, number> = {
 	ubuntu: 1200,
 	windows: 1400,
-	macos: 3100,
+	"macos-arm64": 1700,
+	"macos-x86_64": 1700,
 };
 
 // Adaptive size for progress lines: the setup script is ~13 KB and rendered
@@ -330,6 +408,15 @@ export async function runSkillOffice(
 		return 1;
 	}
 
+	// Only macOS has per-chip bundles; --arch anywhere else is a misunderstanding
+	// worth naming before anything is downloaded.
+	if (parsed.arch !== undefined && platform !== "macos") {
+		console.error(
+			`--arch only applies to macOS bundles (${platform} is x86_64 only).`,
+		);
+		return 1;
+	}
+
 	// Never execute a script built for another OS. The override stays useful
 	// for fetching a bundle to carry to a different machine.
 	let downloadOnly = parsed.downloadOnly;
@@ -340,6 +427,22 @@ export async function runSkillOffice(
 			`Downloading the ${platform} bundle on a ${hostPlatform ?? process.platform} machine — the installer will not be run here.`,
 		);
 		downloadOnly = true;
+	}
+
+	// macOS publishes one bundle per chip, so a macOS download needs an arch.
+	// The host's own arch may only stand in for it when the host IS the target:
+	// on a Linux/Windows x64 box, detectArch() would confidently answer x86_64
+	// for a `--platform macos` download and hand the user the wrong 1.7 GB.
+	// --arch always wins, including on a Mac staging a bundle for the other chip.
+	const arch = parsed.arch ?? (crossPlatform ? null : detectArch());
+	const target = officeTarget(platform, arch);
+	if (target === null) {
+		console.error(
+			crossPlatform
+				? "Downloading a macOS bundle from another OS needs --arch arm64 or --arch x86_64 — there is one bundle per chip and nothing here implies which."
+				: `Could not determine this Mac's architecture (node reports ${process.arch}) — pass --arch arm64 or --arch x86_64.`,
+		);
+		return 1;
 	}
 
 	// Windows staging prefers the profile-independent %PUBLIC% folder, but a
@@ -358,16 +461,16 @@ export async function runSkillOffice(
 		migrateLegacyOfficeDir(legacyOfficeDownloadsDir(), dir);
 	}
 
-	const bundle = officeBundleName(platform);
+	const bundle = officeBundleName(target);
 	const script = parsed.uninstall
 		? officeUninstallScriptName(platform)
 		: officeScriptName(platform);
 	if (parsed.uninstall) {
 		console.error(`CoDev Office offline skills uninstaller (${platform})`);
 	} else {
-		console.error(`CoDev Office offline skills bundle (${platform})`);
+		console.error(`CoDev Office offline skills bundle (${target})`);
 		console.error(
-			`Heads-up: the bundle is ~${APPROX_BUNDLE_MB[platform]} MB — downloading might ` +
+			`Heads-up: the bundle is ~${APPROX_BUNDLE_MB[target]} MB — downloading might ` +
 				"take a while. An interrupted run picks up where it left off; an " +
 				"already-downloaded bundle is reused after checking with the server " +
 				"that it is still the published version.",
@@ -379,7 +482,7 @@ export async function runSkillOffice(
 			: "office bundle download starting",
 		{
 			action: parsed.uninstall ? "office.uninstall" : "office.install",
-			extra: { platform, dir, downloadOnly },
+			extra: { platform, target, dir, downloadOnly },
 		},
 	);
 
