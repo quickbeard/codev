@@ -113,7 +113,7 @@ codevhub skill office --platform macos --arch arm64   # macOS needs a chip: arm6
 codevhub skill office --dir /media/usb/codev-office   # download somewhere else
 ```
 
-Because macOS has one bundle per chip, `--platform macos` from a non-Mac also needs `--arch arm64` or `--arch x86_64` — nothing on a Linux or Windows host implies which Mac the bundle is for, and guessing costs a 1.7 GB download. On a Mac the chip is detected for you (including through Rosetta), and `--arch` is only needed to stage a bundle for the *other* chip. There is still a single macOS setup script: it resolves its own bundle from `uname -m`.
+Because macOS has one bundle per chip, `--platform macos` from a non-Mac also needs `--arch arm64` or `--arch x86_64` — nothing on a Linux or Windows host implies which Mac the bundle is for, and guessing costs a 1.6 GB download. On a Mac the chip is detected for you (including through Rosetta), and `--arch` is only needed to stage a bundle for the *other* chip. There is still a single macOS setup script: it resolves its own bundle from `uname -m`.
 
 Both files land side by side, and the command prints the exact line to run from that folder (`bash codev-office-<os>-setup.sh`, or `powershell -ExecutionPolicy Bypass -File .\codev-office-windows-setup.ps1`). A bundle downloaded for another OS is never executed on this machine.
 

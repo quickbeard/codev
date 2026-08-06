@@ -386,7 +386,7 @@ describe("runSkillOffice", () => {
 
 	// macOS publishes one bundle per chip. From another OS nothing implies
 	// which, and the host's own x64 would be a confident wrong answer costing
-	// 1.7 GB — so this must fail loudly instead of picking a default.
+	// 1.6 GB — so this must fail loudly instead of picking a default.
 	// Pinned to linux so the macOS bundle is always the cross-platform case,
 	// whichever machine runs the suite.
 	test("a macOS bundle from another OS refuses without --arch", async () => {
