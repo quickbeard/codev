@@ -429,14 +429,14 @@ describe("runSkillOffice", () => {
 		const line = officeManualWindowsCommand("codev-office-windows-setup.ps1", [
 			"-SkipVerify",
 			"-SkillsRoot",
-			"C:\\Users\\Van Phong\\.config\\codev\\skills",
+			"C:\\Users\\Van Phong\\.claude\\skills",
 		]);
 		expect(line).toContain(
 			"powershell -ExecutionPolicy Bypass -File .\\codev-office-windows-setup.ps1 -SkipVerify",
 		);
 		// Space-containing paths are quoted so copy-paste survives them.
 		expect(line).toContain(
-			'-SkillsRoot "C:\\Users\\Van Phong\\.config\\codev\\skills"',
+			'-SkillsRoot "C:\\Users\\Van Phong\\.claude\\skills"',
 		);
 	});
 
