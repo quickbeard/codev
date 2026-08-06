@@ -69,12 +69,13 @@ import {
 	stripNoProxyFor,
 } from "@/lib/proxy.js";
 import { spawner } from "@/lib/reexec.js";
-import { agentOnPath } from "@/lib/run.js";
+import { agentOnPath, resolveAgentPath } from "@/lib/run.js";
 import { detectInstalledShims } from "@/lib/shims.js";
 import { isCertError, tlsApi } from "@/lib/tls.js";
 import {
 	describeStdin,
 	rawModeSupported,
+	stdinApi,
 	stdinKind,
 	terminalCause,
 	terminalEvidence,
@@ -1110,6 +1111,101 @@ const terminalCheck: Check = {
 	},
 };
 
+// Windows only. CoDev Code clears ENABLE_PROCESSED_INPUT on the shared console
+// while it runs, so ctrl+c arrives as a keypress its own double-ctrl+c exit can
+// handle. When that guard doesn't take, ctrl+c stays a console break delivered
+// to every process attached to the console — including the cmd.exe shims in the
+// launch chain, which stop at "Terminate batch job (Y/N)?" instead of exiting,
+// and the terminal looks frozen.
+//
+// The agent reports its own verdict (`codev debug console`): it runs under Bun
+// and owns the FFI that reads the console mode, and it installs the real guard
+// to check that clearing the bit actually sticks. This check only relays that.
+const consoleCtrlCCheck: Check = {
+	key: "console-ctrl-c",
+	label: "Console ctrl+c handling",
+	group: "environment",
+	run: async () => {
+		if (process.platform !== "win32")
+			return { status: "skip", detail: "Windows-only check." };
+		if (!stdinApi.isTty())
+			return {
+				status: "skip",
+				detail:
+					"stdin is not a console, so the console mode can't be read. Re-run from an interactive terminal.",
+			};
+		const agent = resolveAgentPath(CLI["codev-code"]);
+		if (!agent)
+			return {
+				status: "skip",
+				detail: "CoDev Code is not installed. Run `codevhub install`.",
+			};
+
+		// Resolved path, not the bare name: the bare name would re-enter our own
+		// PATH shim and relaunch the agent through the hub.
+		const probe = await execAsync(agent, ["debug", "console", "--json"], {
+			inheritStdin: true,
+		});
+		const report = parseConsoleReport(probe.stdout);
+		if (!report)
+			return {
+				status: "skip",
+				detail:
+					"This CoDev Code build has no `debug console` command. Run `codevhub update`.",
+			};
+		if (report.guardEffective)
+			return {
+				status: "pass",
+				detail: `ctrl+c reaches the agent as a keypress (${report.terminal}).`,
+			};
+
+		const cause = !report.ffi
+			? "CoDev Code could not read the console mode at all (kernel32 dlopen or GetConsoleMode failed)."
+			: !report.guardInstalled
+				? "CoDev Code could not install its ctrl+c guard on this console."
+				: "The guard installed but ENABLE_PROCESSED_INPUT stayed set, so something is re-applying it.";
+		return {
+			status: "fail",
+			detail: `ctrl+c will reach this console as a break event (${report.terminal}).`,
+			fix: "Quitting may hang. Until this is fixed, quit with `/exit` instead of ctrl+c, and report this doctor output.",
+			diagnosis: {
+				what: "ctrl+c is not being delivered to CoDev Code as a keypress.",
+				cause,
+				fix: "Report this output — the console mode line is the part that matters.",
+				context: [
+					`${process.platform} ${process.arch} · terminal ${report.terminal}`,
+					`console mode ${report.mode.before ?? "?"} -> ${report.mode.guarded ?? "?"} (guarded)`,
+				],
+				raw: probe.stdout.trim().split("\n"),
+			},
+		};
+	},
+};
+
+interface ConsoleReport {
+	terminal: string;
+	ffi: boolean;
+	guardInstalled: boolean;
+	guardEffective: boolean;
+	mode: { before: string | null; guarded: string | null };
+}
+
+// Returns undefined for anything that isn't the report — a build predating the
+// subcommand answers with yargs' usage text on stderr and an empty stdout.
+function parseConsoleReport(stdout: string): ConsoleReport | undefined {
+	const parsed: unknown = (() => {
+		try {
+			return JSON.parse(stdout.trim() || "null");
+		} catch {
+			return null;
+		}
+	})();
+	if (!parsed || typeof parsed !== "object") return undefined;
+	const report = parsed as Partial<ConsoleReport>;
+	if (typeof report.guardEffective !== "boolean") return undefined;
+	return report as ConsoleReport;
+}
+
 const systemCaCheck: Check = {
 	key: "system-ca",
 	label: "System certificate store",
@@ -1168,6 +1264,7 @@ export const PREFLIGHT_CHECKS: Check[] = [nodeVersionCheck, proxyEnvCheck];
 export const ENVIRONMENT_CHECKS: Check[] = [
 	nodeVersionCheck,
 	terminalCheck,
+	consoleCtrlCCheck,
 	npmAvailableCheck,
 	npmPrefixCheck,
 	npmRegistryCheck,

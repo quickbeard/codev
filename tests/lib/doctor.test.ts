@@ -39,6 +39,7 @@ import * as npm from "@/lib/npm.js";
 import * as proxy from "@/lib/proxy.js";
 import { envVarKeys, PROXY_APPLIED_ENV } from "@/lib/proxy.js";
 import * as reexec from "@/lib/reexec.js";
+import * as run from "@/lib/run.js";
 import * as tls from "@/lib/tls.js";
 import * as tty from "@/lib/tty.js";
 
@@ -684,6 +685,83 @@ describe("environment checks", () => {
 	// only ever report "pass" from inside SetupApp — it belongs to doctor alone.
 	test("terminal is not part of the install pre-flight", () => {
 		expect(PREFLIGHT_CHECKS.some((c) => c.key === "terminal")).toBe(false);
+	});
+
+	// The console check shells out to the agent and grades what it reports.
+	// `windows()` sets up the platform + TTY + installed-agent preconditions so
+	// each test only has to vary the agent's answer.
+	function windows(stdout: string): void {
+		Object.defineProperty(process, "platform", {
+			value: "win32",
+			configurable: true,
+		});
+		vi.spyOn(tty.stdinApi, "isTty").mockReturnValue(true);
+		vi.spyOn(run, "resolveAgentPath").mockReturnValue("C:\\bin\\codev.cmd");
+		vi.spyOn(npm, "execAsync").mockResolvedValue({
+			stdout,
+			stderr: "",
+			error: null,
+		});
+	}
+
+	const REPORT = {
+		terminal: "Windows Terminal",
+		ffi: true,
+		guardInstalled: true,
+		guardEffective: true,
+		mode: { before: "0x01f7", guarded: "0x01f6" },
+	};
+
+	test("console-ctrl-c is skipped off Windows", async () => {
+		Object.defineProperty(process, "platform", {
+			value: "darwin",
+			configurable: true,
+		});
+		expect((await runOne("console-ctrl-c")).status).toBe("skip");
+	});
+
+	test("console-ctrl-c passes when the guard clears processed input", async () => {
+		windows(JSON.stringify(REPORT));
+		const o = await runOne("console-ctrl-c");
+		expect(o.status).toBe("pass");
+		expect(o.detail).toContain("Windows Terminal");
+	});
+
+	test("console-ctrl-c fails and names the cause when the guard is ineffective", async () => {
+		windows(JSON.stringify({ ...REPORT, ffi: false, guardEffective: false }));
+		const o = await runOne("console-ctrl-c");
+		expect(o.status).toBe("fail");
+		expect(o.diagnosis?.cause).toContain("kernel32");
+		// The agent's own report is what a support ticket is read from.
+		expect(o.diagnosis?.raw.join(" ")).toContain("guardEffective");
+	});
+
+	test("console-ctrl-c distinguishes a guard that installed but did not stick", async () => {
+		windows(JSON.stringify({ ...REPORT, guardEffective: false }));
+		expect((await runOne("console-ctrl-c")).diagnosis?.cause).toContain(
+			"re-applying",
+		);
+	});
+
+	// An agent predating `debug console` answers with yargs usage on stderr and
+	// nothing parseable on stdout. That is a stale install, not a broken console.
+	test("console-ctrl-c is skipped on an agent without the subcommand", async () => {
+		windows("");
+		const o = await runOne("console-ctrl-c");
+		expect(o.status).toBe("skip");
+		expect(o.detail).toContain("codevhub update");
+	});
+
+	test("console-ctrl-c probes the resolved path, never the bare name", async () => {
+		windows(JSON.stringify(REPORT));
+		await runOne("console-ctrl-c");
+		// The bare name would re-enter our own PATH shim and relaunch the agent
+		// through the hub, with the upload daemon and key refresh in tow.
+		expect(npm.execAsync).toHaveBeenCalledWith(
+			"C:\\bin\\codev.cmd",
+			["debug", "console", "--json"],
+			{ inheritStdin: true },
+		);
 	});
 });
 

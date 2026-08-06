@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Tool } from "@/lib/configure.js";
@@ -89,7 +89,14 @@ export function recordCommands(): void {
 	commandLog.entries = [];
 }
 
-export function execAsync(file: string, args: string[]): Promise<ExecResult> {
+export function execAsync(
+	file: string,
+	args: string[],
+	// `inheritStdin` hands the child our real stdin instead of a pipe. Only the
+	// console-mode probe needs it: it reads the Windows console input mode
+	// through its stdin handle, and a piped stdin is not a console.
+	options: { inheritStdin?: boolean } = {},
+): Promise<ExecResult> {
 	// Every child process codev shells out to funnels through here (npm, the
 	// agent --version probes, `code --install-extension`, JetBrains CLIs,
 	// codegraph), so this one seam gives the diagnostic log full child-process
@@ -151,18 +158,59 @@ export function execAsync(file: string, args: string[]): Promise<ExecResult> {
 		// pass it as the only positional argument. Our args are simple npm
 		// flags + package names with no whitespace, so naive concatenation
 		// matches what Node was already doing — same semantics, no warning.
+		//
+		// Quote the file when it carries spaces: callers may pass a resolved
+		// absolute path (`C:\Program Files\...\codev.cmd`), which cmd.exe would
+		// otherwise split at the space. Args stay unquoted — see above.
+		const shellCommand = `${file.includes(" ") ? `"${file}"` : file} ${args.join(" ")}`;
+
+		if (options.inheritStdin) {
+			// execFile has no stdio option (neither its typings nor its docs), so
+			// a child that needs the caller's real stdin goes through spawn and
+			// collects the streams itself.
+			const child = USE_SHELL
+				? spawn(shellCommand, {
+						stdio: ["inherit", "pipe", "pipe"],
+						shell: true,
+					})
+				: spawn(file, args, { stdio: ["inherit", "pipe", "pipe"] });
+			const out: Buffer[] = [];
+			const err: Buffer[] = [];
+			child.stdout?.on("data", (chunk: Buffer) => out.push(chunk));
+			child.stderr?.on("data", (chunk: Buffer) => err.push(chunk));
+			child.once("error", (error) =>
+				done(
+					error as NodeJS.ErrnoException,
+					Buffer.concat(out).toString(),
+					Buffer.concat(err).toString(),
+				),
+			);
+			child.once("close", (code) =>
+				done(
+					code === 0
+						? null
+						: Object.assign(new Error(`${file} exited with code ${code}`), {
+								code: String(code),
+							}),
+					Buffer.concat(out).toString(),
+					Buffer.concat(err).toString(),
+				),
+			);
+			return;
+		}
+
 		if (USE_SHELL) {
 			execFile(
-				`${file} ${args.join(" ")}`,
+				shellCommand,
 				{ shell: true, encoding: "utf-8" },
 				(err, stdout, stderr) =>
 					done(err as NodeJS.ErrnoException | null, stdout, stderr),
 			);
-		} else {
-			execFile(file, args, { encoding: "utf-8" }, (err, stdout, stderr) =>
-				done(err as NodeJS.ErrnoException | null, stdout, stderr),
-			);
+			return;
 		}
+		execFile(file, args, { encoding: "utf-8" }, (err, stdout, stderr) =>
+			done(err as NodeJS.ErrnoException | null, stdout, stderr),
+		);
 	});
 }
 
