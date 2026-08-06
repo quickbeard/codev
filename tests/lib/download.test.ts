@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { downloadFile } from "@/lib/download.js";
 import {
+	detectArch,
 	ensureStagingDir,
 	installerArgs,
 	migrateLegacyOfficeDir,
@@ -324,10 +325,14 @@ describe("downloadFile ETag revalidation", () => {
 
 // End-to-end through runSkillOffice against the local server. The test host is
 // linux/macos in CI, so the detected platform maps to one of the bash bundles.
-// File names are the deterministic per-platform contract — no manifest.
+// File names are the deterministic contract — no manifest. Note the asymmetry
+// the macOS bundle split introduced: the BUNDLE is named per chip, the SCRIPT
+// is not, because the one macOS script resolves its own bundle from `uname -m`.
 describe("runSkillOffice", () => {
 	const hostPlatform = process.platform === "darwin" ? "macos" : "ubuntu";
-	const bundleName = `codev-office-${hostPlatform}.zip`;
+	const hostTarget =
+		hostPlatform === "macos" ? `macos-${detectArch() ?? "arm64"}` : "ubuntu";
+	const bundleName = `codev-office-${hostTarget}.zip`;
 	const scriptName = `codev-office-${hostPlatform}-setup.sh`;
 	const BUNDLE = Buffer.from("fake-bundle-bytes");
 	const SCRIPT = Buffer.from("#!/bin/sh\nexit 0\n");
@@ -377,6 +382,64 @@ describe("runSkillOffice", () => {
 		const dir = join(tempDir, "office");
 		const code = await runSkillOffice(["--dir", dir], baseUrl, async () => 7);
 		expect(code).toBe(7);
+	});
+
+	// macOS publishes one bundle per chip. From another OS nothing implies
+	// which, and the host's own x64 would be a confident wrong answer costing
+	// 1.7 GB — so this must fail loudly instead of picking a default.
+	// Pinned to linux so the macOS bundle is always the cross-platform case,
+	// whichever machine runs the suite.
+	test("a macOS bundle from another OS refuses without --arch", async () => {
+		const dir = join(tempDir, "office");
+		const spawns: string[] = [];
+		const code = await withPlatform("linux", () =>
+			runSkillOffice(
+				["--platform", "macos", "--dir", dir],
+				baseUrl,
+				async (c) => {
+					spawns.push(c);
+					return 0;
+				},
+			),
+		);
+		expect(code).toBe(1);
+		expect(spawns).toEqual([]);
+		expect(existsSync(join(dir, "codev-office-macos-x86_64.zip"))).toBe(false);
+		expect(existsSync(join(dir, "codev-office-macos-arm64.zip"))).toBe(false);
+	});
+
+	test("--platform macos --arch stages that chip's bundle", async () => {
+		objects.set("/codev-office-macos-arm64.zip", BUNDLE);
+		objects.set("/codev-office-macos-setup.sh", SCRIPT);
+		const dir = join(tempDir, "office");
+		const spawns: string[] = [];
+		const code = await withPlatform("linux", () =>
+			runSkillOffice(
+				["--platform", "macos", "--arch", "arm64", "--dir", dir],
+				baseUrl,
+				async (c) => {
+					spawns.push(c);
+					return 0;
+				},
+			),
+		);
+		expect(code).toBe(0);
+		expect(spawns).toEqual([]);
+		expect(existsSync(join(dir, "codev-office-macos-arm64.zip"))).toBe(true);
+		// One script for both chips — not codev-office-macos-arm64-setup.sh.
+		expect(existsSync(join(dir, "codev-office-macos-setup.sh"))).toBe(true);
+	});
+
+	test("--arch is refused for the x64-only bundles", async () => {
+		const dir = join(tempDir, "office");
+		const code = await withPlatform("linux", () =>
+			runSkillOffice(
+				["--platform", "windows", "--arch", "arm64", "--dir", dir],
+				baseUrl,
+				async () => 0,
+			),
+		);
+		expect(code).toBe(1);
 	});
 
 	test("a cross-platform --platform forces download-only", async () => {
