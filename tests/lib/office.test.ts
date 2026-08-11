@@ -3,11 +3,14 @@ import {
 	detectArch,
 	detectPlatform,
 	formatSize,
+	installerArgs,
 	officeBundleName,
+	officeManualWindowsCommand,
 	officeScriptName,
 	officeTarget,
 	officeUninstallScriptName,
 	parseOfficeArgs,
+	uninstallerArgs,
 } from "@/lib/office.js";
 
 describe("detectPlatform", () => {
@@ -150,6 +153,101 @@ describe("parseOfficeArgs", () => {
 
 	test("rejects unknown options", () => {
 		expect(parseOfficeArgs(["--wat"]).error).toMatch(/unknown option: --wat/);
+	});
+
+	test("--target-user, both spellings", () => {
+		expect(parseOfficeArgs(["--target-user", "minhnh49"]).targetUser).toBe(
+			"minhnh49",
+		);
+		expect(parseOfficeArgs(["--target-user=VTS\\minhnh49"]).targetUser).toBe(
+			"VTS\\minhnh49",
+		);
+	});
+
+	test("rejects --target-user without a value", () => {
+		expect(parseOfficeArgs(["--target-user"]).error).toMatch(
+			/--target-user requires an account name/,
+		);
+	});
+
+	// It applies to BOTH modes: install puts the skills in the right profile,
+	// uninstall clears them out of it again.
+	test("--target-user is legal in install and uninstall mode alike", () => {
+		expect(parseOfficeArgs(["--target-user", "jdoe"]).error).toBeUndefined();
+		expect(
+			parseOfficeArgs(["--uninstall", "--target-user", "jdoe"]).error,
+		).toBeUndefined();
+	});
+});
+
+// The scripts' own flag names — a drift here silently stops forwarding an
+// option the user explicitly asked for.
+describe("script argument forwarding", () => {
+	test("installer: -TargetUser is forwarded as a separate value token", () => {
+		expect(
+			installerArgs(parseOfficeArgs(["--target-user", "jdoe"]), "windows"),
+		).toEqual(["-TargetUser", "jdoe"]);
+	});
+
+	test("installer: combines with the other switches", () => {
+		expect(
+			installerArgs(
+				parseOfficeArgs(["--target-user", "jdoe", "--skip-verify"]),
+				"windows",
+			),
+		).toEqual(["-TargetUser", "jdoe", "-SkipVerify"]);
+	});
+
+	test("uninstaller: -TargetUser is forwarded alongside its own switches", () => {
+		expect(
+			uninstallerArgs(
+				parseOfficeArgs([
+					"--uninstall",
+					"--target-user",
+					"jdoe",
+					"--skills-only",
+					"--yes",
+				]),
+				"windows",
+			),
+		).toEqual(["-TargetUser", "jdoe", "-Yes", "-SkillsOnly"]);
+	});
+
+	test("nothing is forwarded when the flag is absent", () => {
+		expect(installerArgs(parseOfficeArgs([]), "windows")).toEqual([]);
+		expect(
+			uninstallerArgs(parseOfficeArgs(["--uninstall"]), "windows"),
+		).toEqual([]);
+	});
+
+	// A domain account (VTS\minhnh49) has no space, but a renamed local account
+	// can — the printed command has to stay copy-pasteable either way.
+	test("the printed Windows command quotes a value containing a space", () => {
+		expect(
+			officeManualWindowsCommand(
+				"codev-office-windows-setup.ps1",
+				installerArgs(
+					parseOfficeArgs(["--target-user", "First Last"]),
+					"windows",
+				),
+			),
+		).toBe(
+			'powershell -ExecutionPolicy Bypass -File .\\codev-office-windows-setup.ps1 -TargetUser "First Last"',
+		);
+	});
+
+	test("a domain-qualified account survives unquoted", () => {
+		expect(
+			officeManualWindowsCommand(
+				"codev-office-windows-setup.ps1",
+				installerArgs(
+					parseOfficeArgs(["--target-user", "VTS\\minhnh49"]),
+					"windows",
+				),
+			),
+		).toBe(
+			"powershell -ExecutionPolicy Bypass -File .\\codev-office-windows-setup.ps1 -TargetUser VTS\\minhnh49",
+		);
 	});
 });
 
