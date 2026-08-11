@@ -26,7 +26,7 @@ import { legacyOfficeDownloadsDir, officeDownloadsDir } from "@/lib/paths.js";
 // installer that prompts for sudo/UAC, which an Ink render would fight over.
 
 export const OFFICE_USAGE =
-	"Usage: codevhub skill office [--platform ubuntu|macos|windows] [--arch arm64|x86_64] [--dir <path>] [--download-only] [--skip-verify] [--force-skills]";
+	"Usage: codevhub skill office [--platform ubuntu|macos|windows] [--arch arm64|x86_64] [--dir <path>] [--target-user <name>] [--download-only] [--skip-verify] [--force-skills]";
 
 export type OfficePlatform = "ubuntu" | "macos" | "windows";
 export type OfficeArch = "arm64" | "x86_64";
@@ -110,6 +110,13 @@ export interface OfficeArgs {
 	downloadOnly: boolean;
 	skipVerify: boolean;
 	forceSkills: boolean;
+	// Windows only: the account that will USE the skills, when the installer is
+	// being run from an admin account instead of theirs. Forwarded to both the
+	// setup and uninstall scripts as -TargetUser. Without it there was no way to
+	// drive that case through codevhub at all — the whole point of the flag is
+	// that a human is running the install manually, which is exactly when they
+	// reach for codevhub.
+	targetUser?: string;
 	// Deliberately unadvertised (absent from OFFICE_USAGE and `codevhub help`):
 	// fetches and runs the published uninstall script instead of the installer.
 	uninstall: boolean;
@@ -170,6 +177,15 @@ export function parseOfficeArgs(argv: string[]): OfficeArgs {
 					return parsed;
 				}
 				parsed.dir = value;
+				break;
+			}
+			case "--target-user": {
+				const value = takeValue();
+				if (!value) {
+					parsed.error = "--target-user requires an account name";
+					return parsed;
+				}
+				parsed.targetUser = value;
 				break;
 			}
 			case "--download-only":
@@ -344,6 +360,7 @@ export function installerArgs(
 	// -SkipVerify / -ForceSkills switches.
 	if (platform === "windows") {
 		return [
+			...(parsed.targetUser ? ["-TargetUser", parsed.targetUser] : []),
 			...(parsed.skipVerify ? ["-SkipVerify"] : []),
 			...(parsed.forceSkills ? ["-ForceSkills"] : []),
 		];
@@ -360,6 +377,7 @@ export function uninstallerArgs(
 ): string[] {
 	if (platform === "windows") {
 		return [
+			...(parsed.targetUser ? ["-TargetUser", parsed.targetUser] : []),
 			...(parsed.yes ? ["-Yes"] : []),
 			...(parsed.skillsOnly ? ["-SkillsOnly"] : []),
 			...(parsed.purgeDownloads ? ["-PurgeDownloads"] : []),
@@ -412,6 +430,16 @@ export async function runSkillOffice(
 	if (parsed.arch !== undefined && platform !== "macos") {
 		console.error(
 			`--arch only applies to macOS bundles (${platform} is x86_64 only).`,
+		);
+		return 1;
+	}
+
+	// -TargetUser exists only in the PowerShell scripts. On Ubuntu and macOS the
+	// invoking user is recoverable from SUDO_USER, so there is nothing to name —
+	// forwarding it would just make the bash script choke on an unknown flag.
+	if (parsed.targetUser !== undefined && platform !== "windows") {
+		console.error(
+			`--target-user only applies to Windows (${platform} resolves the real user from SUDO_USER).`,
 		);
 		return 1;
 	}
@@ -546,8 +574,15 @@ export async function runSkillOffice(
 		console.error("  2. Copy-paste these two lines into that window:");
 		console.error(`       cd "${dir}"`);
 		console.error(`       ${commandLine}`);
+		// Name the line the target script actually ends with. Uninstall mode used
+		// to quote the installer's "Verification passed", which the uninstaller
+		// never prints - so the user sat waiting for a message that was not
+		// coming. The installer's own closing line is unconditional; its
+		// "Verification passed" is not, being absent under --skip-verify.
 		console.error(
-			'  3. Wait for the green "Verification passed" closing message',
+			parsed.uninstall
+				? '  3. Wait for the green "codev-office uninstall finished" line'
+				: '  3. Wait for the green "codev-office setup complete" closing line',
 		);
 		logInfo("office windows manual handoff", {
 			action: parsed.uninstall ? "office.uninstall" : "office.install",
