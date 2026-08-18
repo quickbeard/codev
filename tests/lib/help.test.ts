@@ -73,6 +73,17 @@ describe("printHelp", () => {
 		expect(output()).toContain("remove");
 	});
 
+	test("lists every format the office bundle covers", () => {
+		// The bundle ships four skills (minimax-docx, minimax-xlsx,
+		// pptx-generator, minimax-pdf); help used to name only the first two,
+		// so users had no way to know PPTX/PDF were installed.
+		printHelp();
+		const out = output();
+		for (const format of ["DOCX", "XLSX", "PPTX", "PDF"]) {
+			expect(out).toContain(format);
+		}
+	});
+
 	test("does not surface bare-agent launch commands as documented", () => {
 		// Agents (claude/codex/opencode) are launched via PATH shims set up by
 		// `codevhub install` — the bare `codev <agent>` form is intentionally

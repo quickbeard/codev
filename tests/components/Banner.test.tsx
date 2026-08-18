@@ -8,12 +8,13 @@ afterEach(() => {
 });
 
 describe("Banner", () => {
-	test("renders the CODEV ASCII logo", () => {
+	test("renders the CODEV wordmark", () => {
 		const { lastFrame } = render(<Banner />);
 
 		const output = lastFrame() ?? "";
-		expect(output).toContain("██████╗");
-		expect(output).toContain("╚═════╝");
+		// The lowercase "codev" pixel wordmark ported from CoDev Code.
+		expect(output).toContain("█▀▀▀ █▀▀█");
+		expect(output).toContain("▀▀▀▀ ▀▀▀▀");
 	});
 
 	test("renders the subtitle", () => {

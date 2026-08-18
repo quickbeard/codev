@@ -15,6 +15,9 @@ interface ExchangeResponse {
 	};
 }
 
+// Wire shape of the backend's /config payload. The `supabase*` keys are the
+// backend's own field names — renaming them here would silently stop parsing a
+// live response — so they're mapped onto CodevConfig's names below.
 interface ConfigResponse {
 	supabaseUrl: string;
 	supabaseAnonKey: string;
@@ -30,11 +33,11 @@ const MODELS_TIMEOUT_MS = 10_000;
 // A real (1-token) completion can be slower than listing models — it actually
 // hits inference — so give the smoke test more headroom.
 const SMOKE_TIMEOUT_MS = 15_000;
-// Backend endpoints are quick: token exchange, a tiny config blob, a Supabase
-// session exchange. Cap so a stalled gateway doesn't hang the CLI.
+// Backend endpoints are quick: token exchange, a tiny config blob, an analysis
+// backend session exchange. Cap so a stalled gateway doesn't hang the CLI.
 const BACKEND_TIMEOUT_MS = 10_000;
 
-export interface SupabaseSession {
+export interface AnalysisBackendSession {
 	access_token: string;
 	refresh_token?: string;
 	expires_at?: number;
@@ -68,8 +71,8 @@ export async function fetchApiKey(accessToken: string): Promise<string> {
 }
 
 // Pulls the runtime coordinates the CLI doesn't bake into its source — the
-// Supabase URL/anon key and the public gateway base URL. Called from auth.ts on
-// every successful SSO login (fresh + refresh) and persisted into
+// analysis backend URL/anon key and the public gateway base URL. Called from
+// auth.ts on every successful SSO login (fresh + refresh) and persisted into
 // ~/.codev-hub/auth.json by saveCodevConfig.
 export async function fetchCodevConfig(
 	accessToken: string,
@@ -93,8 +96,8 @@ export async function fetchCodevConfig(
 		);
 	}
 	return {
-		supabaseUrl: data.supabaseUrl,
-		supabaseAnonKey: data.supabaseAnonKey,
+		analysisBackendUrl: data.supabaseUrl,
+		analysisBackendAnonKey: data.supabaseAnonKey,
 		gatewayUrl: data.gatewayUrl,
 	};
 }
@@ -182,6 +185,78 @@ export async function fetchModels(
 	return ids;
 }
 
+// LiteLLM's aggregated per-model-name view. Lives at the gateway root next to
+// /key/info, not under /v1, so it reuses the root-stripping join rather than
+// gatewayV1Url.
+function modelGroupInfoUrl(baseUrl?: string): string {
+	const base = baseUrl ?? AI_GATEWAY_URL();
+	const stripped = base.replace(/\/?v1\/?$/, "");
+	const trailing = stripped.endsWith("/") ? stripped : `${stripped}/`;
+	return `${trailing}model_group/info`;
+}
+
+interface ModelGroupInfo {
+	model_group?: string;
+	max_input_tokens?: number | null;
+	max_output_tokens?: number | null;
+}
+
+// A window as the gateway reports it. Deliberately NOT lib/model-limits.ts's
+// ModelLimits: that module reads auth.json, which imports this one, and taking
+// its type as a value import would close a require cycle. Callers convert with
+// limitsFromWindow.
+export interface ModelWindow {
+	context: number;
+	output?: number;
+}
+
+// Per-model context windows, straight from the gateway. Entries whose
+// max_input_tokens the gateway hasn't been told are skipped, which today is all
+// of them — the field is nullable in LiteLLM and only populated when an admin
+// sets it on the model. So this returns {} on the current deployment and the
+// static table in lib/model-limits.ts carries every model; the moment an admin
+// fills the field in, that model becomes gateway-driven with no CoDev release.
+//
+// Unlike fetchModels, this NEVER throws and never fail-stops the caller: a
+// window is an optimization over a sane default, and install must not break
+// because a metadata endpoint 404s on some other gateway build.
+export async function fetchModelWindows(
+	apiKey: string,
+	baseUrl?: string,
+): Promise<Record<string, ModelWindow>> {
+	try {
+		const res = await loggedFetch(
+			"gateway.model-limits",
+			modelGroupInfoUrl(baseUrl),
+			{
+				method: "GET",
+				headers: {
+					accept: "application/json",
+					Authorization: `Bearer ${apiKey}`,
+				},
+				signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
+			},
+		);
+		if (!res.ok) return {};
+		const data = (await res.json()) as { data?: ModelGroupInfo[] };
+		const out: Record<string, ModelWindow> = {};
+		for (const entry of data.data ?? []) {
+			const id = entry.model_group;
+			const context = entry.max_input_tokens;
+			if (!id || typeof context !== "number" || context <= 0) continue;
+			const output =
+				typeof entry.max_output_tokens === "number" &&
+				entry.max_output_tokens > 0
+					? entry.max_output_tokens
+					: undefined;
+			out[id] = { context, ...(output ? { output } : {}) };
+		}
+		return out;
+	} catch {
+		return {};
+	}
+}
+
 // Confirms the configured key can actually RUN the chosen model through the
 // gateway. validateApiKey (/key/info) and fetchModels (/v1/models) only prove
 // the key exists and that models are listable — neither proves inference is
@@ -229,11 +304,14 @@ export async function smokeTestModel(
 	}
 }
 
-export async function fetchSupabaseSession(
+// The `/supabase/exchange` path and the endpoint's error text keep the
+// backend's own route name — it's the literal URL a reader has to grep the
+// backend for when this fails.
+export async function fetchAnalysisBackendSession(
 	accessToken: string,
-): Promise<SupabaseSession> {
+): Promise<AnalysisBackendSession> {
 	const res = await loggedFetch(
-		"backend.supabase-exchange",
+		"backend.analysis-exchange",
 		`${BACKEND_URL}/supabase/exchange`,
 		{
 			method: "POST",
@@ -250,5 +328,5 @@ export async function fetchSupabaseSession(
 		);
 	}
 
-	return (await res.json()) as SupabaseSession;
+	return (await res.json()) as AnalysisBackendSession;
 }

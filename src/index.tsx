@@ -3,14 +3,24 @@ import { join } from "node:path";
 import { styleText } from "node:util";
 import { render } from "ink";
 import { ConfigApp } from "@/ConfigApp.js";
+import { DoctorApp } from "@/DoctorApp.js";
 import { InstallApp } from "@/InstallApp.js";
 import { LoginApp } from "@/LoginApp.js";
 import { clearSkillhubCookie, logout } from "@/lib/auth.js";
 import { runClearLogs } from "@/lib/clear-logs.js";
 import { forwardToCodegraph } from "@/lib/codegraph.js";
+import {
+	MIN_NODE_STRING,
+	NODE_DOWNLOAD_URL,
+	nodeVersionMeets,
+	RECOMMENDED_NODE,
+} from "@/lib/const.js";
+import { doctorOutcome, rerunDoctorWithProxy } from "@/lib/doctor.js";
 import { printHelp, printVersion } from "@/lib/help.js";
-import { initLogging } from "@/lib/log.js";
+import { initLogging, logWarn } from "@/lib/log.js";
 import { runLogs } from "@/lib/logs.js";
+import { runSkillOffice } from "@/lib/office.js";
+import { applyEnvProxy } from "@/lib/proxy.js";
 import {
 	parseReadinessArgs,
 	type ReadinessCliOptions,
@@ -34,9 +44,18 @@ import {
 	type ShimAgent,
 	uninstallShims,
 } from "@/lib/shims.js";
-import { parsePullArgs, runSkillInstall } from "@/lib/skill-install.js";
+import {
+	PULL_USAGE,
+	parsePullArgs,
+	runSkillInstall,
+} from "@/lib/skill-install.js";
 import { parsePublishArgs, runSkillPublish } from "@/lib/skill-publish.js";
 import { runSkillSearch } from "@/lib/skill-search.js";
+import {
+	interactiveTerminalBlocker,
+	rawModeSupported,
+	stdinKind,
+} from "@/lib/tty.js";
 import { runUploadDaemon, spawnUploadDaemon } from "@/lib/upload.js";
 import { ModelApp } from "@/ModelApp.js";
 import { ReadinessApp } from "@/ReadinessApp.js";
@@ -46,16 +65,18 @@ import { SkillPushApp } from "@/SkillPushApp.js";
 import { UpdateApp } from "@/UpdateApp.js";
 import { UploadApp } from "@/UploadApp.js";
 
-// `node:sqlite` (used by the OpenCode provider) was added in Node 22.5 and
-// stabilized in Node 23.5. Earlier 22.x patches don't expose the module even
-// with --experimental-sqlite.
-const MIN_NODE_VERSION = "22.5.0";
-const [nodeMajor = 0, nodeMinor = 0] = process.versions.node
-	.split(".")
-	.map((n) => Number.parseInt(n, 10) || 0);
-if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 5)) {
+// The floor is 22.21.0 — the release that backported HTTP_PROXY/HTTPS_PROXY
+// support to the Node 22 line. Below it Node silently ignores proxy environment
+// variables, so on a corporate network every command fails at sign-in with no
+// way to fix it. (`node:sqlite`, the previous reason for a 22.5 floor, is
+// comfortably below this and still handled by the --experimental-sqlite
+// re-exec in lib/reexec.ts.)
+if (!nodeVersionMeets(process.versions.node)) {
 	console.error(
-		`CoDev requires Node.js >= ${MIN_NODE_VERSION}. Current version: ${process.versions.node}.`,
+		`CoDev requires Node.js >= ${MIN_NODE_STRING} (Node ${RECOMMENDED_NODE} recommended). ` +
+			`Current version: ${process.version}.\n` +
+			`Below ${MIN_NODE_STRING}, Node ignores HTTP_PROXY/HTTPS_PROXY entirely, so sign-in ` +
+			`cannot work behind a corporate proxy.\nDownload: ${NODE_DOWNLOAD_URL}`,
 	);
 	process.exit(1);
 }
@@ -87,14 +108,68 @@ function flagValue(argv: string[], name: string): string | undefined {
 	return undefined;
 }
 
+// Whether a skill subcommand should mount its Ink prompt rather than fall back
+// to its non-interactive runner. Two independent conditions:
+//
+//   - the keyboard, asked via `rawModeSupported()` — Ink gates raw mode on
+//     `stdin.isTTY` alone, and lib/tty.ts exists so that gate is stated in one
+//     place; re-deriving it here is how the two silently drift apart.
+//   - stdout being a terminal, which is not about the keyboard at all: it keeps
+//     `codevhub skill pull … | tee log` on the plain runner instead of piping a
+//     rendered Ink frame full of ANSI into a file.
+function skillPromptUsable(): boolean {
+	return rawModeSupported() && Boolean(process.stdout.isTTY);
+}
+
+// Refuse, with an explanation, when a command is about to mount a keyboard
+// prompt in a terminal that cannot supply one. Ink gates raw mode on
+// `stdin.isTTY` alone, so in Git Bash (an MSYS pipe, not a Windows console)
+// every prompt-bearing command otherwise dies inside a React mount effect with
+// a stack trace through the bundle and no hint of the cause.
+//
+// Only commands that mount an input component *unconditionally* are gated —
+// `update`, `logs`, the skill subcommands (which already fall back to their
+// non-interactive runners) and the agent passthroughs work in Git Bash today
+// and must keep working. `doctor` is deliberately never gated: it degrades to
+// skipping its own prompts, and it is the one command this user needs most.
+// `login` with both credentials and `remove --yes` are likewise non-interactive
+// and gated by their callers, not here.
+function requireInteractiveTerminal(name: string): void {
+	const blocker = interactiveTerminalBlocker(name);
+	if (!blocker) return;
+	logWarn(`${name} requires an interactive terminal`, {
+		action: "terminal.unsupported",
+		extra: { command: name, stdinKind: stdinKind() },
+	});
+	console.error(blocker);
+	process.exit(1);
+}
+
 // Diagnostic logging (~/.codev-hub/logs/codev-YYYYMMDD.ndjson, ECS NDJSON) starts
 // before dispatch so every command logs its start/end and crashes. File-only —
 // never stdout/stderr, which the Ink apps own.
 initLogging(command ?? "help", args);
 
-// Rewrite shims left behind by pre-0.4 hub versions (their bodies re-exec the
-// old `codev` hub command, which is now the agent). Best-effort: a filesystem
-// hiccup here must never block the actual command.
+// Node does not honor HTTP_PROXY/HTTPS_PROXY unless NODE_USE_ENV_PROXY is set,
+// and it reads that only at startup. Users who follow the install guide and
+// export just the proxy variables therefore get no proxy at all — silently.
+// Enable it here, before dispatch, so every command benefits rather than just
+// the one being debugged. Best-effort: a failure never blocks the command,
+// because `codevhub doctor` must still be able to run and explain why.
+{
+	const proxyResult = applyEnvProxy();
+	if (proxyResult.action === "reexec") process.exit(proxyResult.exitCode ?? 1);
+	if (proxyResult.noProxyWarning) {
+		// Not fixable on the user's behalf — rewriting their NO_PROXY would be
+		// overreach — but it silently defeats the proxy, so say so once.
+		process.stderr.write(`Warning: ${proxyResult.noProxyWarning}\n`);
+	}
+}
+
+// Rewrite shims left behind by older hub versions (pre-0.4 bodies re-exec the
+// old `codev` hub command, which is now the agent; later ones lack the
+// missing-hub fallback). Best-effort: a filesystem hiccup here must never
+// block the actual command.
 try {
 	repairShims();
 } catch {
@@ -129,6 +204,7 @@ switch (command) {
 		process.exit(0);
 		break;
 	case "install": {
+		requireInteractiveTerminal("install");
 		const { waitUntilExit } = render(<InstallApp />);
 		try {
 			await waitUntilExit();
@@ -139,6 +215,7 @@ switch (command) {
 		break;
 	}
 	case "config": {
+		requireInteractiveTerminal("config");
 		const { waitUntilExit } = render(<ConfigApp />);
 		try {
 			await waitUntilExit();
@@ -146,6 +223,26 @@ switch (command) {
 		} catch {
 			process.exit(1);
 		}
+		break;
+	}
+	// Pre-flight for everything `install` depends on: Node version, npm, proxy
+	// and TLS environment, network reachability, sign-in, API key, and a real
+	// LLM completion. Read-only — it never installs or configures anything.
+	case "doctor": {
+		const { waitUntilExit } = render(
+			<DoctorApp force={args.includes("--force") || args.includes("-f")} />,
+		);
+		try {
+			await waitUntilExit();
+		} catch {
+			process.exit(1);
+		}
+		// The app cannot re-exec itself: spawnSync with inherited stdio while Ink
+		// still owns the TTY corrupts the terminal. It records the intent instead
+		// and we act on it here, now that Ink has unmounted.
+		const retry = doctorOutcome.retryWithProxy;
+		if (retry) process.exit(rerunDoctorWithProxy(retry, args));
+		process.exit(doctorOutcome.exitCode);
 		break;
 	}
 	case "update": {
@@ -176,6 +273,10 @@ switch (command) {
 			);
 			process.exit(1);
 		}
+		// Only the admin *form* needs the keyboard. SSO sign-in completes through
+		// the browser and the loopback callback, so it stays available in Git Bash
+		// — <Login> just hides its paste-back fallback there.
+		if (admin && username === undefined) requireInteractiveTerminal("login");
 		const { waitUntilExit } = render(
 			<LoginApp
 				force={force}
@@ -205,6 +306,9 @@ switch (command) {
 		// Undocumented (see `restore` below). Long form only — no `-f` alias, so a
 		// reflex `-f` borrowed from `upload` can't unconditionally delete configs.
 		const force = args.includes("--force");
+		// The confirmation prompt is the only keyboard use; `--yes` skips straight
+		// to the work and stays usable without a TTY.
+		if (!skipConfirm) requireInteractiveTerminal("remove");
 		const { waitUntilExit } = render(
 			<RemoveApp skipConfirm={skipConfirm} force={force} />,
 		);
@@ -217,6 +321,7 @@ switch (command) {
 		break;
 	}
 	case "model": {
+		requireInteractiveTerminal("model");
 		const { waitUntilExit } = render(<ModelApp />);
 		try {
 			await waitUntilExit();
@@ -315,11 +420,16 @@ switch (command) {
 	// `skill <subcommand>`: operations against the SkillHub registry. Namespaced
 	// so it doesn't collide with `codevhub install` (which installs agents).
 	// `pull` downloads/installs a skill (not `install`, to avoid that confusion);
-	// `push` publishes one; whoami migrates here next.
+	// `push` publishes one; whoami migrates here next. `office` fetches the
+	// CoDev Office offline skills bundle from codev-storage (anonymous — unlike
+	// the other skill subcommands it must never force a login).
 	case "skill": {
 		const [sub, ...rest] = args;
 		if (sub === "search") {
 			process.exit(await runSkillSearch(rest));
+		}
+		if (sub === "office") {
+			process.exit(await runSkillOffice(rest));
 		}
 		if (sub === "push") {
 			const parsed = parsePublishArgs(rest);
@@ -331,7 +441,7 @@ switch (command) {
 			}
 			// Interactive TTY (and not --json): preview + confirm before uploading
 			// (Ink). Otherwise (piped/CI, or --json) go the plain runner.
-			const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+			const interactive = skillPromptUsable();
 			if (interactive && !parsed.json) {
 				let ok = true;
 				const { waitUntilExit } = render(
@@ -361,21 +471,22 @@ switch (command) {
 				process.exit(1);
 			}
 			if (!parsed.target) {
-				console.error(
-					"Usage: codevhub skill pull <name|id> [--dir <path>] [--force] [--json]",
-				);
+				console.error(PULL_USAGE);
 				process.exit(1);
 			}
-			// Interactive + no explicit --dir: prompt for the location (Ink).
-			// Otherwise (--dir given, or piped/CI) go the plain non-interactive path.
-			const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-			if (parsed.dir === undefined && interactive) {
+			// Interactive + no explicit location: prompt for one (Ink). Otherwise
+			// (--here/--global/--dir given, or piped/CI) go the plain
+			// non-interactive path.
+			const interactive = skillPromptUsable();
+			const located = parsed.dir !== undefined || parsed.location !== undefined;
+			if (!located && interactive) {
 				let ok = true;
 				const { waitUntilExit } = render(
 					<SkillPullApp
 						target={parsed.target}
 						force={parsed.force}
 						json={parsed.json}
+						agents={parsed.agents}
 						onDone={(v) => {
 							ok = v;
 						}}
@@ -392,8 +503,8 @@ switch (command) {
 		}
 		console.error(
 			sub === undefined
-				? "Usage: codevhub skill <search|pull|push> ..."
-				: `Unknown skill subcommand: ${sub}. Valid: search, pull, push.`,
+				? "Usage: codevhub skill <search|pull|push|office> ..."
+				: `Unknown skill subcommand: ${sub}. Valid: search, pull, push, office.`,
 		);
 		process.exit(1);
 		break;

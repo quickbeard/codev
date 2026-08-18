@@ -18,6 +18,7 @@ import {
 	clearSkillhubCookie,
 	loadApiKey,
 	loadAuth,
+	loadModelLimits,
 	loadSkillhubCookie,
 	login,
 	logout,
@@ -245,6 +246,48 @@ describe("logout", () => {
 		});
 	});
 
+	// The provider pair identifies a manually-named provider and is what every
+	// config writer keys off. Losing it here reverts the user to the netGate
+	// default on the next model switch or launch-time key refresh, silently.
+	test("preserves the provider pair alongside the key it belongs to", async () => {
+		const dir = join(tempDir, ".codev-hub");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({
+				...VALID_AUTH,
+				api_key: "sk-keep-me",
+				model: "m1",
+				provider_id: "my-corp-gw",
+				provider_name: "My Corp GW",
+			}),
+		);
+		expect(await logout()).toBe(true);
+		expect(loadApiKey()).toEqual({
+			apiKey: "sk-keep-me",
+			baseUrl: undefined,
+			model: "m1",
+			providerId: "my-corp-gw",
+			providerName: "My Corp GW",
+		});
+	});
+
+	test("preserves cached per-model windows", async () => {
+		const dir = join(tempDir, ".codev-hub");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "auth.json"),
+			JSON.stringify({
+				...VALID_AUTH,
+				model_limits: { "a/model": { context: 500000, trigger: 400000 } },
+			}),
+		);
+		expect(await logout()).toBe(true);
+		expect(loadModelLimits()).toEqual({
+			"a/model": { context: 500000, trigger: 400000 },
+		});
+	});
+
 	test("returns false when only api_key is present (already logged out)", async () => {
 		const dir = join(tempDir, ".codev-hub");
 		mkdirSync(dir, { recursive: true });
@@ -255,14 +298,14 @@ describe("logout", () => {
 		expect(await logout()).toBe(false);
 	});
 
-	test("preserves supabase config when stripping SSO fields", async () => {
+	test("preserves analysis backend config when stripping SSO fields", async () => {
 		const dir = join(tempDir, ".codev-hub");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
 			join(dir, "auth.json"),
 			JSON.stringify({
 				...VALID_AUTH,
-				supabase_url: "https://keep.supabase.co",
+				supabase_url: "https://keep.analysis.example.com",
 				supabase_anon_key: "keep-anon",
 				gateway_url: "https://keep.example.com/gateway",
 			}),
@@ -272,14 +315,14 @@ describe("logout", () => {
 		const after = JSON.parse(
 			readFileSync(join(dir, "auth.json"), "utf-8"),
 		) as Record<string, unknown>;
-		expect(after.supabase_url).toBe("https://keep.supabase.co");
+		expect(after.supabase_url).toBe("https://keep.analysis.example.com");
 		expect(after.supabase_anon_key).toBe("keep-anon");
 		expect(after.gateway_url).toBe("https://keep.example.com/gateway");
 		expect(after.access_token).toBeUndefined();
 		expect(after.refresh_token).toBeUndefined();
 	});
 
-	test("preserves both api_key and supabase config when stripping SSO", async () => {
+	test("preserves both api_key and analysis backend config when stripping SSO", async () => {
 		const dir = join(tempDir, ".codev-hub");
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(
@@ -287,7 +330,7 @@ describe("logout", () => {
 			JSON.stringify({
 				...VALID_AUTH,
 				api_key: "sk-keep",
-				supabase_url: "https://keep.supabase.co",
+				supabase_url: "https://keep.analysis.example.com",
 				supabase_anon_key: "keep-anon",
 			}),
 		);
@@ -296,21 +339,21 @@ describe("logout", () => {
 		const after = JSON.parse(
 			readFileSync(join(dir, "auth.json"), "utf-8"),
 		) as Record<string, unknown>;
-		expect(after.supabase_url).toBe("https://keep.supabase.co");
+		expect(after.supabase_url).toBe("https://keep.analysis.example.com");
 	});
 });
 
 describe("saveCodevConfig", () => {
-	test("round-trips the Supabase and gateway fields through auth.json", () => {
+	test("round-trips the analysis backend and gateway fields through auth.json", () => {
 		saveCodevConfig({
-			supabaseUrl: "https://x.supabase.co",
-			supabaseAnonKey: "anon-x",
+			analysisBackendUrl: "https://x.analysis.example.com",
+			analysisBackendAnonKey: "anon-x",
 			gatewayUrl: "https://gw.example.com/gateway",
 		});
 		const file = JSON.parse(
 			readFileSync(join(tempDir, ".codev-hub", "auth.json"), "utf-8"),
 		) as Record<string, unknown>;
-		expect(file.supabase_url).toBe("https://x.supabase.co");
+		expect(file.supabase_url).toBe("https://x.analysis.example.com");
 		expect(file.supabase_anon_key).toBe("anon-x");
 		expect(file.gateway_url).toBe("https://gw.example.com/gateway");
 	});
@@ -318,8 +361,8 @@ describe("saveCodevConfig", () => {
 	test("does not clobber SSO fields when saving codevhub config", () => {
 		writeAuthFile(VALID_AUTH);
 		saveCodevConfig({
-			supabaseUrl: "https://x.supabase.co",
-			supabaseAnonKey: "anon-x",
+			analysisBackendUrl: "https://x.analysis.example.com",
+			analysisBackendAnonKey: "anon-x",
 			gatewayUrl: "https://gw.example.com/gateway",
 		});
 		expect(loadAuth()?.access_token).toBe("test-access-token");
@@ -328,8 +371,8 @@ describe("saveCodevConfig", () => {
 	test("does not clobber api_key when saving codevhub config", () => {
 		saveApiKey({ apiKey: "sk-merged" });
 		saveCodevConfig({
-			supabaseUrl: "https://x.supabase.co",
-			supabaseAnonKey: "anon-x",
+			analysisBackendUrl: "https://x.analysis.example.com",
+			analysisBackendAnonKey: "anon-x",
 			gatewayUrl: "https://gw.example.com/gateway",
 		});
 		expect(loadApiKey()?.apiKey).toBe("sk-merged");
@@ -342,8 +385,8 @@ describe("saveCodevConfig", () => {
 		"file is written with mode 0600",
 		() => {
 			saveCodevConfig({
-				supabaseUrl: "u",
-				supabaseAnonKey: "a",
+				analysisBackendUrl: "u",
+				analysisBackendAnonKey: "a",
 				gatewayUrl: "g",
 			});
 			const stat = statSync(join(tempDir, ".codev-hub", "auth.json"));
@@ -353,12 +396,12 @@ describe("saveCodevConfig", () => {
 });
 
 describe("refreshCodevConfig", () => {
-	test("fetches /config and writes Supabase coords and gateway URL into auth.json", async () => {
+	test("fetches /config and writes analysis backend coords and gateway URL into auth.json", async () => {
 		const fetchSpy = mockAuthFetch({
 			"/codev-backend/config": async () =>
 				new Response(
 					JSON.stringify({
-						supabaseUrl: "https://fresh.supabase.co",
+						supabaseUrl: "https://fresh.analysis.example.com",
 						supabaseAnonKey: "fresh-anon",
 						gatewayUrl: "https://fresh.example.com/gateway",
 					}),
@@ -370,7 +413,7 @@ describe("refreshCodevConfig", () => {
 			const saved = JSON.parse(
 				readFileSync(join(tempDir, ".codev-hub", "auth.json"), "utf-8"),
 			) as Record<string, unknown>;
-			expect(saved.supabase_url).toBe("https://fresh.supabase.co");
+			expect(saved.supabase_url).toBe("https://fresh.analysis.example.com");
 			expect(saved.supabase_anon_key).toBe("fresh-anon");
 			expect(saved.gateway_url).toBe("https://fresh.example.com/gateway");
 		} finally {

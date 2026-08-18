@@ -17,6 +17,9 @@ beforeEach(() => {
 	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
 	// hit the temp home on every platform.
 	vi.stubEnv("USERPROFILE", tempHome);
+	// ModelSelect refreshes the cached per-model windows alongside the model
+	// list; unmocked it would issue a real request.
+	vi.spyOn(backend, "fetchModelWindows").mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -125,6 +128,11 @@ describe("ModelApp", () => {
 		// Two-tool list uses "and", not a comma.
 		expect(history).toContain(
 			"Default model updated to new-alpha for Claude Code and OpenCode.",
+		);
+		// OpenCode's config carries no model pin (it switches in-CLI), so the
+		// line above must not read as authoritative for it.
+		expect(history).toContain(
+			"In OpenCode, switch models anytime with /models.",
 		);
 		expect(configureClaude).toHaveBeenCalledWith({
 			apiKey: "sk-existing",

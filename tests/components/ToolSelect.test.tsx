@@ -7,17 +7,27 @@ afterEach(() => {
 });
 
 describe("ToolSelect", () => {
-	test("renders all tool options", () => {
+	test("renders the visible tool options", () => {
 		const onConfirm = vi.fn();
 		const { lastFrame } = render(<ToolSelect onConfirm={onConfirm} />);
 
 		const output = lastFrame() ?? "";
 		expect(output).toContain("CoDev Code");
 		expect(output).toContain("Claude Code");
-		expect(output).toContain("OpenCode");
-		expect(output).toContain("Codex");
 		expect(output).toContain("Claude Code (extension)");
 		expect(output).toContain("Continue (extension)");
+	});
+
+	test("hides Codex and OpenCode from the selection UI", () => {
+		// Both are temporarily withheld from users — still fully wired downstream,
+		// just not rendered or selectable here. Remove the `hidden` flag in
+		// ToolSelect's TOOLS array to bring them back.
+		const onConfirm = vi.fn();
+		const { lastFrame } = render(<ToolSelect onConfirm={onConfirm} />);
+
+		const output = lastFrame() ?? "";
+		expect(output).not.toContain("Codex");
+		expect(output).not.toContain("OpenCode");
 	});
 
 	test("emits the `claude-code-ext` sentinel when the Claude Code (extension) row is picked", async () => {
@@ -28,8 +38,10 @@ describe("ToolSelect", () => {
 		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
-		// Four down-arrows to reach the 5th (Claude Code (extension)) row.
-		for (let i = 0; i < 4; i++) {
+		// Two down-arrows to reach the 3rd (Claude Code (extension)) row —
+		// Codex and OpenCode are hidden, so the extension rows sit right below
+		// Claude Code.
+		for (let i = 0; i < 2; i++) {
 			stdin.write("\x1B[B");
 			await new Promise((r) => setTimeout(r, 50));
 		}
@@ -45,8 +57,10 @@ describe("ToolSelect", () => {
 		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
-		// Five down-arrows to reach the 6th (Continue (extension)) row.
-		for (let i = 0; i < 5; i++) {
+		// Three down-arrows to reach the 4th (Continue (extension)) row —
+		// Codex and OpenCode are hidden, so it sits directly below the Claude
+		// Code (extension) row.
+		for (let i = 0; i < 3; i++) {
 			stdin.write("\x1B[B");
 			await new Promise((r) => setTimeout(r, 50));
 		}
@@ -63,8 +77,8 @@ describe("ToolSelect", () => {
 		const { lastFrame } = render(<ToolSelect onConfirm={onConfirm} />);
 
 		const output = lastFrame() ?? "";
-		// Exactly one filled box — the always-on CoDev Code row — and the five
-		// optional agents render unchecked.
+		// Exactly one filled box — the always-on CoDev Code row — and the
+		// remaining optional agents render unchecked.
 		expect((output.match(/■/g) ?? []).length).toBe(1);
 		expect(output).toContain("□");
 		expect(output).toContain("(always installed)");
@@ -139,7 +153,9 @@ describe("ToolSelect", () => {
 		const onConfirm = vi.fn();
 		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
 
-		// Down to Claude Code (row 1), select, down to Codex (row 2), select.
+		// Down to Claude Code (row 1), select, down to Claude Code (extension)
+		// (row 2), select. Codex/OpenCode are hidden, so the extension row is
+		// the next selectable option below Claude Code.
 		stdin.write("\x1B[B");
 		await new Promise((r) => setTimeout(r, 50));
 		stdin.write(" ");
@@ -156,24 +172,8 @@ describe("ToolSelect", () => {
 		expect(onConfirm).toHaveBeenCalledWith([
 			"codev-code",
 			"claude-code",
-			"codex",
+			"claude-code-ext",
 		]);
-	});
-
-	test("can select Codex by moving cursor down twice", async () => {
-		const onConfirm = vi.fn();
-		const { stdin } = render(<ToolSelect onConfirm={onConfirm} />);
-
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\x1B[B");
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write(" ");
-		await new Promise((r) => setTimeout(r, 50));
-		stdin.write("\r");
-		await new Promise((r) => setTimeout(r, 50));
-
-		expect(onConfirm).toHaveBeenCalledWith(["codev-code", "codex"]);
 	});
 
 	test("can deselect a tool", async () => {

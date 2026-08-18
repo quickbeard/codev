@@ -2,7 +2,7 @@
 
 CoDev — AI Coding Agent Hub. Install, configure, and manage multiple AI coding agents.
 
-Requires Node.js ≥ 22.5 (Node 24+ recommended).
+Requires Node.js ≥ 22.21 (Node 24+ recommended).
 
 ## Install
 
@@ -13,10 +13,73 @@ npm install -g codev-ai
 Then run:
 
 ```bash
+codevhub doctor    # check your environment and network first
 codevhub install
 ```
 
 After install, go to your project and type `codev`, `claude`, `codex`, or `opencode` to launch.
+
+## Check your setup first: `codevhub doctor`
+
+On a corporate network — behind a proxy, a TLS-inspecting gateway, or an
+internal npm mirror — run this before `codevhub install`:
+
+```bash
+codevhub doctor
+codevhub doctor --force    # also force a real sign-in instead of reusing the cached session
+```
+
+It is read-only (it installs and configures nothing) and checks, in order:
+
+- **Environment** — Node version, whether your terminal can accept keyboard
+  input, npm, the global npm prefix (on `PATH` and writable), the npm
+  registry/proxy configuration, your proxy and TLS environment variables, and
+  whether the OS certificate store is readable.
+- **Network** — the CoDev backend and the npm registry are actually reachable.
+- **Account** — sign-in, gateway API key, CoDev configuration, and the analysis
+  backend (used by `codevhub upload`).
+- **LLM access** — the key is valid, models are listable, and a real one-token
+  completion succeeds. Only the last of these proves inference is permitted;
+  `/key/info` and `/v1/models` both pass for a key that is then 403'd on every
+  completion.
+- **This machine** — what is already installed, configured, and backed up.
+
+Failures expand in place into what happened, the most likely cause given your
+proxy and TLS settings, the fix, and the raw error chain — never a bare
+`fetch failed`. If the network checks fail it offers to re-run everything
+through a proxy you type in (nothing is written to disk), so you see the fix
+work before it prints the exact `export` / `setx` commands to make it permanent.
+
+Exit code is 0 when nothing failed — warnings do not fail it — and 1 otherwise.
+
+Every run also writes a machine-readable report to
+**`~/.codev-hub/doctor-report.json`**, replacing the previous one. It holds the
+full results, diagnoses, your Node and proxy environment, and the suggested next
+steps — attach it to a support ticket rather than pasting screenshots. Secrets
+are scrubbed before it is written. The same results additionally land in the
+diagnostic log, so `codevhub logs` can replay a whole run.
+
+### Working behind a proxy
+
+Node does **not** honor `HTTP_PROXY`/`HTTPS_PROXY` on its own — it needs
+`NODE_USE_ENV_PROXY=1`, read at startup. CoDev applies that for you when it sees
+a proxy configured, but it is worth setting permanently:
+
+```bash
+export HTTP_PROXY=http://<PROXY-IP>:<PROXY-PORT>
+export HTTPS_PROXY=http://<PROXY-IP>:<PROXY-PORT>
+export NODE_USE_ENV_PROXY=1
+export NODE_USE_SYSTEM_CA=1
+```
+
+Two traps `codevhub doctor` will catch for you:
+
+- **`NO_PROXY` covering the CoDev backend** (for example a blanket
+  `*.viettel.vn`) routes sign-in traffic *around* the proxy and straight into
+  the firewall. This is the usual cause of `Login failed`.
+- **npm keeps its own proxy and TLS configuration**, separate from these
+  variables — `npm config set proxy`, `https-proxy`, `cafile`, `registry`. A
+  working `codevhub` says nothing about whether `npm i -g` will work.
 
 ## CodeGraph integration
 
@@ -28,6 +91,33 @@ When you run `codevhub install` or `codevhub config`, CoDev also installs [CodeG
 cd your-project
 codevhub init        # initialize + index the current project (one time)
 ```
+
+## CoDev Office skills (offline bundle)
+
+`codevhub skill office` installs the CoDev Office skills so your agents can create, read and edit real DOCX, XLSX, PPTX and PDF files. Everything ships in one offline bundle — no login and no per-skill downloads:
+
+```bash
+codevhub skill office
+```
+
+It picks the bundle for your OS — on macOS, for your chip: Apple Silicon and Intel get separate bundles — and downloads it into `~/.codev-hub/office` (on Windows: `%PUBLIC%\Downloads\codev-office`). On macOS/Linux it then runs the bundled setup script, which may prompt for `sudo`; on Windows it prints the exact command to paste into an elevated PowerShell instead of launching the installer itself.
+
+**The bundle is large**, and the command prints its approximate size before downloading. The download folder is kept between runs, so an interrupted transfer resumes where it left off and an already-downloaded bundle is reused. To force a completely fresh download, delete that folder.
+
+To fetch the bundle now and install later — or to stage it for a machine that has no internet access:
+
+```bash
+codevhub skill office --download-only                 # download for this OS, don't install
+codevhub skill office --platform windows              # download another OS's bundle (implies --download-only)
+codevhub skill office --platform macos --arch arm64   # macOS needs a chip: arm64 or x86_64
+codevhub skill office --dir /media/usb/codev-office   # download somewhere else
+```
+
+Because macOS has one bundle per chip, `--platform macos` from a non-Mac also needs `--arch arm64` or `--arch x86_64` — nothing on a Linux or Windows host implies which Mac the bundle is for. On a Mac the chip is detected for you (including through Rosetta), and `--arch` is only needed to stage a bundle for the *other* chip. There is still a single macOS setup script: it resolves its own bundle from `uname -m`.
+
+Both files land side by side, and the command prints the exact line to run from that folder (`bash codev-office-<os>-setup.sh`, or `powershell -ExecutionPolicy Bypass -File .\codev-office-windows-setup.ps1`). A bundle downloaded for another OS is never executed on this machine.
+
+Two flags are passed straight through to the setup script: `--skip-verify` (skip the bundle's own SHA-256 check) and `--force-skills` (replace already-installed skills with the bundled versions).
 
 ## Switching between self-hosted and proprietary models
 

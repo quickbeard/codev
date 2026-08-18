@@ -18,12 +18,18 @@ import * as codegraph from "@/lib/codegraph.js";
 import * as configure from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
 import * as npm from "@/lib/npm.js";
+import * as ripgrep from "@/lib/ripgrep.js";
+import * as shims from "@/lib/shims.js";
 import {
 	vscodeSettingsPath,
 	vscodeUserDataDir,
 } from "@/lib/vscode-settings.js";
 
 function stubModels() {
+	// ModelSelect also refreshes the cached per-model windows. Unmocked it would
+	// issue a real request and, on a non-empty result, write to the developer's
+	// real ~/.codev-hub/auth.json.
+	vi.spyOn(backend, "fetchModelWindows").mockResolvedValue({});
 	return vi
 		.spyOn(backend, "fetchModels")
 		.mockResolvedValue(["m-alpha", "m-beta"]);
@@ -80,6 +86,13 @@ beforeEach(() => {
 		status: "skipped",
 		targets: [],
 	});
+	// The finalize Phase also stages ripgrep into CoDev Code's cache dir (a
+	// real download from the landing page). Default to "present" so full-flow
+	// tests neither hit the network nor write outside the temp home.
+	vi.spyOn(ripgrep, "installRipgrep").mockResolvedValue({
+		status: "present",
+		path: null,
+	});
 	// The post-model gateway smoke test hits the gateway with a real completion;
 	// default it to a pass so full-flow tests don't make a network call. The
 	// failure-path test overrides it.
@@ -97,6 +110,20 @@ beforeEach(() => {
 			created: true,
 		},
 	]);
+	// The finalize Phase calls installShims(), and on Windows that shells out to
+	// a real `powershell -Command` (execFileSync — NOT the mocked execFile) to
+	// rewrite the user-scope PATH in the registry. That's a synchronous spawn
+	// which blocks the event loop for ~10s on its cold start, so the first flow
+	// to reach finalize blows past waitForFrame's budget and never renders the
+	// done screen — and it mutates the PATH of whatever machine runs the suite.
+	// lib/shims.test.ts skips its installShims block on Windows for the same
+	// reason; nothing here asserts shim files, so stub the whole call.
+	vi.spyOn(shims, "installShims").mockReturnValue({
+		shimDir: join(installAppTempHome, ".codev-hub", "bin"),
+		shimsWritten: [],
+		rcFilesUpdated: [],
+		windowsUserPathUpdated: false,
+	});
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
@@ -504,7 +531,9 @@ describe("InstallApp fail-stop invariant", () => {
 		expect(history).toContain("Happy coding");
 	});
 
-	test("Codex selection routes to configureCodex and reaches done", async () => {
+	// Parked while Codex is hidden from ToolSelect (still fully wired downstream —
+	// just not user-selectable). Un-skip when the Codex row is surfaced again.
+	test.skip("Codex selection routes to configureCodex and reaches done", async () => {
 		stubExecFile(() => ({ stdout: "ok" }));
 		stubModels();
 		vi.spyOn(auth, "login").mockResolvedValue(fakeAuth());
@@ -1064,9 +1093,10 @@ describe("InstallApp fail-stop invariant", () => {
 
 		const { stdin, frames } = render(<InstallApp />);
 
-		// Pick the Claude Code (extension) row (5th, index 4).
+		// Pick the Claude Code (extension) row (3rd, index 2 — Codex/OpenCode
+		// are hidden, so it sits right below Claude Code).
 		await waitForFrame(frames, "Select the AI agent(s) to install");
-		for (let i = 0; i < 4; i++) {
+		for (let i = 0; i < 2; i++) {
 			stdin.write("\x1B[B");
 			await new Promise((r) => setTimeout(r, 30));
 		}
@@ -1096,8 +1126,9 @@ describe("InstallApp fail-stop invariant", () => {
 	});
 
 	test("Claude Code CLI + extension share the backup kind: single configure call, both install tasks scheduled", async () => {
-		// Picks Claude Code CLI (2nd row) AND Claude Code (extension) (5th
-		// row), then VS Code in the merged sub-select. Asserts:
+		// Picks Claude Code CLI (2nd row) AND Claude Code (extension) (3rd
+		// row — Codex/OpenCode are hidden), then VS Code in the merged sub-
+		// select. Asserts:
 		//  - `configureClaudeCode` runs exactly once (shared BackupKind).
 		//  - Both the npm install task (@anthropic-ai/claude-code) and the
 		//    extension install task (anthropic.claude-code (VS Code)) appear.
@@ -1126,15 +1157,14 @@ describe("InstallApp fail-stop invariant", () => {
 		const { stdin, frames } = render(<InstallApp />);
 
 		await waitForFrame(frames, "Select the AI agent(s) to install");
-		// Row 1 (Claude Code CLI) — toggle, then arrow down to row 4 and toggle.
+		// Row 1 (Claude Code CLI) — toggle, then arrow down to row 2 (Claude
+		// Code (extension), now directly below) and toggle.
 		stdin.write("\x1B[B");
 		await new Promise((r) => setTimeout(r, 30));
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 30));
-		for (let i = 0; i < 3; i++) {
-			stdin.write("\x1B[B");
-			await new Promise((r) => setTimeout(r, 30));
-		}
+		stdin.write("\x1B[B");
+		await new Promise((r) => setTimeout(r, 30));
 		stdin.write(" ");
 		await new Promise((r) => setTimeout(r, 30));
 		stdin.write("\r");
@@ -1200,7 +1230,10 @@ describe("InstallApp fail-stop invariant", () => {
 		});
 	});
 
-	test("partial install failure: survivor advances to Configure, failed tool is dropped", async () => {
+	// Parked while Codex is hidden from ToolSelect: this exercises the
+	// survivor-advances fail-stop via a Codex selection that's no longer
+	// user-reachable. Un-skip when the Codex row is surfaced again.
+	test.skip("partial install failure: survivor advances to Configure, failed tool is dropped", async () => {
 		// User selects both Claude Code and Codex. The codex npm install
 		// hard-fails ("disk full"); the claude-code one succeeds. Pre-change
 		// behavior was to park at install-failed and force the user to Ctrl-C.

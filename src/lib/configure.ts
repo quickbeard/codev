@@ -12,16 +12,16 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import TOML from "@iarna/toml";
 import { type ParseError, parse } from "jsonc-parser";
-import {
-	AI_GATEWAY_OPENAI_URL,
-	AI_GATEWAY_URL,
-	GATEWAY_COMPACT_PCT,
-	GATEWAY_COMPACT_RESERVED,
-	GATEWAY_COMPACT_TRIGGER,
-	GATEWAY_CONTEXT_WINDOW,
-	GATEWAY_MAX_OUTPUT_TOKENS,
-} from "@/lib/const.js";
+import { AI_GATEWAY_OPENAI_URL, AI_GATEWAY_URL } from "@/lib/const.js";
 import { logInfo } from "@/lib/log.js";
+import {
+	COMPACT_RESERVED,
+	claudeCompactPct,
+	claudeWindow,
+	declaredInput,
+	limitsFor,
+	outputTokens,
+} from "@/lib/model-limits.js";
 import { codevProviderIds, resolveProvider } from "@/lib/provider.js";
 import type { Agent } from "@/providers/types.js";
 
@@ -137,7 +137,6 @@ export const OPENCODE_SCHEMA_URL = atob(
 const OPENCODE_K = {
 	schema: atob("JHNjaGVtYQ=="),
 	mcp: atob("bWNw"),
-	model: atob("bW9kZWw="),
 	provider: atob("cHJvdmlkZXI="),
 	npm: atob("bnBt"),
 	npmPkg: atob("QGFpLXNkay9vcGVuYWktY29tcGF0aWJsZQ=="),
@@ -146,8 +145,20 @@ const OPENCODE_K = {
 	baseURL: atob("YmFzZVVSTA=="),
 	apiKey: atob("YXBpS2V5"),
 	models: atob("bW9kZWxz"),
+	recent: atob("cmVjZW50"),
+	providerID: atob("cHJvdmlkZXJJRA=="),
+	modelID: atob("bW9kZWxJRA=="),
+	attachment: atob("YXR0YWNobWVudA=="),
+	modalities: atob("bW9kYWxpdGllcw=="),
+	input: atob("aW5wdXQ="),
+	text: atob("dGV4dA=="),
+	image: atob("aW1hZ2U="),
 	limit: atob("bGltaXQ="),
 	context: atob("Y29udGV4dA=="),
+	// Same literal as `input` above, which names the modalities key. Kept as its
+	// own entry because the two are unrelated: this one is the compaction
+	// budget, that one is a media type list.
+	inputLimit: atob("aW5wdXQ="),
 	output: atob("b3V0cHV0"),
 	compaction: atob("Y29tcGFjdGlvbg=="),
 	auto: atob("YXV0bw=="),
@@ -290,6 +301,9 @@ const CONTINUE_K = {
 	model: atob("bW9kZWw="),
 	apiBase: atob("YXBpQmFzZQ=="),
 	apiKey: atob("YXBpS2V5"),
+	defaultCompletionOptions: atob("ZGVmYXVsdENvbXBsZXRpb25PcHRpb25z"),
+	contextLength: atob("Y29udGV4dExlbmd0aA=="),
+	maxTokens: atob("bWF4VG9rZW5z"),
 	// The config title is `CoDev (<provider name>)`, so only the prefix is
 	// stable — that prefix is what isCodevContinueConfig matches on.
 	configNamePrefix: atob("Q29EZXYgKA=="),
@@ -653,6 +667,17 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 		? normalizeClaudeBaseUrl(creds.baseUrl)
 		: AI_GATEWAY_URL();
 	const model = requireModel(creds);
+	// Claude Code pins one model (ANTHROPIC_MODEL, just below), so its window
+	// and trigger are simply that model's — no reconciling across a model list
+	// the way the OpenCode family needs.
+	//
+	// It is also the one agent that will not accept an arbitrary window: it
+	// clamps to what it believes the model's native window is (200000 for
+	// anything it doesn't recognize, i.e. all of them) and caps the trigger at
+	// 80% of that. claudeWindow/claudeCompactPct encode both ceilings, and the
+	// window is omitted entirely when pinning it would disable compaction.
+	const limits = limitsFor(model);
+	const claudeCompactWindow = claudeWindow(limits);
 
 	writeJson(sourcePath, {
 		[CLAUDE_K.schema]: CLAUDE_SCHEMA_URL,
@@ -664,9 +689,11 @@ export function configureClaudeCode(creds: Credentials): ConfigureResult[] {
 			[CLAUDE_K.sonnet]: model,
 			[CLAUDE_K.haiku]: model,
 			[CLAUDE_K.agentTeams]: "1",
-			// Env-var values are strings; the shared window/percentage are numeric.
-			[CLAUDE_K.autoCompactWindow]: String(GATEWAY_CONTEXT_WINDOW),
-			[CLAUDE_K.autoCompactPct]: String(GATEWAY_COMPACT_PCT),
+			// Env-var values are strings; the window/percentage are numeric.
+			...(claudeCompactWindow !== null
+				? { [CLAUDE_K.autoCompactWindow]: String(claudeCompactWindow) }
+				: {}),
+			[CLAUDE_K.autoCompactPct]: String(claudeCompactPct(limits)),
 		},
 	});
 
@@ -813,15 +840,18 @@ export function configureCodex(creds: Credentials): ConfigureResult[] {
 		: AI_GATEWAY_OPENAI_URL();
 	const model = requireModel(creds);
 	const provider = resolveProvider(creds);
+	// Single-model, like Claude Code — `model` above is what Codex will run.
+	const limits = limitsFor(model);
 
 	writeToml(sourcePath, {
 		[CODEX_K.model]: model,
 		[CODEX_K.modelProvider]: provider.id,
-		// The gateway model isn't in Codex's catalog, so Codex would otherwise
-		// assume a 272K fallback window — larger than the real 196608 ceiling.
-		// Pin the true window and compact at ~85% of it, mirroring Claude Code.
-		[CODEX_K.modelContextWindow]: GATEWAY_CONTEXT_WINDOW,
-		[CODEX_K.autoCompactTokenLimit]: GATEWAY_COMPACT_TRIGGER,
+		// The gateway models aren't in Codex's catalog, so Codex would otherwise
+		// assume a 272K fallback window for every one of them — too large for a
+		// 200K model, too small for the 1M one. Pin the real window, and give
+		// the trigger as the absolute token count Codex expects.
+		[CODEX_K.modelContextWindow]: limits.context,
+		[CODEX_K.autoCompactTokenLimit]: limits.trigger,
 		[CODEX_K.modelProviders]: {
 			[provider.id]: {
 				[CODEX_K.name]: provider.name,
@@ -857,6 +887,7 @@ export function configureContinue(creds: Credentials): ConfigureResult[] {
 	lines.push(`${CONTINUE_K.schema}: ${yamlScalar(CONTINUE_K.schemaValue)}`);
 	lines.push(`${CONTINUE_K.models}:`);
 	for (const id of allModels) {
+		const limits = limitsFor(id);
 		lines.push(`  - ${CONTINUE_K.name}: ${yamlScalar(id)}`);
 		lines.push(
 			`    ${CONTINUE_K.provider}: ${yamlScalar(CONTINUE_K.providerValue)}`,
@@ -864,6 +895,14 @@ export function configureContinue(creds: Credentials): ConfigureResult[] {
 		lines.push(`    ${CONTINUE_K.model}: ${yamlScalar(id)}`);
 		lines.push(`    ${CONTINUE_K.apiBase}: ${yamlScalar(baseUrl)}`);
 		lines.push(`    ${CONTINUE_K.apiKey}: ${yamlScalar(creds.apiKey)}`);
+		// Continue has no compaction of its own — it prunes history to fit
+		// `contextLength`, so the window is all it needs, and there's no trigger
+		// to express. Without it Continue falls back to a generic default for an
+		// unrecognized model, which is the same mis-sizing the other three
+		// agents get. Per-model, since Continue switches models in-IDE.
+		lines.push(`    ${CONTINUE_K.defaultCompletionOptions}:`);
+		lines.push(`      ${CONTINUE_K.contextLength}: ${limits.context}`);
+		lines.push(`      ${CONTINUE_K.maxTokens}: ${outputTokens(limits)}`);
 	}
 	writeText(sourcePath, `${lines.join("\n")}\n`);
 
@@ -919,39 +958,81 @@ function configureOpenCodeKind(
 	const provider = resolveProvider(creds);
 	// Fall back to [defaultModel] when `models` is unset so callers that don't
 	// know about the list (e.g. older fixtures, the fallback path with no
-	// fetched list) still produce a valid one-entry map.
-	const allModels =
-		creds.models && creds.models.length > 0 ? creds.models : [defaultModel];
+	// fetched list) still produce a valid one-entry map. The chosen model
+	// leads the map for readability, but ordering does not carry the choice —
+	// the first-launch default is seeded into the agent's saved selection
+	// instead (see seedOpenCodeRecentModel).
+	const allModels = [
+		...new Set([
+			defaultModel,
+			...(creds.models && creds.models.length > 0 ? creds.models : []),
+		]),
+	];
 
 	// A custom-provider model with no `limit` defaults to context 0, which both
 	// mis-sizes the window and disables OpenCode's auto-compaction entirely.
-	// Declare the gateway's real window so compaction works; `output` is required
+	// Declare each model's real window so compaction works; `output` is required
 	// whenever a `limit` object is present.
+	//
+	// `input` is what makes the trigger per-model. OpenCode computes it as
+	// `limit.input − compaction.reserved`, and falls back to
+	// `limit.context − maxOutputTokens` when `input` is absent — a branch that
+	// ignores `reserved` entirely. Since `reserved` is a single top-level value
+	// shared by every model, `input` (= trigger + reserved, see declaredInput)
+	// is the only way to land a 1M-token and a 200K-token model on their own
+	// triggers from one config. `context` stays the true window, which is what
+	// the TUI's "% context used" gauge divides by.
+	//
+	// Image input defaults to off for custom-provider models, which makes
+	// OpenCode strip attached images before the request and the model reply
+	// that it can't see them. Declare image support so attachments pass
+	// through; for a text-only model the gateway/model then decides (reject or
+	// ignore) instead of the client silently dropping the image.
 	const modelsMap = Object.fromEntries(
-		allModels.map((id) => [
-			id,
-			{
-				[OPENCODE_K.name]: id,
-				[OPENCODE_K.limit]: {
-					[OPENCODE_K.context]: GATEWAY_CONTEXT_WINDOW,
-					[OPENCODE_K.output]: GATEWAY_MAX_OUTPUT_TOKENS,
+		allModels.map((id) => {
+			const limits = limitsFor(id);
+			return [
+				id,
+				{
+					[OPENCODE_K.name]: id,
+					[OPENCODE_K.attachment]: true,
+					[OPENCODE_K.modalities]: {
+						[OPENCODE_K.input]: [OPENCODE_K.text, OPENCODE_K.image],
+						[OPENCODE_K.output]: [OPENCODE_K.text],
+					},
+					[OPENCODE_K.limit]: {
+						[OPENCODE_K.context]: limits.context,
+						[OPENCODE_K.inputLimit]: declaredInput(limits),
+						[OPENCODE_K.output]: outputTokens(limits),
+					},
 				},
-			},
-		]),
+			];
+		}),
 	);
 
 	writeJson(sourcePath, {
 		[OPENCODE_K.schema]: OPENCODE_SCHEMA_URL,
 		...(mcp !== undefined ? { [OPENCODE_K.mcp]: mcp } : {}),
-		// Top-level `model` pins the initial active model OpenCode uses on
-		// launch. Format is `<provider>/<modelId>` per OpenCode's schema.
-		[OPENCODE_K.model]: `${provider.id}/${defaultModel}`,
-		// OpenCode has no percentage trigger; it compacts at `context − reserved`.
-		// Reserve the headroom that lands the trigger at ~85% of the window, to
-		// match Claude Code and Codex.
+		// No top-level `model`. The install-time model choice exists for Claude
+		// Code and Codex, which can only run one model at a time; OpenCode and
+		// CoDev Code switch freely in-CLI (docs/hub/installation). A pin there
+		// outranks their saved selection on every launch — it beats the recent
+		// models in their state dir — so each in-CLI switch reverted on restart
+		// and only hand-editing the config undid it. The chosen model is
+		// seeded into that saved selection instead (seedOpenCodeRecentModel,
+		// below), which decides the first launch and yields to any later
+		// switch. The models-map order alone can't carry the choice: with no
+		// pin and no saved selection the TUI falls back to the first provider
+		// in its list — upstream's hosted Zen provider, which self-registers
+		// ahead of config providers — and, within a provider, to the server's
+		// own model sort, neither of which reads this map's order. This is why
+		// `codevhub model` steers only Claude Code and Codex directly.
+		// One global reserve for every model in the map — OpenCode's schema has no
+		// per-model compaction block. Each model's own trigger comes from its
+		// `limit.input` above, which is sized against exactly this number.
 		[OPENCODE_K.compaction]: {
 			[OPENCODE_K.auto]: true,
-			[OPENCODE_K.reserved]: GATEWAY_COMPACT_RESERVED,
+			[OPENCODE_K.reserved]: COMPACT_RESERVED,
 		},
 		[OPENCODE_K.provider]: {
 			[provider.id]: {
@@ -966,5 +1047,62 @@ function configureOpenCodeKind(
 		},
 	});
 
+	seedOpenCodeRecentModel(kind, provider.id, defaultModel);
+
 	return [{ kind, sourcePath, backupPath, created }];
+}
+
+// OpenCode-family agents persist the TUI's model selection in the XDG state
+// dir (`state/model.json`, `recent` list); only the app segment differs
+// between OpenCode and the codev-code fork, mirroring dbPath in
+// providers/opencode.ts.
+function openCodeStateModelPath(
+	kind: "opencode-config" | "codev-code-config",
+): string {
+	const app = kind === "codev-code-config" ? "codev" : "opencode";
+	const xdg = process.env.XDG_STATE_HOME;
+	if (xdg) return join(xdg, app, "model.json");
+	return join(homedir(), ".local", "state", app, "model.json");
+}
+
+// Seed the install-time model choice as the agent's saved selection —
+// `recent[0]` in the state dir is the TUI's highest-priority startup source
+// once the config carries no `model` pin, and a later in-CLI switch simply
+// displaces it. Seeds ONLY when the recents list is empty or absent: this
+// writer also runs on every gateway-key auto-refresh (refresh.ts) and
+// `codevhub model`, and a non-empty list is a selection the user already
+// made that must keep winning. Best-effort by design, like the config
+// writer: a corrupt state file is replaced (the agent ignores one anyway),
+// other fields (favorites, variants) are carried over, and a filesystem
+// failure never fails the configure step.
+function seedOpenCodeRecentModel(
+	kind: "opencode-config" | "codev-code-config",
+	providerId: string,
+	modelId: string,
+): void {
+	try {
+		const path = openCodeStateModelPath(kind);
+		let existing: Record<string, unknown> = {};
+		if (existsSync(path)) {
+			try {
+				const raw = JSON.parse(readFileSync(path, "utf-8"));
+				if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+					existing = raw as Record<string, unknown>;
+				}
+			} catch {
+				// Corrupt state file: replaced below.
+			}
+		}
+		const recent = existing[OPENCODE_K.recent];
+		if (Array.isArray(recent) && recent.length > 0) return;
+		mkdirSync(dirname(path), { recursive: true });
+		writeJson(path, {
+			...existing,
+			[OPENCODE_K.recent]: [
+				{ [OPENCODE_K.providerID]: providerId, [OPENCODE_K.modelID]: modelId },
+			],
+		});
+	} catch {
+		// The seed is a nicety; the config write above already succeeded.
+	}
 }

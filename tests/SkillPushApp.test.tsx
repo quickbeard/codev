@@ -4,6 +4,7 @@ import * as auth from "@/lib/auth.js";
 import * as publish from "@/lib/skill-publish.js";
 import * as skillhub from "@/lib/skillhub.js";
 import { SkillPushApp } from "@/SkillPushApp.js";
+import { lastNonEmptyFrame, renderWithoutRawMode } from "./helpers/raw-mode.js";
 
 const ESC = String.fromCharCode(27);
 const stripAnsi = (s: string) =>
@@ -187,5 +188,39 @@ describe("SkillPushApp login gate", () => {
 		expect(onDone).toHaveBeenCalledWith(false);
 		expect(authSpy).not.toHaveBeenCalled();
 		expect(pub).not.toHaveBeenCalled();
+	});
+
+	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts and
+	// helpers/raw-mode.tsx). The confirm step is the last thing between the user
+	// and an upload, so silence must never be read as consent.
+	test("without raw mode: refuses rather than publishing unconfirmed", async () => {
+		const authSpy = vi
+			.spyOn(skillhub, "hasSkillhubAuth")
+			.mockResolvedValue(true);
+		const pub = vi.spyOn(publish, "publishSkill").mockResolvedValue(RESULT);
+		vi.spyOn(publish, "preparePublishArchive").mockResolvedValue(ARCHIVE);
+		const onDone = vi.fn();
+
+		const instance = renderWithoutRawMode(
+			<SkillPushApp
+				path="./pg-tuner"
+				json={false}
+				draftOnly={false}
+				autoApprove={false}
+				onDone={onDone}
+			/>,
+		);
+
+		// The last *non-empty* frame, not lastFrame(): the refusal is shown and the
+		// app then exits ~20ms later, and Ink writes an empty frame on unmount. A
+		// poll on lastFrame() has to sample inside that 20ms window or it sees ""
+		// for the rest of the run — which is how this test flaked under load.
+		const settled = () => stripAnsi(lastNonEmptyFrame(instance.frames));
+		await waitFor(() => settled().includes("cannot supply keystrokes"));
+		expect(settled()).toContain("--json");
+		expect(authSpy).not.toHaveBeenCalled();
+		expect(pub).not.toHaveBeenCalled();
+		await waitFor(() => onDone.mock.calls.length > 0);
+		expect(onDone).toHaveBeenCalledWith(false);
 	});
 });

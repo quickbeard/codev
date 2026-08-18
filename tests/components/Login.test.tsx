@@ -6,6 +6,7 @@ import { Login, loginTitle } from "@/components/Login.js";
 import { Step } from "@/components/Step.js";
 import * as auth from "@/lib/auth.js";
 import { clipboard } from "@/lib/clipboard.js";
+import { renderWithoutRawMode } from "../helpers/raw-mode.js";
 
 const ESC = String.fromCharCode(27);
 const stripAnsi = (s: string) =>
@@ -128,7 +129,11 @@ describe("Login", () => {
 		expect(onDone).not.toHaveBeenCalled();
 	});
 
-	test("surfaces err.cause when present (real-world: fetch failed → DNS detail)", async () => {
+	// Node's fetch throws a bare `TypeError: fetch failed` and hides the reason
+	// on err.cause. Rather than echoing that, Login now renders the full
+	// diagnosis: what actually failed, why it most likely happened on this
+	// machine, and the fix. `fetch failed` must never reach the user alone.
+	test("renders a full diagnosis for a DNS failure, not `fetch failed`", async () => {
 		vi.spyOn(auth, "login").mockImplementation(() => {
 			const err = new TypeError("fetch failed");
 			(err as Error & { cause?: unknown }).cause = new Error(
@@ -143,9 +148,12 @@ describe("Login", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		const output = lastFrame() ?? "";
-		expect(output).toContain(
-			"Login failed: fetch failed (getaddrinfo ENOTFOUND sso.example.com)",
-		);
+		// Names the real failure and the host, in plain language.
+		expect(output).toContain("Could not resolve sso.example.com");
+		// And tells the user what to do about it.
+		expect(output).toContain("NODE_USE_ENV_PROXY");
+		// The bare Node message is not what's shown on its own.
+		expect(output).not.toContain("Login failed: fetch failed");
 	});
 
 	test("keeps the happy path to a one-line spinner until the fallback delay elapses", async () => {
@@ -484,5 +492,60 @@ describe("Login", () => {
 		// both strip it.
 		const joined = stripAnsi(lastFrame() ?? "").replace(/\n/g, "");
 		expect(joined).toContain(url);
+	});
+
+	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts). Ink
+	// throws from `useInput`'s mount effect there, which used to take down
+	// `codevhub doctor` — the one command that can still explain the problem.
+	// helpers/raw-mode.tsx mounts the component as that terminal would.
+	describe("without raw mode", () => {
+		test("still shows the sign-in URL, since the browser completes login", async () => {
+			const url = "https://sso.test/authorize?x=1";
+			vi.spyOn(auth, "login").mockImplementation((_onLog, onReady) => {
+				onReady(
+					() => {},
+					url,
+					() => null,
+				);
+				return new Promise(() => {});
+			});
+
+			const onDone = vi.fn();
+			const { lastFrame } = renderWithoutRawMode(
+				<Box padding={1}>
+					<Frame tag="CoDev">
+						<Step active title={loginTitle()}>
+							<Login onDone={onDone} fallbackDelayMs={0} />
+						</Step>
+					</Frame>
+				</Box>,
+			);
+
+			await waitFor(() => (lastFrame() ?? "").includes("Browser didn't open?"));
+			const output = lastFrame() ?? "";
+			// The URL is the whole point: the loopback callback still finishes the
+			// sign-in without a single keystroke.
+			expect(stripAnsi(output).replace(/\n/g, "")).toContain(url);
+			// What genuinely needs a keyboard is replaced by an explanation, not
+			// rendered as a field the user can type into with no effect.
+			expect(output).not.toContain("Press Enter to submit");
+			expect(output).toContain("can't accept keyboard input");
+			// The copy shortcut is a keystroke too.
+			expect(output).not.toContain("press C to copy");
+		});
+
+		test("drops the Enter-to-retry hint it cannot honor", async () => {
+			vi.spyOn(auth, "login").mockImplementation(() =>
+				Promise.reject(new Error("Connection refused")),
+			);
+
+			const onDone = vi.fn();
+			const { lastFrame } = renderWithoutRawMode(<Login onDone={onDone} />);
+
+			await waitFor(() =>
+				(lastFrame() ?? "").includes("Login failed: Connection refused"),
+			);
+			expect(lastFrame() ?? "").not.toContain("Press Enter to retry");
+		});
 	});
 });

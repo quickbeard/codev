@@ -99,6 +99,10 @@ function posixShimContent(agent: ShimAgent): string {
 	// `codevhub` resolves it (including older versions that don't filter their
 	// own shim dir) won't loop back through this script when it spawns the
 	// real agent.
+	//
+	// If the hub itself is gone (npm-uninstalled without `codevhub unhook`),
+	// fall back to the real agent on the stripped PATH so the command keeps
+	// working instead of dying with "codevhub: not found".
 	return `#!/bin/sh
 # This shim is managed by CoDev. Manual edits will be overwritten.
 SHIM_DIR="$HOME/.codev-hub/bin"
@@ -115,13 +119,17 @@ set +f
 IFS="$old_ifs"
 PATH="$new_path"
 export PATH
-exec codevhub ${agent} "$@"
+if command -v codevhub >/dev/null 2>&1; then
+	exec codevhub ${agent} "$@"
+fi
+exec ${agent} "$@"
 `;
 }
 
 function cmdShimContent(agent: ShimAgent): string {
 	// Same recursion guard as the POSIX shim: strip our shim dir from PATH so
-	// older hub versions that don't filter their own shim dir don't loop.
+	// older hub versions that don't filter their own shim dir don't loop. Same
+	// fallback too: a missing codevhub runs the real agent directly.
 	return `@echo off\r
 REM This shim is managed by CoDev. Manual edits will be overwritten.\r
 setlocal EnableDelayedExpansion\r
@@ -133,7 +141,12 @@ for %%P in ("%PATH:;=";"%") do (\r
 \t)\r
 )\r
 endlocal & set "PATH=%NEWPATH%"\r
-codevhub ${agent} %*\r
+where codevhub >nul 2>nul\r
+if errorlevel 1 (\r
+\t${agent} %*\r
+) else (\r
+\tcodevhub ${agent} %*\r
+)\r
 `;
 }
 
@@ -187,9 +200,16 @@ function escapeRegExp(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Aliases are guarded on the shim file existing: rc blocks and live shells
+// can outlive the shims (`codevhub unhook` from another terminal, an npm
+// uninstall), and an unguarded alias to a missing absolute path breaks the
+// command entirely ("no such file or directory") instead of letting the
+// shell fall back to the real binary on PATH.
 function posixShellSnippet(agents: readonly ShimAgent[]): string {
 	const dir = "$HOME/.codev-hub/bin";
-	const aliases = agents.map((a) => `alias ${a}="${dir}/${a}"`).join("\n");
+	const aliases = agents
+		.map((a) => `[ -x "${dir}/${a}" ] && alias ${a}="${dir}/${a}"`)
+		.join("\n");
 	return `# Routes claude/codex/opencode/codev through codevhub so they pick up CoDev's config.
 # Remove this block to disable.
 export PATH="${dir}:$PATH"
@@ -199,7 +219,9 @@ ${aliases}
 
 function fishShellSnippet(agents: readonly ShimAgent[]): string {
 	const dir = "$HOME/.codev-hub/bin";
-	const aliases = agents.map((a) => `alias ${a} "${dir}/${a}"`).join("\n");
+	const aliases = agents
+		.map((a) => `test -x "${dir}/${a}"; and alias ${a} "${dir}/${a}"`)
+		.join("\n");
 	return `# Routes claude/codex/opencode/codev through codevhub so they pick up CoDev's config.
 # Remove this block to disable.
 fish_add_path -p ${dir}
@@ -210,7 +232,10 @@ ${aliases}
 function powershellSnippet(agents: readonly ShimAgent[]): string {
 	const dir = "$HOME\\.codev-hub\\bin";
 	const functions = agents
-		.map((a) => `function ${a} { & "${dir}\\${a}.cmd" @args }`)
+		.map(
+			(a) =>
+				`if (Test-Path "${dir}\\${a}.cmd") { function ${a} { & "${dir}\\${a}.cmd" @args } }`,
+		)
 		.join("\n");
 	return `# Routes claude/codex/opencode/codev through codevhub so they pick up CoDev's config.
 # Remove this block to disable.
@@ -334,12 +359,13 @@ export function installShims(
 	};
 }
 
-// Heals shims written by hub versions before the 0.4.0 command rename: their
-// bodies re-exec the bare `codev` command, which now belongs to CoDev Code
-// (the agent), so a stale `claude` shim would hand `claude` to the agent as an
-// argument instead of routing through the hub. Called on every hub startup;
-// the common case (no shim dir, or already-current shims) does no writes.
-// Returns true when anything was repaired.
+// Heals shims written by older hub versions. Two known generations: pre-0.4
+// shims re-exec the bare `codev` command (which now belongs to CoDev Code,
+// the agent), and pre-fallback shims die when codevhub itself was
+// uninstalled. Any shim whose body differs from the current template is
+// rewritten, and the rc-file alias blocks are refreshed with it. Called on
+// every hub startup; the common case (no shim dir, or already-current shims)
+// does no writes. Returns true when anything was repaired.
 export function repairShims(): boolean {
 	const dir = shimDir();
 	if (!existsSync(dir)) return false;
@@ -354,7 +380,11 @@ export function repairShims(): boolean {
 	const installed = detectInstalledShims();
 	const stale = installed.some((agent) => {
 		const name = process.platform === "win32" ? `${agent}.cmd` : agent;
-		return !readFileSync(join(dir, name), "utf-8").includes("codevhub");
+		const current =
+			process.platform === "win32"
+				? cmdShimContent(agent)
+				: posixShimContent(agent);
+		return readFileSync(join(dir, name), "utf-8") !== current;
 	});
 	if (!hadLegacy && !stale) return false;
 	const agents =

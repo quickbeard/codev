@@ -71,7 +71,7 @@ function writeAuth() {
 			id_token: "token",
 			expires_at: Date.now() + 3600000,
 			user: { sub: "u", email: "u@example.com", displayName: "User" },
-			supabase_url: "https://test.supabase.co",
+			supabase_url: "https://test.analysis.example.com",
 			supabase_anon_key: "anon",
 		}),
 	);
@@ -96,7 +96,7 @@ function mockUploadHappyPath() {
 		if (url.includes("/codev-backend/supabase/exchange")) {
 			return new Response(
 				JSON.stringify({
-					access_token: "supabase-upload-token",
+					access_token: "analysis-upload-token",
 					user: { id: "u", email: "u@example.com" },
 				}),
 				{ headers: { "Content-Type": "application/json" } },
@@ -220,7 +220,7 @@ describe("runUploadDaemon", () => {
 		expect(existsSync(lockPath())).toBe(false);
 	});
 
-	test("supabase exchange failure writes ok=false status, releases lock", async () => {
+	test("analysis backend exchange failure writes ok=false status, releases lock", async () => {
 		const diagDir = initDiag();
 		writeAuth();
 		writeLog("new.md", "hello");
@@ -281,12 +281,12 @@ describe("runUploadDaemon", () => {
 					d.event?.outcome === "success",
 			),
 		).toBe(true);
-		// loggedFetch documents from the Supabase pipeline.
+		// loggedFetch documents from the analysis backend pipeline.
 		expect(
 			docs.some(
 				(d) =>
 					d.event?.action === "http.request" &&
-					d.codev?.endpoint === "supabase.presign",
+					d.codev?.endpoint === "analysis-backend.presign",
 			),
 		).toBe(true);
 	});

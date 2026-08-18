@@ -1,6 +1,6 @@
 {
   "name": "codev-ai",
-  "version": "0.4.5",
+  "version": "0.5.16",
   "description": "CoDev — AI Coding Agent Hub. Install, configure, and manage multiple AI coding agents.",
   "keywords": [
     "ai",
@@ -15,6 +15,9 @@
     "dist"
   ],
   "packageManager": "pnpm@10.26.0",
+  "engines": {
+    "node": ">=22.21.0"
+  },
   "scripts": {
     "dev": "tsx src/index.tsx",
     "build": "tsx build.ts",

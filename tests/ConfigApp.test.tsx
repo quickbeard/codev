@@ -16,6 +16,8 @@ import * as auth from "@/lib/auth.js";
 import * as backend from "@/lib/backend.js";
 import * as codegraph from "@/lib/codegraph.js";
 import * as configure from "@/lib/configure.js";
+import * as ripgrep from "@/lib/ripgrep.js";
+import * as shims from "@/lib/shims.js";
 
 // ConfigApp shares its state machine with InstallApp (both render <SetupApp />).
 // These tests cover only the config-specific deltas:
@@ -30,6 +32,8 @@ import * as configure from "@/lib/configure.js";
 // already covered by InstallApp.test.tsx against the same component.
 
 function stubModels() {
+	// See InstallApp.test.tsx — ModelSelect refreshes cached model windows too.
+	vi.spyOn(backend, "fetchModelWindows").mockResolvedValue({});
 	return vi
 		.spyOn(backend, "fetchModels")
 		.mockResolvedValue(["m-alpha", "m-beta"]);
@@ -63,6 +67,13 @@ beforeEach(() => {
 		status: "skipped",
 		targets: [],
 	});
+	// The finalize Phase also stages ripgrep into CoDev Code's cache dir (a
+	// real download from the landing page). Default to "present" so full-flow
+	// tests neither hit the network nor write outside the temp home.
+	vi.spyOn(ripgrep, "installRipgrep").mockResolvedValue({
+		status: "present",
+		path: null,
+	});
 	// Default to "no saved API key" so the validating-existing branch doesn't
 	// surface a stale dev-machine key.
 	vi.spyOn(auth, "loadApiKey").mockReturnValue(null);
@@ -81,6 +92,17 @@ beforeEach(() => {
 			created: true,
 		},
 	]);
+	// The finalize Phase calls installShims(), and on Windows that shells out to
+	// a real `powershell -Command` (execFileSync — NOT the mocked execFile) to
+	// rewrite the user-scope PATH in the registry: a synchronous spawn that
+	// blocks the event loop long enough to starve waitForFrame, and that mutates
+	// the PATH of whatever machine runs the suite. See InstallApp.test.tsx.
+	vi.spyOn(shims, "installShims").mockReturnValue({
+		shimDir: join(configAppTempHome, ".codev-hub", "bin"),
+		shimsWritten: [],
+		rcFilesUpdated: [],
+		windowsUserPathUpdated: false,
+	});
 });
 
 type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;

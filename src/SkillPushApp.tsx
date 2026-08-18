@@ -5,6 +5,7 @@ import { Banner } from "@/components/Banner.js";
 import { Frame } from "@/components/Frame.js";
 import { Login, loginTitle } from "@/components/Login.js";
 import { Step } from "@/components/Step.js";
+import { useCanType } from "@/components/useCanType.js";
 import { type AuthData, loadAuth } from "@/lib/auth.js";
 import {
 	formatPublishResult,
@@ -85,6 +86,7 @@ export function SkillPushApp({
 	onDone,
 }: SkillPushAppProps) {
 	const { exit } = useApp();
+	const canType = useCanType();
 	const [phase, setPhase] = useState<Phase>("preparing");
 	const [archive, setArchive] = useState<PublishArchive | null>(null);
 	const [result, setResult] = useState<PublishResult | null>(null);
@@ -176,6 +178,21 @@ export function SkillPushApp({
 		[start],
 	);
 
+	// The dispatcher already routes a keyboard-less terminal to the plain runner,
+	// so reaching "confirm" without one means Ink's stdin isn't the process's own.
+	// Bail rather than mount a confirmation nobody can answer — and never assume
+	// consent from the silence: this step is the last thing standing between the
+	// user and an upload.
+	useEffect(() => {
+		if (phase !== "confirm" || canType) return;
+		setError(
+			"This terminal cannot supply keystrokes, so the confirmation prompt cannot be shown.\n" +
+				"Re-run with --json to publish without confirming.",
+		);
+		setPhase("error");
+		finish(false);
+	}, [phase, canType, finish]);
+
 	useInput(
 		(input, key) => {
 			if (phase !== "confirm") return;
@@ -188,7 +205,7 @@ export function SkillPushApp({
 				finish(false);
 			}
 		},
-		{ isActive: phase === "confirm" },
+		{ isActive: canType && phase === "confirm" },
 	);
 
 	// After confirmation: if a credential is already available, record the
@@ -222,7 +239,7 @@ export function SkillPushApp({
 	const started = Object.values(stepState).some((s) => s !== "pending");
 
 	return (
-		<Box flexDirection="column" padding={1}>
+		<Box flexDirection="column" paddingX={1} paddingBottom={1}>
 			<Banner />
 			<Frame tag="CoDev">
 				{/* Step 1 — archive preview + confirm. Stays visible (dimmed) through

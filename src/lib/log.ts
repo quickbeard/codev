@@ -86,7 +86,7 @@ export interface LogFields {
 	// http.request, process.spawn, process.exit, step.transition, task.result,
 	// export.provider, upload.file, upload.summary, daemon.skip, daemon.run,
 	// configure.tool, configure.api-key, configure.smoke-test, model.fallback,
-	// restore.kind, sqlite.probe, crash.
+	// restore.kind, sqlite.probe, terminal.unsupported, crash.
 	action?: string;
 	// ECS event.type — distinguishes a begin document ("start") from its
 	// completion ("end") without forking event.action. Start documents are the
@@ -282,9 +282,10 @@ async function errorBody(res: Response): Promise<string> {
 	}
 }
 
-// Instrumented fetch for codev's direct network calls (SSO, backend,
-// gateway, Supabase). `endpoint` is a stable label (e.g. "backend.config",
-// "supabase.presign") persisted as codev.endpoint so failures group cleanly.
+// Instrumented fetch for codev's direct network calls (SSO, backend, gateway,
+// analysis backend). `endpoint` is a stable label (e.g. "backend.config",
+// "analysis-backend.presign") persisted as codev.endpoint so failures group
+// cleanly.
 //
 // Writes a start document (the evidence trail when a request hangs and never
 // completes), then a completion document with status + duration — success at
@@ -294,6 +295,53 @@ async function errorBody(res: Response): Promise<string> {
 // bearer tokens; error response bodies are captured from a clone, truncated,
 // and pass through the same line scrubbing as every other document. With
 // logging disabled this is a plain fetch passthrough.
+export interface RequestRecord {
+	method: string;
+	/** Scheme, host and path. The query is stripped — it can carry tokens. */
+	url: string;
+	/** null when no response ever arrived (DNS/TCP/TLS failure). */
+	status: number | null;
+	durationMs: number;
+	ok: boolean;
+}
+
+/**
+ * Opt-in record of every HTTP request made through `loggedFetch`.
+ *
+ * The sibling of `npm.ts#commandLog`, for the same reason: `codevhub doctor`
+ * shows the user everything it did on their machine, and on a corporate
+ * network the endpoints it contacted are the *more* useful half — they are
+ * what IT needs in order to allow-list them.
+ *
+ * Off by default; only `doctor` turns it on.
+ */
+export const requestLog: { enabled: boolean; entries: RequestRecord[] } = {
+	enabled: false,
+	entries: [],
+};
+
+export function recordRequests(): void {
+	requestLog.enabled = true;
+	requestLog.entries = [];
+}
+
+// Query strings are dropped rather than redacted: OAuth codes, signed-URL
+// signatures and access tokens all live there, and none of it helps a user
+// understand which endpoint was contacted.
+function requestUrl(raw: string): string {
+	try {
+		const u = new URL(raw);
+		return `${u.origin}${u.pathname}`;
+	} catch {
+		const q = raw.indexOf("?");
+		return q === -1 ? raw : raw.slice(0, q);
+	}
+}
+
+function recordRequest(record: RequestRecord): void {
+	if (requestLog.enabled) requestLog.entries.push(record);
+}
+
 export async function loggedFetch(
 	endpoint: string,
 	input: string | URL,
@@ -312,6 +360,13 @@ export async function loggedFetch(
 	try {
 		const res = await fetchTrustingSystemCa(input, init, endpoint);
 		const durationMs = Date.now() - startedAt;
+		recordRequest({
+			method,
+			url: requestUrl(url),
+			status: res.status,
+			durationMs,
+			ok: res.ok,
+		});
 		if (res.ok) {
 			logDebug(`http ${method} ${endpoint} → ${res.status}`, {
 				action: "http.request",
@@ -339,13 +394,23 @@ export async function loggedFetch(
 		}
 		return res;
 	} catch (err) {
+		const durationMs = Date.now() - startedAt;
+		// No response at all — DNS, TCP or TLS. Recorded with a null status so
+		// the user can see the request was attempted and got nowhere.
+		recordRequest({
+			method,
+			url: requestUrl(url),
+			status: null,
+			durationMs,
+			ok: false,
+		});
 		logError(`http ${method} ${endpoint} failed`, {
 			action: "http.request",
 			eventType: "end",
 			outcome: "failure",
 			url,
 			method,
-			durationMs: Date.now() - startedAt,
+			durationMs,
 			err,
 			extra: { endpoint },
 		});
@@ -471,7 +536,7 @@ function redactByKey(extra: Record<string, unknown>): Record<string, unknown> {
 
 // Second redaction layer, applied to the fully serialized line: VALUE shapes
 // that must never reach disk regardless of which field carried them. Bearer
-// credentials, JWT-shaped tokens (SSO/Supabase), LiteLLM gateway keys, and
+// credentials, JWT-shaped tokens (SSO/analysis backend), LiteLLM gateway keys, and
 // sensitive query params (OAuth code/state, signed-URL signatures).
 const SCRUB_PATTERNS: [RegExp, string][] = [
 	[/Bearer\s+[A-Za-z0-9._~+/=-]+/g, "Bearer [REDACTED]"],
@@ -489,6 +554,14 @@ function scrubLine(line: string): string {
 		out = out.replace(re, replacement);
 	}
 	return out;
+}
+
+// The same value-shape scrubbing, exposed for text that is about to be printed
+// to the TERMINAL rather than written to disk — `codevhub doctor` echoes raw
+// error bodies and response headers, and users paste that output into chat.
+// Sharing SCRUB_PATTERNS keeps one definition of "this must never be shown".
+export function redactSecrets(text: string): string {
+	return scrubLine(text);
 }
 
 export interface PruneLimits {

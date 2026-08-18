@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+	fetchAnalysisBackendSession,
 	fetchApiKey,
 	fetchCodevConfig,
 	fetchModels,
-	fetchSupabaseSession,
+	fetchModelWindows,
 	isInvalidKeyError,
 	smokeTestModel,
 	validateApiKey,
@@ -192,6 +193,86 @@ describe("validateApiKey", () => {
 	});
 });
 
+describe("fetchModelWindows", () => {
+	test("reads windows from the gateway root's /model_group/info", async () => {
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, {
+				data: [
+					{
+						model_group: "big/model",
+						max_input_tokens: 1000000,
+						max_output_tokens: 32768,
+					},
+				],
+			}),
+		);
+		await expect(fetchModelWindows("sk-test")).resolves.toEqual({
+			"big/model": { context: 1000000, output: 32768 },
+		});
+
+		const [url, init] = fetchSpy.mock.calls[0] as [
+			string,
+			{ method?: string; headers?: Record<string, string> },
+		];
+		// Sibling of /key/info at the gateway root — NOT under /v1.
+		expect(url).toBe(`${AI_GATEWAY_URL()}/model_group/info`);
+		expect(init.method).toBe("GET");
+		expect(init.headers?.Authorization).toBe("Bearer sk-test");
+	});
+
+	// The live gateway reports null for every model today, which is precisely
+	// why the static table in lib/model-limits.ts exists.
+	test("skips entries whose window the gateway hasn't been told", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, {
+				data: [
+					{ model_group: "a", max_input_tokens: null, max_output_tokens: null },
+					{ model_group: "b", max_input_tokens: 0 },
+					{ model_group: "c" },
+					{ max_input_tokens: 4096 },
+					{ model_group: "d", max_input_tokens: 8192 },
+				],
+			}),
+		);
+		await expect(fetchModelWindows("sk-x")).resolves.toEqual({
+			d: { context: 8192 },
+		});
+	});
+
+	test("omits output when the gateway reports no cap", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(200, {
+				data: [
+					{ model_group: "a", max_input_tokens: 8192, max_output_tokens: null },
+				],
+			}),
+		);
+		const out = await fetchModelWindows("sk-x");
+		expect(out.a).not.toHaveProperty("output");
+	});
+
+	// Unlike fetchModels, this must never fail-stop a caller: a missing window
+	// degrades to the default, a thrown error would break install.
+	test("resolves to {} rather than throwing on a non-2xx", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			jsonResponse(404, { error: "not found" }),
+		);
+		await expect(fetchModelWindows("sk-x")).resolves.toEqual({});
+	});
+
+	test("resolves to {} rather than throwing on a network error", async () => {
+		vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("ECONNREFUSED"));
+		await expect(fetchModelWindows("sk-x")).resolves.toEqual({});
+	});
+
+	test("resolves to {} rather than throwing on an unparseable body", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response("<html>proxy blocked</html>", { status: 200 }),
+		);
+		await expect(fetchModelWindows("sk-x")).resolves.toEqual({});
+	});
+});
+
 describe("fetchModels", () => {
 	test("returns the list of model ids from the gateway /v1/models", async () => {
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -336,30 +417,30 @@ describe("smokeTestModel", () => {
 	});
 });
 
-describe("fetchSupabaseSession", () => {
+describe("fetchAnalysisBackendSession", () => {
 	test("posts to the backend /supabase/exchange endpoint", async () => {
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
-				access_token: "supabase-token",
+				access_token: "analysis-backend-token",
 				user: { id: "uid", email: "x@y.z" },
 			}),
 		);
-		await fetchSupabaseSession("sso-token");
+		await fetchAnalysisBackendSession("sso-token");
 		const [url] = fetchSpy.mock.calls[0] as [string];
 		expect(url).toBe(`${BACKEND_URL}/supabase/exchange`);
 	});
 
-	test("returns the Supabase session on a 2xx response", async () => {
+	test("returns the analysis backend session on a 2xx response", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
-				access_token: "supabase-token",
+				access_token: "analysis-backend-token",
 				refresh_token: "refresh",
 				expires_at: 123,
 				user: { id: "uid", email: "x@y.z" },
 			}),
 		);
-		expect(await fetchSupabaseSession("sso-token")).toEqual({
-			access_token: "supabase-token",
+		expect(await fetchAnalysisBackendSession("sso-token")).toEqual({
+			access_token: "analysis-backend-token",
 			refresh_token: "refresh",
 			expires_at: 123,
 			user: { id: "uid", email: "x@y.z" },
@@ -370,24 +451,25 @@ describe("fetchSupabaseSession", () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(401, { error: "invalid sso token" }),
 		);
-		await expect(fetchSupabaseSession("bad-token")).rejects.toThrow(
+		await expect(fetchAnalysisBackendSession("bad-token")).rejects.toThrow(
 			"Backend /supabase/exchange failed (401): invalid sso token",
 		);
 	});
 });
 
 describe("fetchCodevConfig", () => {
-	test("returns the Supabase coordinates and gateway URL on a 2xx response", async () => {
+	test("returns the analysis backend coordinates and gateway URL on a 2xx response", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse(200, {
-				supabaseUrl: "https://x.supabase.co",
+				supabaseUrl: "https://x.analysis.example.com",
 				supabaseAnonKey: "anon",
 				gatewayUrl: "https://gw.example.com/gateway",
 			}),
 		);
+		// The backend's wire keys are still `supabase*`; CodevConfig renames them.
 		expect(await fetchCodevConfig("sso-token")).toEqual({
-			supabaseUrl: "https://x.supabase.co",
-			supabaseAnonKey: "anon",
+			analysisBackendUrl: "https://x.analysis.example.com",
+			analysisBackendAnonKey: "anon",
 			gatewayUrl: "https://gw.example.com/gateway",
 		});
 	});

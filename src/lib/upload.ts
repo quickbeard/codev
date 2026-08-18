@@ -17,12 +17,16 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { gzipSync } from "node:zlib";
 import {
+	type AnalysisBackendConfig,
+	getAnalysisBackendConfig,
+} from "@/lib/analysis-backend.js";
+import {
 	type AuthData,
-	ensureInteractiveAuth,
 	loadAuth,
+	login,
 	refreshCodevConfig,
 } from "@/lib/auth.js";
-import { fetchSupabaseSession } from "@/lib/backend.js";
+import { fetchAnalysisBackendSession } from "@/lib/backend.js";
 import { runExport } from "@/lib/export.js";
 import {
 	currentTraceId,
@@ -33,7 +37,6 @@ import {
 	logWarn,
 } from "@/lib/log.js";
 import { projectLogsDir } from "@/lib/paths.js";
-import { getSupabaseConfig, type SupabaseConfig } from "@/lib/supabase.js";
 import { AGENTS, type Agent } from "@/providers/types.js";
 
 export interface UploadOptions {
@@ -142,13 +145,13 @@ export async function runUpload({
 		onLoginDone,
 	);
 
-	// Try the Supabase block once. If it trips a refreshable failure (cache
-	// missing, or Supabase rejected our credentials), refresh the cached
-	// CoDev config from the backend and retry exactly once. ensureAuth above
-	// guarantees auth.access_token is fresh, so refreshCodevConfig will
-	// authenticate against the backend with a valid bearer.
+	// Try the analysis backend block once. If it trips a refreshable failure
+	// (cache missing, or the analysis backend rejected our credentials), refresh
+	// the cached CoDev config from the backend and retry exactly once.
+	// ensureAuth above guarantees auth.access_token is fresh, so
+	// refreshCodevConfig will authenticate against the backend with a valid bearer.
 	try {
-		return await runSupabaseUpload(outDir, files, auth, onStatus, force);
+		return await runAnalysisBackendUpload(outDir, files, auth, onStatus, force);
 	} catch (err) {
 		if (!isRefreshableError(err)) {
 			logError("upload failed", { err });
@@ -160,7 +163,13 @@ export async function runUpload({
 		onStatus("Refreshing CoDev config and retrying...");
 		await refreshCodevConfig(auth.access_token, onStatus);
 		try {
-			return await runSupabaseUpload(outDir, files, auth, onStatus, force);
+			return await runAnalysisBackendUpload(
+				outDir,
+				files,
+				auth,
+				onStatus,
+				force,
+			);
 		} catch (retryErr) {
 			logError("upload failed after config refresh", { err: retryErr });
 			throw retryErr;
@@ -168,7 +177,7 @@ export async function runUpload({
 	}
 }
 
-async function runSupabaseUpload(
+async function runAnalysisBackendUpload(
 	outDir: string,
 	files: string[],
 	auth: AuthData,
@@ -184,10 +193,10 @@ async function runSupabaseUpload(
 		errors: [],
 	};
 
-	const config = getSupabaseConfig();
-	onStatus("Exchanging SSO session for Supabase upload session...");
-	const supabaseSession = await fetchSupabaseSession(auth.access_token);
-	const uploadToken = supabaseSession.access_token;
+	const config = getAnalysisBackendConfig();
+	onStatus("Exchanging SSO session for analysis backend upload session...");
+	const session = await fetchAnalysisBackendSession(auth.access_token);
+	const uploadToken = session.access_token;
 	onStatus("Checking existing uploads...");
 	const existing = await fetchExistingUploads(config, uploadToken);
 	const candidates = filterNewFiles(files, existing, force);
@@ -231,7 +240,8 @@ async function runSupabaseUpload(
 	return summary;
 }
 
-// Narrow refresh trigger: empty cache, or Supabase/backend returning 401/403.
+// Narrow refresh trigger: empty cache, or the analysis backend/CoDev backend
+// returning 401/403.
 // 5xx, network errors, and timeouts are NOT retried — refreshing config won't
 // help and we'd just amplify the outage.
 //
@@ -242,6 +252,7 @@ async function runSupabaseUpload(
 // containing a literal `(403)` reference would falsely trigger a refresh).
 export function isRefreshableError(err: unknown): boolean {
 	const msg = err instanceof Error ? err.message : String(err);
+	// `supabase_*` is the on-disk key name the const.ts accessors report.
 	if (msg.includes("Missing supabase_")) return true;
 	const match = msg.match(/failed \((\d{3})\)/);
 	if (!match?.[1]) return false;
@@ -294,18 +305,21 @@ async function ensureAuth(
 ) {
 	const auth = loadAuth();
 	if (auth) return auth;
-	const fresh = await ensureInteractiveAuth(onStatus, {
-		onLoginUrl,
-		onManualSubmit,
-		onLoginDone,
+	const fresh = await login(onStatus, (openBrowser, url, submitManualCode) => {
+		if (onLoginUrl) onLoginUrl(url);
+		else
+			onStatus(`If your browser didn't open, visit this URL manually: ${url}`);
+		onManualSubmit?.(submitManualCode);
+		openBrowser();
 	});
+	onLoginDone?.();
 	// Login finished (loopback browser callback or manual paste). Signal the
 	// caller to dismiss the login URL + paste-back prompt before the upload
 	// continues, so they don't linger on screen.
 	// login() no longer refreshes CoDev config on its own — every caller does
 	// it explicitly so the timing fits each flow. On a fresh
 	// login we don't have a cache yet, so populating it here avoids burning
-	// the first Supabase attempt + retry path just to fetch coords.
+	// the first analysis backend attempt + retry path just to fetch coords.
 	await refreshCodevConfig(fresh.access_token, onStatus);
 	return fresh;
 }
@@ -318,7 +332,7 @@ const PAGE_SIZE = 1000;
 const MAX_PAGES = 100;
 
 async function fetchExistingUploads(
-	config: SupabaseConfig,
+	config: AnalysisBackendConfig,
 	accessToken: string,
 ): Promise<Map<string, ExistingConversation>> {
 	const byPath = new Map<string, ExistingConversation>();
@@ -331,7 +345,7 @@ async function fetchExistingUploads(
 			"id,local_file_path,local_content_hash,uploaded_at",
 		);
 		url.searchParams.set("order", "uploaded_at.desc");
-		const res = await loggedFetch("supabase.conversations", url, {
+		const res = await loggedFetch("analysis-backend.conversations", url, {
 			headers: {
 				apikey: config.anonKey,
 				Authorization: `Bearer ${accessToken}`,
@@ -364,7 +378,7 @@ async function fetchExistingUploads(
 }
 
 async function uploadFile(
-	config: SupabaseConfig,
+	config: AnalysisBackendConfig,
 	accessToken: string,
 	candidate: UploadCandidate,
 ): Promise<void> {
@@ -376,12 +390,12 @@ async function uploadFile(
 }
 
 async function presignUpload(
-	config: SupabaseConfig,
+	config: AnalysisBackendConfig,
 	accessToken: string,
 	filename: string,
 ): Promise<PresignResponse> {
 	const res = await loggedFetch(
-		"supabase.presign",
+		"analysis-backend.presign",
 		`${config.url}/functions/v1/presign-upload`,
 		{
 			method: "POST",
@@ -403,7 +417,7 @@ async function presignUpload(
 
 async function putGzip(path: string, uploadUrl: string): Promise<void> {
 	const payload = gzipSync(readFileSync(path));
-	const res = await loggedFetch("supabase.storage-put", uploadUrl, {
+	const res = await loggedFetch("analysis-backend.storage-put", uploadUrl, {
 		method: "PUT",
 		headers: {
 			"Content-Type": "text/markdown",
@@ -420,14 +434,14 @@ async function putGzip(path: string, uploadUrl: string): Promise<void> {
 }
 
 async function confirmUpload(
-	config: SupabaseConfig,
+	config: AnalysisBackendConfig,
 	accessToken: string,
 	presign: PresignResponse,
 	candidate: UploadCandidate,
 	stat: Stats,
 ): Promise<void> {
 	const res = await loggedFetch(
-		"supabase.confirm",
+		"analysis-backend.confirm",
 		`${config.url}/functions/v1/confirm-upload`,
 		{
 			method: "POST",

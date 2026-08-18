@@ -15,6 +15,9 @@ passed through to it as well — \`codevhub run "fix the tests"\`,
 \`codevhub serve\`, \`codevhub models\`, and so on.
 
 Hub commands:
+  doctor              Check your environment and network before installing
+                      (Node version, npm, proxy/TLS, sign-in, LLM access;
+                      --force to test a real sign-in instead of the cached one)
   install             Install and configure AI coding agents
   config              Configure existing AI coding agents
   update              Update installed AI coding agents
@@ -41,11 +44,24 @@ Skill hub:
   skill search <query>   Search the public skill hub
                          (--json for machine-readable output,
                          --limit <n> to cap results, default 20)
-  skill pull <name>      Download and install a skill by name or id
-                         (prompts for location; --dir <path> to set it explicitly,
-                         --force to overwrite; --json for machine-readable output)
+  skill pull <name>      Download and install a skill for your agents
+                         (prompts for location and agents; --here or --global to
+                         set the scope, --agent <list> or --all-agents to set the
+                         agents, --dir <path> for an exact path, --force to
+                         overwrite; --json for machine-readable output)
   skill push <path>      Publish a skill (a directory with SKILL.md, or a .zip)
                          (previews and confirms before upload; --draft-only to stop
                          at DRAFT, --auto-approve for admins, --json for output)
+  skill office           Download the CoDev Office offline skills bundle
+                         (create, read and edit DOCX, XLSX, PPTX and PDF)
+                         for this OS and run its setup script
+                         (--platform ubuntu|macos|windows to fetch for another OS
+                         [implies --download-only], --arch arm64|x86_64 to pick
+                         the macOS chip's bundle [required when fetching a macOS
+                         bundle from another OS], --dir <path> for the download
+                         folder, --download-only to skip running the installer,
+                         --skip-verify passed through to the installer,
+                         --force-skills to replace already-installed skills
+                         with the bundled versions)
 `);
 }

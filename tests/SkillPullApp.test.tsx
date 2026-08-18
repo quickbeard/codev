@@ -2,9 +2,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { cleanup, render } from "ink-testing-library";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import type { SkillAgent } from "@/lib/skill-dirs.js";
 import * as install from "@/lib/skill-install.js";
 import * as skillhub from "@/lib/skillhub.js";
 import { SkillPullApp } from "@/SkillPullApp.js";
+import { lastNonEmptyFrame, renderWithoutRawMode } from "./helpers/raw-mode.js";
 
 const ESC = String.fromCharCode(27);
 const DOWN = `${ESC}[B`;
@@ -54,14 +56,21 @@ async function confirm(
 }
 
 function okResult(dir: string): install.InstallResult {
+	const path = join(dir, "pg-tuner");
 	return {
 		name: "pg-tuner",
 		version: "1.2.0",
 		id: ID,
-		dir: join(dir, "pg-tuner"),
+		dir: path,
 		strippedRoot: "pg-tuner",
+		placements: [{ path, mode: "store", agents: ["codev"] }],
 	};
 }
+
+// Most tests here are about the location step, so they pass `agents` explicitly:
+// that skips the agent picker AND keeps them off detectCodevTools(), which reads
+// the real machine. The picker has its own tests below.
+const CODEV_ONLY: SkillAgent[] = ["codev"];
 
 function mockResolve(meta: skillhub.SkillMeta = META) {
 	return vi.spyOn(skillhub, "getSkillMeta").mockResolvedValue(meta);
@@ -85,7 +94,7 @@ describe("SkillPullApp", () => {
 
 		await waitFor(() => frameText(lastFrame).includes("pg-tuner"));
 		const frame = frameText(lastFrame);
-		expect(frame).toContain("Current directory");
+		expect(frame).toContain("Current directory (recommended)");
 		expect(frame).not.toContain(ID);
 	});
 
@@ -97,12 +106,17 @@ describe("SkillPullApp", () => {
 			.mockResolvedValue(okResult(currentRoot));
 
 		const { stdin, lastFrame } = render(
-			<SkillPullApp target={ID} force={false} json={false} />,
+			<SkillPullApp
+				target={ID}
+				force={false}
+				json={false}
+				agents={CODEV_ONLY}
+			/>,
 		);
 
 		await confirm(stdin, lastFrame, () => spy.mock.calls.length > 0);
 		expect(spy).toHaveBeenCalledWith(META, {
-			rootDir: currentRoot,
+			target: { kind: "agents", agents: CODEV_ONLY, scope: "current" },
 			force: false,
 		});
 		await waitFor(() =>
@@ -118,13 +132,18 @@ describe("SkillPullApp", () => {
 			.mockResolvedValue(okResult(globalRoot));
 
 		const { stdin, lastFrame } = render(
-			<SkillPullApp target={ID} force={false} json={false} />,
+			<SkillPullApp
+				target={ID}
+				force={false}
+				json={false}
+				agents={CODEV_ONLY}
+			/>,
 		);
 
 		await moveToGlobal(stdin, lastFrame);
 		await confirm(stdin, lastFrame, () => spy.mock.calls.length > 0);
 		expect(spy).toHaveBeenCalledWith(META, {
-			rootDir: globalRoot,
+			target: { kind: "agents", agents: CODEV_ONLY, scope: "global" },
 			force: false,
 		});
 	});
@@ -136,10 +155,143 @@ describe("SkillPullApp", () => {
 			.mockResolvedValue(okResult(join(process.cwd(), ".claude", "skills")));
 
 		const { stdin, lastFrame } = render(
-			<SkillPullApp target={ID} force={true} json={false} />,
+			<SkillPullApp
+				target={ID}
+				force={true}
+				json={false}
+				agents={CODEV_ONLY}
+			/>,
 		);
 		await confirm(stdin, lastFrame, () => spy.mock.calls.length > 0);
 		expect(spy.mock.calls[0]?.[1]).toMatchObject({ force: true });
+	});
+
+	// The agent picker. `agents` is left off so the second prompt appears;
+	// detectCodevTools is stubbed so the pre-check doesn't depend on the machine.
+	describe("agent picker", () => {
+		function renderPicker(detected: SkillAgent[] = []) {
+			vi.spyOn(install, "defaultAgents").mockReturnValue([
+				...detected,
+				"codev",
+			]);
+			return render(<SkillPullApp target={ID} force={false} json={false} />);
+		}
+
+		test("appears after the location choice, pre-checked with detected agents", async () => {
+			mockResolve();
+			vi.spyOn(install, "installResolvedSkill").mockResolvedValue(
+				okResult(join(process.cwd(), ".claude", "skills")),
+			);
+			const { stdin, lastFrame } = renderPicker(["claude"]);
+
+			await waitFor(() => {
+				if (frameText(lastFrame).includes("For which agents?")) return true;
+				if (inSelect(lastFrame)) stdin.write("\r");
+				return false;
+			});
+
+			const frame = frameText(lastFrame);
+			expect(frame).toContain("[✓] Claude Code");
+			expect(frame).toContain("[✓] CoDev Code");
+			// Not configured on this machine, so not pre-checked.
+			expect(frame).toContain("[ ] Codex");
+			expect(frame).toContain("[ ] OpenCode");
+		});
+
+		test("space toggles an agent, and enter installs the checked set", async () => {
+			mockResolve();
+			const spy = vi
+				.spyOn(install, "installResolvedSkill")
+				.mockResolvedValue(okResult(join(process.cwd(), ".agents", "skills")));
+			const { stdin, lastFrame } = renderPicker();
+
+			await waitFor(() => {
+				if (frameText(lastFrame).includes("For which agents?")) return true;
+				if (inSelect(lastFrame)) stdin.write("\r");
+				return false;
+			});
+			// Cursor starts on Claude Code; move to Codex and check it.
+			await waitFor(() => {
+				if (frameText(lastFrame).includes("[✓] Codex")) return true;
+				if (frameText(lastFrame).includes("❯ [ ] Codex")) stdin.write(" ");
+				else stdin.write(DOWN);
+				return false;
+			});
+			await waitFor(() => {
+				if (spy.mock.calls.length > 0) return true;
+				stdin.write("\r");
+				return false;
+			});
+
+			expect(spy.mock.calls[0]?.[1]).toMatchObject({
+				target: { kind: "agents", agents: ["codex", "codev"] },
+			});
+		});
+
+		// CoDev Code is the flagship: the picker must not let it be turned off.
+		test("CoDev Code cannot be unchecked", async () => {
+			mockResolve();
+			const spy = vi
+				.spyOn(install, "installResolvedSkill")
+				.mockResolvedValue(okResult(join(process.cwd(), ".claude", "skills")));
+			const { stdin, lastFrame } = renderPicker();
+
+			await waitFor(() => {
+				if (frameText(lastFrame).includes("For which agents?")) return true;
+				if (inSelect(lastFrame)) stdin.write("\r");
+				return false;
+			});
+			// Walk to CoDev Code and press space repeatedly — it stays checked.
+			await waitFor(() => {
+				if (frameText(lastFrame).includes("❯ [✓] CoDev Code")) return true;
+				stdin.write(DOWN);
+				return false;
+			});
+			stdin.write(" ");
+			stdin.write(" ");
+			expect(frameText(lastFrame)).toContain("[✓] CoDev Code");
+
+			await waitFor(() => {
+				if (spy.mock.calls.length > 0) return true;
+				stdin.write("\r");
+				return false;
+			});
+			expect(spy.mock.calls[0]?.[1]).toMatchObject({
+				target: { agents: ["codev"] },
+			});
+		});
+	});
+
+	// A terminal with no raw mode (Git Bash on Windows — see lib/tty.ts and
+	// helpers/raw-mode.tsx). The dispatcher normally routes those to the plain
+	// runner, so this covers the case where Ink's stdin isn't the process's own.
+	// Unlike an ungated useInput (which throws), an unanswerable picker would
+	// just hang forever.
+	test("without raw mode: explains the missing keyboard instead of prompting", async () => {
+		mockResolve();
+		const spy = vi.spyOn(install, "installResolvedSkill");
+		const onDone = vi.fn();
+
+		const instance = renderWithoutRawMode(
+			<SkillPullApp target={ID} force={false} json={false} onDone={onDone} />,
+		);
+
+		// The last *non-empty* frame, not lastFrame(): the message is shown and the
+		// app then exits ~20ms later, and Ink writes an empty frame on unmount. A
+		// poll on lastFrame() has to sample inside that 20ms window or it sees ""
+		// for the rest of the run — which is how this test flaked under load. The
+		// whole history would be wrong here: the picker does render for one frame
+		// before the effect replaces it, so `not.toContain("❯ ")` is an assertion
+		// about what the user is left looking at.
+		const settled = () => stripAnsi(lastNonEmptyFrame(instance.frames));
+		await waitFor(() => settled().includes("cannot supply keystrokes"));
+		const frame = settled();
+		expect(frame).toContain("--here, --global, or --dir");
+		// Never falls back to a location the user didn't choose.
+		expect(frame).not.toContain("❯ ");
+		expect(spy).not.toHaveBeenCalled();
+		await waitFor(() => onDone.mock.calls.length > 0);
+		expect(onDone).toHaveBeenCalledWith(false);
 	});
 
 	test("shows an error when the skill can't be resolved", async () => {

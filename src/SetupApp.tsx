@@ -1,12 +1,13 @@
 import { Box, Text, useApp } from "ink";
 import Spinner from "ink-spinner";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AuthMethodChoice } from "@/components/AuthMethod.js";
 import {
 	AuthMethod,
 	configurationMethodTitle,
 } from "@/components/AuthMethod.js";
 import { Banner } from "@/components/Banner.js";
+import { CheckList } from "@/components/CheckList.js";
 import { Configure, configureTitle } from "@/components/Configure.js";
 import { Confirm, confirmTitle } from "@/components/Confirm.js";
 import {
@@ -56,12 +57,21 @@ import {
 	type Tool,
 } from "@/lib/configure.js";
 import { FALLBACK_MODEL } from "@/lib/const.js";
+import {
+	type CheckOutcome,
+	PREFLIGHT_CHECKS,
+	runChecks,
+} from "@/lib/doctor.js";
 import { logApiKeyConfigured, logDebug, logError, logWarn } from "@/lib/log.js";
 import { providerFromName } from "@/lib/provider.js";
+import { installRipgrep } from "@/lib/ripgrep.js";
 import { installShims, toolToShimAgent } from "@/lib/shims.js";
 import { disableClaudeCodeLoginPrompt } from "@/lib/vscode-settings.js";
 
 type Phase =
+	// Pure environment checks (Node version, proxy/TLS env), before the user is
+	// asked for anything. Advisory only — it always advances to "select".
+	| "preflight"
 	| "select"
 	| "editor-select"
 	| "confirm"
@@ -158,7 +168,7 @@ interface SetupAppProps {
 
 export function SetupApp({ mode }: SetupAppProps) {
 	const { exit } = useApp();
-	const [step, setStep] = useState<Phase>("select");
+	const [step, setStep] = useState<Phase>("preflight");
 	const [tools, setTools] = useState<Tool[]>([]);
 	// Survivors of the install step — populated from TaskList's succeededKeys.
 	// Drives shim install + the Configure step, so failed tools are quietly
@@ -186,6 +196,10 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// CodeGraph-eligible tools, so the row never renders.
 	const [codegraphResult, setCodegraphResult] =
 		useState<CodegraphSetupResult | null>(null);
+	// Set only when staging ripgrep into CoDev Code's cache fails during the
+	// finalize Phase (best-effort, CoDev Code selections only). Drives a yellow
+	// ▲ row so the user learns file search may be degraded and how to fix it.
+	const [ripgrepWarning, setRipgrepWarning] = useState<string | null>(null);
 	const [chosenModel, setChosenModel] = useState<string | null>(null);
 	// Set when ModelSelect falls back to FALLBACK_MODEL because the gateway's
 	// model list couldn't be fetched. Drives a persistent yellow ▲ row above
@@ -201,6 +215,23 @@ export function SetupApp({ mode }: SetupAppProps) {
 	// (and the row stays unmounted) on the success path, so refresh remains
 	// invisible when it works.
 	const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
+	// Pure environment checks, shared verbatim with `codevhub doctor`.
+	const [preflight, setPreflight] = useState<CheckOutcome[]>([]);
+	const preflightStartedRef = useRef(false);
+
+	// Surface a misconfigured proxy BEFORE the user invests a few minutes in the
+	// wizard — on a corporate network that misconfiguration is what kills the
+	// run at sign-in, and the message is the same either way. Advisory by
+	// design: it never blocks, because the one condition that genuinely cannot
+	// proceed (Node below the floor) is already refused at startup in
+	// index.tsx, and a proxy warning must not stop a user who has no proxy.
+	useEffect(() => {
+		if (step !== "preflight" || preflightStartedRef.current) return;
+		preflightStartedRef.current = true;
+		runChecks(PREFLIGHT_CHECKS, {}, (outcome) => {
+			setPreflight((prev) => [...prev, outcome]);
+		}).then(() => setStep("select"));
+	}, [step]);
 
 	// Diagnostic trail of the wizard's progress — one document per phase
 	// transition, so a stuck or aborted run shows exactly where it stopped.
@@ -556,7 +587,7 @@ export function SetupApp({ mode }: SetupAppProps) {
 			// The flow holds on "finalizing" (spinner) until this resolves; a
 			// failure surfaces as a warning row but never blocks completion.
 			// setupCodegraph never throws, but the catch is defensive.
-			setupCodegraph(installedTools)
+			const codegraph = setupCodegraph(installedTools)
 				.then(setCodegraphResult)
 				.catch((err: unknown) =>
 					setCodegraphResult({
@@ -566,15 +597,29 @@ export function SetupApp({ mode }: SetupAppProps) {
 							err instanceof Error ? err.message : String(err)
 						}`,
 					}),
-				)
-				.finally(() => {
-					setStep("done");
-					// Hold the terminal frame for ~1s so the user can read "Done! Run
-					// exec $SHELL" and "Happy coding!" before Ink tears down. Without
-					// this, React's render of the "done" Phase wouldn't flush to the
-					// terminal before exit() unmounts the app.
-					setTimeout(() => exit(), 1000);
-				});
+				);
+			// Best-effort ripgrep staging for CoDev Code's file search — see
+			// lib/ripgrep.ts for why the agent can't be left to download its own
+			// on corporate networks. Failure warns but never blocks completion;
+			// the agent still tries PATH and its own GitHub download at runtime.
+			const ripgrep = installedTools.includes("codev-code")
+				? installRipgrep().catch((err: unknown) => {
+						logError("ripgrep staging failed during finalize", { err });
+						setRipgrepWarning(
+							`Could not stage ripgrep for CoDev Code: ${
+								err instanceof Error ? err.message : String(err)
+							}. File search may be empty on Windows — install ripgrep (winget install BurntSushi.ripgrep.MSVC) and restart the agent.`,
+						);
+					})
+				: Promise.resolve();
+			Promise.all([codegraph, ripgrep]).finally(() => {
+				setStep("done");
+				// Hold the terminal frame for ~1s so the user can read "Done! Run
+				// exec $SHELL" and "Happy coding!" before Ink tears down. Without
+				// this, React's render of the "done" Phase wouldn't flush to the
+				// terminal before exit() unmounts the app.
+				setTimeout(() => exit(), 1000);
+			});
 		},
 		[installedTools, exit],
 	);
@@ -591,244 +636,284 @@ export function SetupApp({ mode }: SetupAppProps) {
 		[creds, runFinalizeSideEffects],
 	);
 
+	// Nothing downstream of the pre-flight should mount while it runs — several
+	// of the Steps below key off `step !== "select"` and would otherwise render
+	// their read-only history before the user has chosen anything.
+	const inPreflight = step === "preflight";
+
 	return (
-		<Box flexDirection="column" padding={1}>
+		<Box flexDirection="column" paddingX={1} paddingBottom={1}>
 			<Banner />
 			<Frame tag="CoDev">
-				<Step
-					active={step === "select"}
-					title={toolSelectTitle(step !== "select", mode)}
-				>
-					<ToolSelect
-						onConfirm={handleToolSelectConfirm}
-						readOnly={step !== "select"}
-						mode={mode}
-					/>
-				</Step>
-				{(claudeCodeExtSelected || continueSelected) && step !== "select" && (
+				{preflight.length > 0 && (
 					<Step
-						active={step === "editor-select"}
-						title={editorSelectTitle(step !== "editor-select")}
+						active={step === "preflight"}
+						title={<Text bold>Checking your environment</Text>}
 					>
-						<EditorSelect
-							onConfirm={handleEditorsConfirm}
-							readOnly={step !== "editor-select"}
+						{/* A clean environment costs one line; only warnings
+						    expand. `codevhub doctor` shows every row. */}
+						<CheckList
+							pending={[]}
+							outcomes={preflight}
+							running={null}
+							collapsePasses
 						/>
-					</Step>
-				)}
-				{step !== "select" && step !== "editor-select" && (
-					<Step active={step === "confirm"} title={confirmTitle()}>
-						<Confirm
-							tools={tools}
-							onConfirm={handleConfirmProceed}
-							readOnly={step !== "confirm"}
-						/>
-					</Step>
-				)}
-				{step !== "select" &&
-					step !== "editor-select" &&
-					step !== "confirm" && (
-						<Step active={step === "login"} title={loginTitle()}>
-							<Login onDone={handleLoginDone} />
-						</Step>
-					)}
-				{(mode === "install" ||
-					(mode === "config" && codegraphEligible(tools))) &&
-					POST_LOGIN.includes(step) && (
-						<Step
-							active={step === "installing"}
-							title={
-								<Text bold>
-									{mode === "install"
-										? "Installing packages"
-										: "Installing CodeGraph"}
-								</Text>
-							}
-						>
-							<Install
-								tools={tools}
-								includeAgents={mode === "install"}
-								onDone={handleInstallDone}
-							/>
-						</Step>
-					)}
-				{POST_REFRESH.includes(step) && refreshWarning && (
-					<Step title={<Text bold>Refresh CoDev config</Text>}>
-						<Box>
-							<Text color="yellow">▲</Text>
-							<Text color="yellow">{` ${refreshWarning}`}</Text>
-						</Box>
-					</Step>
-				)}
-				{POST_REFRESH.includes(step) && savedCreds && (
-					<Step
-						active={step === "validating-existing"}
-						title={<Text bold>Checking saved API key</Text>}
-					>
-						{step === "validating-existing" ? (
-							<Box>
-								<Text color="cyan">
-									<Spinner />
-								</Text>
-								<Text> Verifying with gateway...</Text>
-							</Box>
-						) : (
+						{preflight.some((o) => o.status !== "pass") && (
 							<Text dimColor>
-								{existingValid
-									? "Saved API key is valid."
-									: (existingMessage ?? "")}
+								{
+									"Run `codevhub doctor` for the full check — npm, network, sign-in and LLM access — plus setup instructions."
+								}
 							</Text>
 						)}
 					</Step>
 				)}
-				{POST_VALIDATE.includes(step) && (
-					<Step
-						active={step === "key-choice"}
-						title={configurationMethodTitle(step !== "key-choice")}
-					>
-						<AuthMethod
-							onSelect={handleAuthMethod}
-							readOnly={step !== "key-choice"}
-							selected={authMethod}
-							hasExisting={existingValid}
-						/>
-					</Step>
-				)}
-				{POST_KEY_CHOICE.includes(step) && authMethod === "new" && auth && (
-					<Step active={step === "fetching-key"} title={fetchApiKeyTitle()}>
-						<FetchApiKey
-							auth={auth}
-							onDone={handleFetchKeyDone}
-							onFallback={handleFetchKeyFallback}
-						/>
-					</Step>
-				)}
-				{POST_KEY_CHOICE.includes(step) &&
-					(authMethod === "manual" ||
-						(authMethod === "new" && step === "manual-creds")) && (
+				{!inPreflight && (
+					<>
 						<Step
-							active={step === "manual-creds"}
-							title={manualCredentialsTitle()}
+							active={step === "select"}
+							title={toolSelectTitle(step !== "select", mode)}
 						>
-							<ManualCredentials
-								onDone={handleManualDone}
-								readOnly={step !== "manual-creds"}
+							<ToolSelect
+								onConfirm={handleToolSelectConfirm}
+								readOnly={step !== "select"}
+								mode={mode}
 							/>
 						</Step>
-					)}
-				{POST_KEY_CHOICE.includes(step) &&
-					authMethod !== "skip" &&
-					modelWarning && (
-						<Step title={<Text bold>Model list</Text>}>
-							<Box>
-								<Text color="yellow">▲</Text>
-								<Text color="yellow">{` ${modelWarning}`}</Text>
-							</Box>
-						</Step>
-					)}
-				{POST_KEY_CHOICE.includes(step) &&
-					authMethod !== "skip" &&
-					creds &&
-					step !== "fetching-key" &&
-					step !== "manual-creds" && (
-						<Step
-							active={step === "model-choice"}
-							title={modelSelectTitle(step !== "model-choice")}
-						>
-							<ModelSelect
-								apiKey={creds.apiKey}
-								baseUrl={creds.baseUrl}
-								onSelect={handleModelSelect}
-								onFallback={handleModelFallback}
-								fallbackModel={FALLBACK_MODEL}
-								readOnly={step !== "model-choice"}
-								selected={chosenModel}
-							/>
-						</Step>
-					)}
-				{POST_VERIFY_GATEWAY.includes(step) && creds && (
-					<Step
-						active={step === "verifying-gateway"}
-						title={<Text bold>Verifying gateway access</Text>}
-					>
-						{step === "verifying-gateway" ? (
-							<Box>
-								<Text color="cyan">
-									<Spinner />
-								</Text>
-								<Text>{` Sending a test request to ${chosenModel ?? "the model"}…`}</Text>
-							</Box>
-						) : smokeWarning ? (
-							<Box flexDirection="column">
-								<Box>
-									<Text color="yellow">▲</Text>
-									<Text color="yellow">{` ${smokeWarning}`}</Text>
-								</Box>
-								<Text dimColor>
-									{
-										"Config was still written, but your agents will hit this same error — fix gateway access (model entitlement, budget, or region/IP), then relaunch."
-									}
-								</Text>
-							</Box>
-						) : (
-							<Text dimColor>{"Gateway accepted a test request."}</Text>
-						)}
-					</Step>
-				)}
-				{POST_MODEL_CHOICE.includes(step) &&
-					(creds || authMethod === "skip") &&
-					(authMethod === "skip" ? (
-						// Skip configuration runs Configure for its backup
-						// side-effects only — rendered bare (no Step, no title) so
-						// nothing appears in the TUI. Configure itself emits no rows
-						// on the creds === null path.
-						<Configure
-							tools={installedTools}
-							creds={creds}
-							onDone={handleConfigureDone}
-						/>
-					) : (
-						<Step active={step === "configuring"} title={configureTitle()}>
-							<Configure
-								tools={installedTools}
-								creds={creds}
-								onDone={handleConfigureDone}
-							/>
-						</Step>
-					))}
-				{(step === "finalizing" || step === "done") &&
-					codegraphEligible(installedTools) &&
-					codegraphResult?.status !== "skipped" && (
-						<Step
-							active={step === "finalizing"}
-							title={<Text bold>Set up CodeGraph</Text>}
-						>
-							{codegraphResult === null ? (
-								<Box>
-									<Text color="cyan">
-										<Spinner />
-									</Text>
-									<Text> Setting up CodeGraph…</Text>
-								</Box>
-							) : codegraphResult.status === "warning" ? (
-								<Box>
-									<Text color="yellow">▲</Text>
-									<Text color="yellow">
-										{` ${codegraphResult.message ?? "CodeGraph setup did not complete."}`}
-									</Text>
-								</Box>
-							) : (
-								<Text dimColor>
-									{`Wired CodeGraph into ${formatCodegraphTargets(codegraphResult.targets)}.`}
-								</Text>
+						{(claudeCodeExtSelected || continueSelected) &&
+							step !== "select" && (
+								<Step
+									active={step === "editor-select"}
+									title={editorSelectTitle(step !== "editor-select")}
+								>
+									<EditorSelect
+										onConfirm={handleEditorsConfirm}
+										readOnly={step !== "editor-select"}
+									/>
+								</Step>
 							)}
-						</Step>
-					)}
-				{step === "done" && (
-					<SetupComplete
-						tools={installedTools}
-						shimsInstalled={shimsInstalled}
-					/>
+						{step !== "select" && step !== "editor-select" && (
+							<Step active={step === "confirm"} title={confirmTitle()}>
+								<Confirm
+									tools={tools}
+									onConfirm={handleConfirmProceed}
+									readOnly={step !== "confirm"}
+								/>
+							</Step>
+						)}
+						{step !== "select" &&
+							step !== "editor-select" &&
+							step !== "confirm" && (
+								<Step active={step === "login"} title={loginTitle()}>
+									<Login onDone={handleLoginDone} />
+								</Step>
+							)}
+						{(mode === "install" ||
+							(mode === "config" && codegraphEligible(tools))) &&
+							POST_LOGIN.includes(step) && (
+								<Step
+									active={step === "installing"}
+									title={
+										<Text bold>
+											{mode === "install"
+												? "Installing packages"
+												: "Installing CodeGraph"}
+										</Text>
+									}
+								>
+									<Install
+										tools={tools}
+										includeAgents={mode === "install"}
+										onDone={handleInstallDone}
+									/>
+								</Step>
+							)}
+						{POST_REFRESH.includes(step) && refreshWarning && (
+							<Step title={<Text bold>Refresh CoDev config</Text>}>
+								<Box>
+									<Text color="yellow">▲</Text>
+									<Text color="yellow">{` ${refreshWarning}`}</Text>
+								</Box>
+							</Step>
+						)}
+						{POST_REFRESH.includes(step) && savedCreds && (
+							<Step
+								active={step === "validating-existing"}
+								title={<Text bold>Checking saved API key</Text>}
+							>
+								{step === "validating-existing" ? (
+									<Box>
+										<Text color="cyan">
+											<Spinner />
+										</Text>
+										<Text> Verifying with gateway...</Text>
+									</Box>
+								) : (
+									<Text dimColor>
+										{existingValid
+											? "Saved API key is valid."
+											: (existingMessage ?? "")}
+									</Text>
+								)}
+							</Step>
+						)}
+						{POST_VALIDATE.includes(step) && (
+							<Step
+								active={step === "key-choice"}
+								title={configurationMethodTitle(step !== "key-choice")}
+							>
+								<AuthMethod
+									onSelect={handleAuthMethod}
+									readOnly={step !== "key-choice"}
+									selected={authMethod}
+									hasExisting={existingValid}
+								/>
+							</Step>
+						)}
+						{POST_KEY_CHOICE.includes(step) && authMethod === "new" && auth && (
+							<Step active={step === "fetching-key"} title={fetchApiKeyTitle()}>
+								<FetchApiKey
+									auth={auth}
+									onDone={handleFetchKeyDone}
+									onFallback={handleFetchKeyFallback}
+								/>
+							</Step>
+						)}
+						{POST_KEY_CHOICE.includes(step) &&
+							(authMethod === "manual" ||
+								(authMethod === "new" && step === "manual-creds")) && (
+								<Step
+									active={step === "manual-creds"}
+									title={manualCredentialsTitle()}
+								>
+									<ManualCredentials
+										onDone={handleManualDone}
+										readOnly={step !== "manual-creds"}
+									/>
+								</Step>
+							)}
+						{POST_KEY_CHOICE.includes(step) &&
+							authMethod !== "skip" &&
+							modelWarning && (
+								<Step title={<Text bold>Model list</Text>}>
+									<Box>
+										<Text color="yellow">▲</Text>
+										<Text color="yellow">{` ${modelWarning}`}</Text>
+									</Box>
+								</Step>
+							)}
+						{POST_KEY_CHOICE.includes(step) &&
+							authMethod !== "skip" &&
+							creds &&
+							step !== "fetching-key" &&
+							step !== "manual-creds" && (
+								<Step
+									active={step === "model-choice"}
+									title={modelSelectTitle(step !== "model-choice")}
+								>
+									<ModelSelect
+										apiKey={creds.apiKey}
+										baseUrl={creds.baseUrl}
+										onSelect={handleModelSelect}
+										onFallback={handleModelFallback}
+										fallbackModel={FALLBACK_MODEL}
+										readOnly={step !== "model-choice"}
+										selected={chosenModel}
+									/>
+								</Step>
+							)}
+						{POST_VERIFY_GATEWAY.includes(step) && creds && (
+							<Step
+								active={step === "verifying-gateway"}
+								title={<Text bold>Verifying gateway access</Text>}
+							>
+								{step === "verifying-gateway" ? (
+									<Box>
+										<Text color="cyan">
+											<Spinner />
+										</Text>
+										<Text>{` Sending a test request to ${chosenModel ?? "the model"}…`}</Text>
+									</Box>
+								) : smokeWarning ? (
+									<Box flexDirection="column">
+										<Box>
+											<Text color="yellow">▲</Text>
+											<Text color="yellow">{` ${smokeWarning}`}</Text>
+										</Box>
+										<Text dimColor>
+											{
+												"Config was still written, but your agents will hit this same error — fix gateway access (model entitlement, budget, or region/IP), then relaunch."
+											}
+										</Text>
+									</Box>
+								) : (
+									<Text dimColor>{"Gateway accepted a test request."}</Text>
+								)}
+							</Step>
+						)}
+						{POST_MODEL_CHOICE.includes(step) &&
+							(creds || authMethod === "skip") &&
+							(authMethod === "skip" ? (
+								// Skip configuration runs Configure for its backup
+								// side-effects only — rendered bare (no Step, no title) so
+								// nothing appears in the TUI. Configure itself emits no rows
+								// on the creds === null path.
+								<Configure
+									tools={installedTools}
+									creds={creds}
+									onDone={handleConfigureDone}
+								/>
+							) : (
+								<Step active={step === "configuring"} title={configureTitle()}>
+									<Configure
+										tools={installedTools}
+										creds={creds}
+										onDone={handleConfigureDone}
+									/>
+								</Step>
+							))}
+						{(step === "finalizing" || step === "done") &&
+							codegraphEligible(installedTools) &&
+							codegraphResult?.status !== "skipped" && (
+								<Step
+									active={step === "finalizing"}
+									title={<Text bold>Set up CodeGraph</Text>}
+								>
+									{codegraphResult === null ? (
+										<Box>
+											<Text color="cyan">
+												<Spinner />
+											</Text>
+											<Text> Setting up CodeGraph…</Text>
+										</Box>
+									) : codegraphResult.status === "warning" ? (
+										<Box>
+											<Text color="yellow">▲</Text>
+											<Text color="yellow">
+												{` ${codegraphResult.message ?? "CodeGraph setup did not complete."}`}
+											</Text>
+										</Box>
+									) : (
+										<Text dimColor>
+											{`Wired CodeGraph into ${formatCodegraphTargets(codegraphResult.targets)}.`}
+										</Text>
+									)}
+								</Step>
+							)}
+						{(step === "finalizing" || step === "done") && ripgrepWarning && (
+							<Step title={<Text bold>File search</Text>}>
+								<Box>
+									<Text color="yellow">▲</Text>
+									<Text color="yellow">{` ${ripgrepWarning}`}</Text>
+								</Box>
+							</Step>
+						)}
+						{step === "done" && (
+							<SetupComplete
+								tools={installedTools}
+								shimsInstalled={shimsInstalled}
+							/>
+						)}
+					</>
 				)}
 			</Frame>
 		</Box>

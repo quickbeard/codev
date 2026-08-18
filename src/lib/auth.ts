@@ -16,6 +16,9 @@ import open from "open";
 import { fetchCodevConfig } from "@/lib/backend.js";
 import { LOGIN_SUCCESS_URL, SSO_URL } from "@/lib/const.js";
 import { logDebug, logError, loggedFetch, logWarn } from "@/lib/log.js";
+// Type-only: lib/model-limits.ts imports loadModelLimits from here, so a value
+// import would close a runtime cycle. `import type` is erased at compile time.
+import type { ModelLimits } from "@/lib/model-limits.js";
 
 const CLIENT_ID = atob("bGl0ZWxsbS10ZXN0");
 const REVOKE_TIMEOUT_MS = 3_000;
@@ -78,9 +81,9 @@ export interface ApiKeyCreds {
 
 // auth.json holds three independent blocks: SSO tokens (issued by the IdP),
 // the gateway API key (issued by /auth/exchange or entered manually), and the
-// CoDev runtime config (Supabase coordinates, fetched from the backend's
-// /config endpoint on every successful SSO login). They share a file because
-// they're written together on a fresh install, but each is updated in
+// CoDev runtime config (analysis backend coordinates, fetched from the
+// backend's /config endpoint on every successful SSO login). They share a file
+// because they're written together on a fresh install, but each is updated in
 // isolation — saving SSO must not clobber the api_key or codev-config blocks,
 // and `codevhub logout` strips SSO while preserving the rest for reuse.
 interface AuthFileContents {
@@ -94,9 +97,17 @@ interface AuthFileContents {
 	model?: string;
 	provider_id?: string;
 	provider_name?: string;
+	// Analysis backend coordinates. The keys keep their historical `supabase_*`
+	// names — they're what /config returns and what installed machines cache.
 	supabase_url?: string;
 	supabase_anon_key?: string;
 	gateway_url?: string;
+	// Per-model context windows as reported by the gateway, cached at the
+	// model-choice step. Its own block rather than a field on the api-key block
+	// above, precisely because saveApiKey rewrites that block wholesale — a
+	// field there would be cleared by every re-save site that didn't thread it
+	// through. Absent ⇒ lib/model-limits.ts falls back to its static table.
+	model_limits?: Record<string, ModelLimits>;
 	// SkillHub session cookie (`skill-hub-session=…`), captured by
 	// `codevhub login --admin` for local ADMIN/SUPERADMIN accounts that can't use
 	// SSO. SSO users don't have one — skillhubFetch falls back to a Bearer token.
@@ -104,8 +115,8 @@ interface AuthFileContents {
 }
 
 export interface CodevConfig {
-	supabaseUrl: string;
-	supabaseAnonKey: string;
+	analysisBackendUrl: string;
+	analysisBackendAnonKey: string;
 	gatewayUrl: string;
 }
 
@@ -225,10 +236,23 @@ export function saveCodevConfig(config: CodevConfig): void {
 	const existing = readAuthFile() ?? {};
 	writeAuthFile({
 		...existing,
-		supabase_url: config.supabaseUrl,
-		supabase_anon_key: config.supabaseAnonKey,
+		supabase_url: config.analysisBackendUrl,
+		supabase_anon_key: config.analysisBackendAnonKey,
 		gateway_url: config.gatewayUrl,
 	});
+}
+
+// Cache the gateway's per-model windows. Skips the write entirely for an empty
+// map so a gateway that reports nothing (every max_input_tokens null, which is
+// the case today) doesn't churn auth.json on every model-choice step.
+export function saveModelLimits(limits: Record<string, ModelLimits>): void {
+	if (Object.keys(limits).length === 0) return;
+	const existing = readAuthFile() ?? {};
+	writeAuthFile({ ...existing, model_limits: limits });
+}
+
+export function loadModelLimits(): Record<string, ModelLimits> | null {
+	return readAuthFile()?.model_limits ?? null;
 }
 
 export function loadApiKey(): ApiKeyCreds | null {
@@ -285,10 +309,18 @@ export async function logout(): Promise<boolean> {
 			api_key: raw.api_key,
 			base_url: raw.base_url,
 			model: raw.model,
+			// The provider pair belongs to the api-key block above and must travel
+			// with it. Dropping it here silently re-labels a manually-named
+			// provider as the netGate default on the next config write — the same
+			// failure saveApiKey's whole-block rewrite is documented to cause,
+			// reached by a different route.
+			provider_id: raw.provider_id,
+			provider_name: raw.provider_name,
 			supabase_url: raw.supabase_url,
 			supabase_anon_key: raw.supabase_anon_key,
 			gateway_url: raw.gateway_url,
 			skillhub_cookie: raw.skillhub_cookie,
+			model_limits: raw.model_limits,
 		};
 		const hasAnything = Object.values(preserved).some((v) => v !== undefined);
 		if (hasAnything) {
@@ -542,9 +574,9 @@ export async function silentSso(): Promise<AuthData | null> {
 	}
 }
 
-// Best-effort: pull the latest Supabase coordinates from the backend and
-// persist them next to the SSO session. Failure is logged but not thrown —
-// downstream accessors (SUPABASE_URL/ANON_KEY in const.ts) will hard-fail
+// Best-effort: pull the latest analysis backend coordinates from the backend
+// and persist them next to the SSO session. Failure is logged but not thrown —
+// downstream accessors (ANALYSIS_BACKEND_URL/ANON_KEY in const.ts) will hard-fail
 // later if no values were ever fetched, with a "run codevhub install" message
 // that's actionable for the user.
 //
@@ -553,8 +585,8 @@ export async function silentSso(): Promise<AuthData | null> {
 //     Step — the call blocks the transition to `validating-existing`/
 //     `key-choice` but doesn't render a spinner of its own).
 //   - upload.ts's ensureAuth runs it on the fresh-login branch, and again
-//     in the retry path after a 401/403 from Supabase (config may have
-//     rotated since the last login).
+//     in the retry path after a 401/403 from the analysis backend (config may
+//     have rotated since the last login).
 export async function refreshCodevConfig(
 	accessToken: string,
 	onLog: (msg: string) => void,

@@ -19,6 +19,10 @@ beforeEach(() => {
 	// homedir() reads USERPROFILE on Windows, HOME on POSIX. Stub both so tests
 	// hit the temp home on every platform.
 	vi.stubEnv("USERPROFILE", tempDir);
+	// The model-seeding writer resolves the agents' state dir via
+	// XDG_STATE_HOME before falling back to $HOME/.local/state; clear it so a
+	// host that exports it can't leak test writes into a real state dir.
+	vi.stubEnv("XDG_STATE_HOME", "");
 	// The configure* functions fall back to AI_GATEWAY_URL()/AI_GATEWAY_OPENAI_URL()
 	// whenever creds carry no baseUrl (the SSO-key path), and those accessors read
 	// gateway_url out of ~/.codev-hub/auth.json. Seed it so the fallback resolves.
@@ -282,9 +286,31 @@ describe("configureClaudeCode", () => {
 			ANTHROPIC_DEFAULT_SONNET_MODEL: "chosen-model",
 			ANTHROPIC_DEFAULT_HAIKU_MODEL: "chosen-model",
 			CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1",
-			CLAUDE_CODE_AUTO_COMPACT_WINDOW: "196608",
-			CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "85",
+			// "chosen-model" isn't in the model table, so it takes the 200K
+			// default — which is also Claude Code's own ceiling — at 80%.
+			CLAUDE_CODE_AUTO_COMPACT_WINDOW: "200000",
+			CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80",
 		});
+	});
+
+	// Claude Code clamps the window env var to the model's native window (200000
+	// for anything it doesn't recognize), so a 1M model cannot be described to
+	// it honestly — writing 1000000 would be silently reduced. See
+	// claudeWindow/claudeCompactPct.
+	test("pins Claude Code's own 200K ceiling even for a 1M model", async () => {
+		const { configureClaudeCode } = await import("@/lib/configure.js");
+		const read = () =>
+			JSON.parse(
+				readFileSync(join(tempDir, ".claude", "settings.json"), "utf-8"),
+			).env;
+
+		configureClaudeCode({ apiKey: "sk", model: "MiniMax/MiniMax-M3" });
+		expect(read().CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("200000");
+		expect(read().CLAUDE_AUTOCOMPACT_PCT_OVERRIDE).toBe("80");
+
+		configureClaudeCode({ apiKey: "sk", model: "zai-org/GLM-4.7-cc" });
+		expect(read().CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("200000");
+		expect(read().CLAUDE_AUTOCOMPACT_PCT_OVERRIDE).toBe("80");
 	});
 
 	test("does not touch ~/.claude.json on its own (handled by resetClaudeAuth earlier in the install flow)", async () => {
@@ -398,18 +424,56 @@ describe("configureOpenCode", () => {
 		expect(config.provider.netgate.models["chosen-model"].name).toBe(
 			"chosen-model",
 		);
-		// Top-level `model` pins the active default in <provider>/<modelId> form.
-		expect(config.model).toBe("netgate/chosen-model");
-		// Declares the gateway window so OpenCode sizes context correctly and its
+		// No top-level `model`: OpenCode and CoDev Code switch models in-CLI, and
+		// a pin would outrank that selection on every launch.
+		expect(config.model).toBeUndefined();
+		// Declares the model's window so OpenCode sizes context correctly and its
 		// auto-compaction fires (a model with no `limit` defaults to context 0,
 		// which disables compaction). `output` is required alongside `context`.
+		// `input` is the compaction budget — see the declaredInput tests.
 		expect(config.provider.netgate.models["chosen-model"].limit).toEqual({
-			context: 196608,
+			context: 200000,
+			input: 200000,
 			output: 65536,
 		});
-		// Reserve lands the compaction trigger at ~85% of the window (196608 −
-		// 29491 ≈ 167K), matching Claude Code and Codex.
-		expect(config.compaction).toEqual({ auto: true, reserved: 29491 });
+		// Declares image input so OpenCode doesn't strip attached images
+		// client-side before the request (a custom-provider model defaults to
+		// text-only capabilities).
+		expect(config.provider.netgate.models["chosen-model"].attachment).toBe(
+			true,
+		);
+		expect(config.provider.netgate.models["chosen-model"].modalities).toEqual({
+			input: ["text", "image"],
+			output: ["text"],
+		});
+		// One global reserve; each model's trigger comes from its own
+		// `limit.input` minus this.
+		expect(config.compaction).toEqual({ auto: true, reserved: 40000 });
+	});
+
+	// The reason `limit.input` is written at all. OpenCode's trigger is
+	// `input − reserved`, and `reserved` is a single top-level value, so `input`
+	// is the only per-model lever — without it a 1M model and a 200K model in
+	// one config cannot both land on their intended triggers.
+	test("gives each model in one config its own compaction trigger", async () => {
+		const { configureOpenCode } = await import("@/lib/configure.js");
+		configureOpenCode({
+			apiKey: "sk-xyz",
+			model: "MiniMax/MiniMax-M3",
+			models: ["MiniMax/MiniMax-M3", "zai-org/GLM-4.7-cc"],
+		});
+
+		const filePath = join(tempDir, ".config", "opencode", "opencode.json");
+		const config = JSON.parse(readFileSync(filePath, "utf-8"));
+		const map = config.provider.netgate.models;
+		const reserved = config.compaction.reserved;
+
+		// True windows, so the TUI's "% context used" gauge stays honest.
+		expect(map["MiniMax/MiniMax-M3"].limit.context).toBe(1000000);
+		expect(map["zai-org/GLM-4.7-cc"].limit.context).toBe(200000);
+		// ...and each fires where it should, off one shared reserve.
+		expect(map["MiniMax/MiniMax-M3"].limit.input - reserved).toBe(800000);
+		expect(map["zai-org/GLM-4.7-cc"].limit.input - reserved).toBe(160000);
 	});
 
 	test("writes every fetched model into the provider's models map", async () => {
@@ -426,10 +490,21 @@ describe("configureOpenCode", () => {
 		expect(Object.keys(map).sort()).toEqual(["model-a", "model-b", "model-c"]);
 		for (const id of ["model-a", "model-b", "model-c"]) {
 			expect(map[id].name).toBe(id);
-			expect(map[id].limit).toEqual({ context: 196608, output: 65536 });
+			expect(map[id].limit).toEqual({
+				context: 200000,
+				input: 200000,
+				output: 65536,
+			});
+			expect(map[id].attachment).toBe(true);
+			expect(map[id].modalities).toEqual({
+				input: ["text", "image"],
+				output: ["text"],
+			});
 		}
-		// Top-level default still points at the chosen one.
-		expect(config.model).toBe("netgate/model-a");
+		// With no pin, the map order carries the choice: a launch with nothing
+		// selected yet takes the provider's first model.
+		expect(config.model).toBeUndefined();
+		expect(Object.keys(map)[0]).toBe("model-a");
 	});
 
 	test("falls back to [model] when `models` is absent (older call sites)", async () => {
@@ -581,15 +656,25 @@ describe("configureCodevCode", () => {
 		expect(config.provider.netgate.models["chosen-model"].name).toBe(
 			"chosen-model",
 		);
-		// Top-level `model` pins the active default in <provider>/<modelId> form.
-		expect(config.model).toBe("netgate/chosen-model");
+		// No top-level `model`: OpenCode and CoDev Code switch models in-CLI, and
+		// a pin would outrank that selection on every launch.
+		expect(config.model).toBeUndefined();
 		// The fork shares OpenCode's window/compaction handling, so the same
 		// limit + compaction blocks must land in its config.
 		expect(config.provider.netgate.models["chosen-model"].limit).toEqual({
-			context: 196608,
+			context: 200000,
+			input: 200000,
 			output: 65536,
 		});
-		expect(config.compaction).toEqual({ auto: true, reserved: 29491 });
+		// Same image-input declaration as OpenCode (shared writer).
+		expect(config.provider.netgate.models["chosen-model"].attachment).toBe(
+			true,
+		);
+		expect(config.provider.netgate.models["chosen-model"].modalities).toEqual({
+			input: ["text", "image"],
+			output: ["text"],
+		});
+		expect(config.compaction).toEqual({ auto: true, reserved: 40000 });
 	});
 
 	test("does not touch ~/.config/opencode/opencode.json (fork-only install)", async () => {
@@ -684,6 +769,111 @@ describe("configureCodevCode", () => {
 	});
 });
 
+describe("first-launch model seeding (state/model.json recents)", () => {
+	function statePath(app: "opencode" | "codev") {
+		return join(tempDir, ".local", "state", app, "model.json");
+	}
+
+	test("configureCodevCode seeds the chosen model as the saved selection", async () => {
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "chosen-model" });
+
+		const state = JSON.parse(readFileSync(statePath("codev"), "utf-8"));
+		expect(state.recent).toEqual([
+			{ providerID: "netgate", modelID: "chosen-model" },
+		]);
+	});
+
+	test("configureOpenCode seeds its own state dir, not the fork's", async () => {
+		const { configureOpenCode } = await import("@/lib/configure.js");
+		configureOpenCode({ apiKey: "sk-xyz", model: "chosen-model" });
+
+		const state = JSON.parse(readFileSync(statePath("opencode"), "utf-8"));
+		expect(state.recent).toEqual([
+			{ providerID: "netgate", modelID: "chosen-model" },
+		]);
+		expect(existsSync(statePath("codev"))).toBe(false);
+	});
+
+	test("honors XDG_STATE_HOME", async () => {
+		vi.stubEnv("XDG_STATE_HOME", join(tempDir, "xdg-state"));
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "m" });
+
+		const state = JSON.parse(
+			readFileSync(join(tempDir, "xdg-state", "codev", "model.json"), "utf-8"),
+		);
+		expect(state.recent[0]?.modelID).toBe("m");
+	});
+
+	test("never overrides a non-empty saved selection (key refresh, codevhub model)", async () => {
+		const dir = join(tempDir, ".local", "state", "codev");
+		mkdirSync(dir, { recursive: true });
+		const original = {
+			recent: [{ providerID: "netgate", modelID: "user-switched" }],
+			favorite: [],
+			variant: {},
+		};
+		writeFileSync(join(dir, "model.json"), JSON.stringify(original));
+
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "install-choice" });
+
+		const state = JSON.parse(readFileSync(statePath("codev"), "utf-8"));
+		expect(state).toEqual(original);
+	});
+
+	test("seeds an empty recents list and carries the other fields over", async () => {
+		const dir = join(tempDir, ".local", "state", "codev");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "model.json"),
+			JSON.stringify({
+				recent: [],
+				favorite: [{ providerID: "netgate", modelID: "fav" }],
+				variant: { "netgate/fav": "default" },
+			}),
+		);
+
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "chosen-model" });
+
+		const state = JSON.parse(readFileSync(statePath("codev"), "utf-8"));
+		expect(state.recent).toEqual([
+			{ providerID: "netgate", modelID: "chosen-model" },
+		]);
+		expect(state.favorite).toEqual([{ providerID: "netgate", modelID: "fav" }]);
+		expect(state.variant).toEqual({ "netgate/fav": "default" });
+	});
+
+	test("replaces a corrupt state file with a fresh seed", async () => {
+		const dir = join(tempDir, ".local", "state", "codev");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "model.json"), "{not json");
+
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-xyz", model: "chosen-model" });
+
+		const state = JSON.parse(readFileSync(statePath("codev"), "utf-8"));
+		expect(state.recent).toEqual([
+			{ providerID: "netgate", modelID: "chosen-model" },
+		]);
+	});
+
+	test("uses the manual-path provider id in the seed", async () => {
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({
+			apiKey: "sk-xyz",
+			model: "m",
+			providerId: "myprov",
+			providerName: "My Provider",
+		});
+
+		const state = JSON.parse(readFileSync(statePath("codev"), "utf-8"));
+		expect(state.recent).toEqual([{ providerID: "myprov", modelID: "m" }]);
+	});
+});
+
 describe("configureCodex", () => {
 	function readCodexToml() {
 		return TOML.parse(
@@ -726,13 +916,26 @@ describe("configureCodex", () => {
 		);
 	});
 
-	test("pins the gateway window and compaction trigger (Codex would otherwise assume a larger fallback window)", async () => {
+	test("pins the chosen model's window and compaction trigger (Codex would otherwise assume a 272K fallback window)", async () => {
 		const { configureCodex } = await import("@/lib/configure.js");
 		configureCodex({ apiKey: "sk-codex", model: "m" });
 
 		const config = readCodexToml();
-		expect(config.model_context_window).toBe(196608);
-		expect(config.model_auto_compact_token_limit).toBe(167117); // ≈85% of the window
+		// "m" is unknown, so it takes the 200K default.
+		expect(config.model_context_window).toBe(200000);
+		expect(config.model_auto_compact_token_limit).toBe(160000);
+	});
+
+	test("pins each model's own window, not a shared constant", async () => {
+		const { configureCodex } = await import("@/lib/configure.js");
+
+		configureCodex({ apiKey: "sk-codex", model: "MiniMax/MiniMax-M3" });
+		expect(readCodexToml().model_context_window).toBe(1000000);
+		expect(readCodexToml().model_auto_compact_token_limit).toBe(800000);
+
+		configureCodex({ apiKey: "sk-codex", model: "zai-org/GLM-4.7-cc" });
+		expect(readCodexToml().model_context_window).toBe(200000);
+		expect(readCodexToml().model_auto_compact_token_limit).toBe(160000);
 	});
 
 	test("does not touch ~/.claude.json (Codex-only install)", async () => {
@@ -859,6 +1062,23 @@ describe("configureContinue", () => {
 		expect(raw).toContain(`apiKey: "sk-vscode"`);
 		expect(raw).toContain(`name: "chosen-model"`);
 		expect(raw).toContain(`model: "chosen-model"`);
+	});
+
+	// Continue has no compaction of its own; it prunes history to fit
+	// contextLength, so the window is the whole of what it needs from us.
+	test("declares each model's own window", async () => {
+		const { configureContinue } = await import("@/lib/configure.js");
+		configureContinue({
+			apiKey: "sk",
+			model: "MiniMax/MiniMax-M3",
+			models: ["MiniMax/MiniMax-M3", "zai-org/GLM-4.7-cc"],
+		});
+
+		const raw = readContinueYaml();
+		expect(raw).toContain("defaultCompletionOptions:");
+		expect(raw).toContain("contextLength: 1000000");
+		expect(raw).toContain("contextLength: 200000");
+		expect(raw.match(/^\s*maxTokens: 65536$/gm)?.length).toBe(2);
 	});
 
 	test("emits one model entry per fetched model", async () => {
@@ -1629,7 +1849,7 @@ describe("custom provider identity", () => {
 		expect(config.model_providers.netgate).toBeUndefined();
 	});
 
-	test("opencode writes the custom id in both the provider map and `model`", async () => {
+	test("opencode writes the custom id in the provider map", async () => {
 		const { configureOpenCode } = await import("@/lib/configure.js");
 		configureOpenCode(custom);
 
@@ -1639,7 +1859,7 @@ describe("custom provider identity", () => {
 				"utf-8",
 			),
 		);
-		expect(config.model).toBe("acme-ai/m");
+		expect(config.provider["acme-ai"].models.m).toBeDefined();
 		expect(config.provider["acme-ai"].name).toBe("Acme AI");
 		expect(config.provider["acme-ai"].options.apiKey).toBe("sk-user");
 		expect(config.provider.netgate).toBeUndefined();
@@ -1652,7 +1872,7 @@ describe("custom provider identity", () => {
 		const config = JSON.parse(
 			readFileSync(join(tempDir, ".config", "codev", "codev.json"), "utf-8"),
 		);
-		expect(config.model).toBe("acme-ai/m");
+		expect(config.provider["acme-ai"].models.m).toBeDefined();
 		expect(config.provider["acme-ai"].name).toBe("Acme AI");
 	});
 
