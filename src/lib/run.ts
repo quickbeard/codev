@@ -3,7 +3,10 @@ import { accessSync, constants as fsConstants } from "node:fs";
 import { constants } from "node:os";
 import { delimiter, join } from "node:path";
 import { logError, logInfo, logWarn } from "@/lib/log.js";
-import { claudeNativeBinaryMissing } from "@/lib/npm.js";
+import {
+	claudeNativeBinaryMissing,
+	codevNativeBinaryMissing,
+} from "@/lib/npm.js";
 import { stripShimDirFromPath } from "@/lib/shims.js";
 
 const AGENT_LABEL: Record<string, string> = {
@@ -158,20 +161,34 @@ export function runAgent(cmd: string, args: string[]): Promise<number> {
 		child.once("exit", async (code, signal) => {
 			cleanup();
 			if (code !== null) {
-				// A non-zero `claude` exit can be the leftover placeholder stub
-				// erroring with "native binary not installed" (suppressed
-				// postinstall / omitted optional dependency). The stub already
-				// printed its own message via inherited stderr; we only add a
-				// codev-specific repair hint when we can positively confirm the
-				// native binary is missing, so normal claude failures stay quiet.
-				if (
-					code !== 0 &&
-					cmd === "claude" &&
-					(await claudeNativeBinaryMissing())
-				) {
+				// A non-zero `claude` or `codev` exit can be the leftover
+				// placeholder stub rather than the agent (suppressed postinstall /
+				// omitted optional dependency). We only add a repair hint when we
+				// can positively confirm the native binary is missing, so ordinary
+				// agent failures stay quiet.
+				//
+				// The two stubs fail very differently and only one of them explains
+				// itself. Claude's prints "native binary not installed" through the
+				// inherited stderr, so the hint just adds the fix. CoDev Code's
+				// placeholder is a shell script that npm installs as `codev.exe`,
+				// so on Windows the user gets a PE-loader error blaming their
+				// Windows version and no clue that a download was skipped — there
+				// the hint carries the diagnosis as well.
+				const stubbedAgent =
+					code !== 0 && (cmd === "claude" || cmd === "codev") ? cmd : null;
+				if (stubbedAgent === "claude" && (await claudeNativeBinaryMissing())) {
 					process.stderr.write(
 						"\nclaude's native binary is missing. Run 'codevhub install' to repair it " +
 							"(reinstalls Claude Code with the platform binary included).\n",
+					);
+				} else if (
+					stubbedAgent === "codev" &&
+					(await codevNativeBinaryMissing())
+				) {
+					process.stderr.write(
+						"\nCoDev Code's native binary is missing — bin/codev.exe is still the " +
+							"placeholder stub, which is why it won't start. Run 'codevhub install' " +
+							"to repair it (re-runs the postinstall and reinstalls the platform binary).\n",
 					);
 				}
 				(code === 0 ? logInfo : logWarn)(`${label} exited (code ${code})`, {

@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Tool } from "@/lib/configure.js";
 import { logDebug, logWarn } from "@/lib/log.js";
+import { stripShimDirFromPath } from "@/lib/shims.js";
 
 // Tools installed via npm-global. Extension/plugin variants (Claude Code +
 // Continue) are not npm packages — VS Code installs them via
@@ -95,7 +96,14 @@ export function execAsync(
 	// `inheritStdin` hands the child our real stdin instead of a pipe. Only the
 	// console-mode probe needs it: it reads the Windows console input mode
 	// through its stdin handle, and a piped stdin is not a console.
-	options: { inheritStdin?: boolean } = {},
+	//
+	// `env` replaces the child's environment wholesale (Node's default is to
+	// inherit ours, so callers pass a spread of `process.env`). Only
+	// `verifyInstall` needs it, to drop our own PATH shim dir — see there.
+	options: {
+		inheritStdin?: boolean;
+		env?: NodeJS.ProcessEnv;
+	} = {},
 ): Promise<ExecResult> {
 	// Every child process codev shells out to funnels through here (npm, the
 	// agent --version probes, `code --install-extension`, JetBrains CLIs,
@@ -172,8 +180,12 @@ export function execAsync(
 				? spawn(shellCommand, {
 						stdio: ["inherit", "pipe", "pipe"],
 						shell: true,
+						...(options.env ? { env: options.env } : {}),
 					})
-				: spawn(file, args, { stdio: ["inherit", "pipe", "pipe"] });
+				: spawn(file, args, {
+						stdio: ["inherit", "pipe", "pipe"],
+						...(options.env ? { env: options.env } : {}),
+					});
 			const out: Buffer[] = [];
 			const err: Buffer[] = [];
 			child.stdout?.on("data", (chunk: Buffer) => out.push(chunk));
@@ -199,17 +211,23 @@ export function execAsync(
 			return;
 		}
 
+		const envOption = options.env ? { env: options.env } : {};
+
 		if (USE_SHELL) {
 			execFile(
 				shellCommand,
-				{ shell: true, encoding: "utf-8" },
+				{ shell: true, encoding: "utf-8", ...envOption },
 				(err, stdout, stderr) =>
 					done(err as NodeJS.ErrnoException | null, stdout, stderr),
 			);
 			return;
 		}
-		execFile(file, args, { encoding: "utf-8" }, (err, stdout, stderr) =>
-			done(err as NodeJS.ErrnoException | null, stdout, stderr),
+		execFile(
+			file,
+			args,
+			{ encoding: "utf-8", ...envOption },
+			(err, stdout, stderr) =>
+				done(err as NodeJS.ErrnoException | null, stdout, stderr),
 		);
 	});
 }
@@ -235,8 +253,19 @@ function installSpec(tool: NpmTool): string {
 // `claude` fails at runtime with "claude native binary not installed".
 const HARDENING_FLAGS = ["--include=optional", "--ignore-scripts=false"];
 
-export async function installPackage(pkg: string): Promise<string | null> {
-	const r = await execAsync("npm", ["i", "-g", pkg, ...HARDENING_FLAGS]);
+export async function installPackage(
+	pkg: string,
+	// Appended after the hardening flags. Recovery paths use it to add
+	// `--force`; ordinary installs pass nothing.
+	extraFlags: string[] = [],
+): Promise<string | null> {
+	const r = await execAsync("npm", [
+		"i",
+		"-g",
+		pkg,
+		...HARDENING_FLAGS,
+		...extraFlags,
+	]);
 	if (!r.error) return null;
 	return r.stderr.trim() || r.error.message;
 }
@@ -248,8 +277,21 @@ export async function npmGlobalRoot(): Promise<string | null> {
 	return root || null;
 }
 
+// Probe the freshly-installed agent by asking it for its version.
+//
+// The child's PATH has ~/.codev-hub/bin stripped, because that directory holds
+// CoDev's own shims: on a machine that has installed before, a bare `codev`
+// resolves to `codev.cmd`, which re-execs `codevhub codev --version`, which
+// runs `runAgent` — so verification would spawn a whole second hub process and
+// prefix the agent's real error with our own "Starting CoDev Code..." banner.
+// That banner is exactly what users reported seeing inside the install error.
+// `run.ts` strips the same directory for the same reason when it launches an
+// agent for real; verification has to match, or it measures the shim rather
+// than the binary npm just wrote.
 export async function verifyInstall(tool: NpmTool): Promise<string | null> {
-	const r = await execAsync(CLI[tool], ["--version"]);
+	const r = await execAsync(CLI[tool], ["--version"], {
+		env: { ...process.env, PATH: stripShimDirFromPath(process.env.PATH) },
+	});
 	if (!r.error) return null;
 	return r.stderr.trim() || r.error.message;
 }
@@ -258,6 +300,24 @@ export async function runClaudePostinstall(): Promise<string | null> {
 	const root = await npmGlobalRoot();
 	if (!root) return "could not resolve npm root -g";
 	const script = join(root, "@anthropic-ai", "claude-code", "install.cjs");
+	if (!existsSync(script)) return `${script} does not exist`;
+	const r = await execAsync("node", [script]);
+	if (!r.error) return null;
+	return r.stderr.trim() || r.error.message;
+}
+
+// CoDev Code's sibling of runClaudePostinstall. `codev-code` ships the same
+// shape as Claude Code — a placeholder at bin/codev.exe plus a postinstall that
+// copies the real binary out of a platform-specific optionalDependency — so it
+// needs the same escape hatch. Running the script directly is the one recovery
+// that works no matter what npm decided: npm re-runs install scripts only when
+// it considers the tree changed, so a repeat `npm i -g codev-code` over an
+// already-current install can report success without ever touching the
+// placeholder. `node postinstall.mjs` doesn't ask npm's opinion.
+export async function runCodevPostinstall(): Promise<string | null> {
+	const root = await npmGlobalRoot();
+	if (!root) return "could not resolve npm root -g";
+	const script = join(root, PKG["codev-code"], "postinstall.mjs");
 	if (!existsSync(script)) return `${script} does not exist`;
 	const r = await execAsync("node", [script]);
 	if (!r.error) return null;
@@ -278,8 +338,40 @@ export async function claudeNativeBinaryMissing(): Promise<boolean> {
 	const root = await npmGlobalRoot();
 	if (!root) return false;
 	const bin = join(root, "@anthropic-ai", "claude-code", "bin", "claude.exe");
+	return isPlaceholderStub(bin);
+}
+
+// CoDev Code's sibling of claudeNativeBinaryMissing, and the probe behind the
+// Windows failure this recovery exists for. `codev-code`'s placeholder is a
+// 476-byte POSIX shell script that npm nonetheless installs — and links a
+// `codev.cmd` shim to — under the name `bin/codev.exe`, because that is the
+// package's declared `bin` on every platform. Unix reads the shebang-less text
+// as a shell script and prints its "postinstall script was not run" message;
+// Windows hands the .exe to the PE loader, which rejects a file that has no PE
+// header and reports it through cmd.exe as:
+//
+//   This version of C:\...\codev-code\bin\codev.exe is not compatible with the
+//   version of Windows you're running.
+//
+// That message names neither npm nor a postinstall, so it reads as "wrong
+// architecture" or "unsupported Windows" and sends users chasing their OS
+// version. The size probe is what lets us say what actually happened. Same
+// conservative default as its Claude sibling: anything we can't resolve is a
+// `false`, so a genuinely broken binary is never mislabeled a missing one.
+export async function codevNativeBinaryMissing(): Promise<boolean> {
+	const root = await npmGlobalRoot();
+	if (!root) return false;
+	const bin = join(root, PKG["codev-code"], "bin", "codev.exe");
+	return isPlaceholderStub(bin);
+}
+
+// Both agents ship a placeholder small enough that no real native binary could
+// be confused for it (Claude's stub is ~4 KB, CoDev Code's is 476 bytes; the
+// binaries they stand in for are 170-250 MB). A file we can't stat is not a
+// confirmed stub, so it reports false.
+function isPlaceholderStub(path: string): boolean {
 	try {
-		return statSync(bin).size < 4096;
+		return statSync(path).size < 4096;
 	} catch {
 		return false;
 	}
@@ -313,6 +405,66 @@ async function recoverClaudeNativeBinary(
 		return `installed but '${cli}' still fails after recovery (postinstall + reinstall): ${afterReinstall}`;
 	}
 	return `installed but '${cli}' fails (${firstVerify}); recovery reinstall failed: ${reinstallErr}`;
+}
+
+// Recovery for a CoDev Code install whose native binary never got placed. Same
+// two root causes as Claude Code's, and the same cheapest-first order, with one
+// addition that the Claude path doesn't need.
+//
+// The extra case is npm's own idempotency. `npm i -g codev-code` over a tree npm
+// already considers current can finish without re-running install scripts, so
+// once bin/codev.exe is left as the placeholder, every subsequent
+// `codevhub install` re-reports the same failure and exits 0 from npm — the
+// user is stuck in a loop no amount of retrying escapes. Stage 1 sidesteps npm
+// entirely by running postinstall.mjs itself, and stage 2's reinstall carries
+// `--force` so npm re-fetches and re-links rather than declaring the tree
+// already correct.
+//
+// Reported failures name the placeholder rather than echoing the raw loader
+// error, which on Windows blames the OS for something npm did.
+async function recoverCodevNativeBinary(
+	firstVerify: string,
+): Promise<string | null> {
+	const cli = CLI["codev-code"];
+	// Captured before the repair attempts, which are what change the answer.
+	const wasPlaceholder = await codevNativeBinaryMissing();
+
+	const postErr = await runCodevPostinstall();
+	if (!postErr) {
+		const afterPost = await verifyInstall("codev-code");
+		if (!afterPost) return null;
+	}
+
+	const reinstallErr = await installPackage(installSpec("codev-code"), [
+		"--force",
+	]);
+	if (!reinstallErr) {
+		const afterReinstall = await verifyInstall("codev-code");
+		if (!afterReinstall) return null;
+		return `installed but '${cli}' still fails after recovery (postinstall + reinstall): ${describeCodevFailure(wasPlaceholder, afterReinstall)}`;
+	}
+	return `installed but '${cli}' fails (${describeCodevFailure(wasPlaceholder, firstVerify)}); recovery reinstall failed: ${reinstallErr}`;
+}
+
+// Replace the platform's own wording with what actually went wrong, when we
+// have positively confirmed the placeholder is still in place. Windows' loader
+// error ("This version of …\codev.exe is not compatible with the version of
+// Windows you're running") is the one users report, and it points at the OS
+// rather than at the postinstall that never ran — so a user who follows it
+// checks their Windows build and finds nothing wrong. Without that
+// confirmation the agent's own message is passed through untouched: a real
+// architecture or OS mismatch would produce the same text, and overriding it
+// would be the same mistake in reverse.
+function describeCodevFailure(wasPlaceholder: boolean, reason: string): string {
+	if (!wasPlaceholder) return reason;
+	return (
+		"CoDev Code's native binary was never unpacked — bin/codev.exe is still " +
+		"the placeholder stub, so it isn't a runnable program. This usually means " +
+		"npm skipped the package's postinstall script, or the platform-specific " +
+		"download (~170 MB) was blocked. Retry on a connection that can reach the " +
+		"npm registry, or install it by hand with " +
+		`\`npm i -g ${PKG["codev-code"]} --include=optional --ignore-scripts=false --force\`.`
+	);
 }
 
 // Codex's npm package resolves its native binary via an `optionalDependencies`
@@ -355,6 +507,13 @@ export async function installAndVerify(tool: NpmTool): Promise<string | null> {
 	// the postinstall and, if that doesn't help, forcing a reinstall.
 	if (tool === "claude-code") {
 		return recoverClaudeNativeBinary(firstVerify);
+	}
+
+	// codev-code ships the same placeholder-plus-postinstall shape, and it is
+	// the one agent ToolSelect locks on, so a bare failure here parks the whole
+	// wizard on `install-failed` with nothing installed. Recover it too.
+	if (tool === "codev-code") {
+		return recoverCodevNativeBinary(firstVerify);
 	}
 
 	if (tool === "codex" && process.platform === "win32") {
