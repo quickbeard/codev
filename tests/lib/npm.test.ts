@@ -1,9 +1,10 @@
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
 	claudeNativeBinaryMissing,
+	codevNativeBinaryMissing,
 	detectInstalledViaNpm,
 	installAndVerify,
 	installPackage,
@@ -11,6 +12,7 @@ import {
 	npmGlobalRoot,
 	verifyInstall,
 } from "@/lib/npm.js";
+import { shimDir } from "@/lib/shims.js";
 
 // ESM module namespaces are frozen — vi.spyOn can't redefine `execFile` /
 // `existsSync` directly. We replace them up-front with vi.fn() via vi.mock()
@@ -34,6 +36,9 @@ type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
 interface ExecCall {
 	file: string;
 	args: string[];
+	// The child's environment, when the caller overrode it. `verifyInstall` is
+	// the only production caller that does.
+	env?: NodeJS.ProcessEnv;
 }
 
 interface StubOptions {
@@ -54,16 +59,21 @@ interface StubOptions {
 function normalizeExecFileCall(callArgs: unknown[]): {
 	file: string;
 	args: string[];
+	env?: NodeJS.ProcessEnv;
 	cb: ExecCb;
 } {
 	const cb = callArgs[callArgs.length - 1] as ExecCb;
+	const opts = callArgs[callArgs.length - 2] as
+		| { env?: NodeJS.ProcessEnv }
+		| undefined;
+	const env = opts?.env;
 	const first = callArgs[0] as string;
 	const second = callArgs[1];
 	if (Array.isArray(second)) {
-		return { file: first, args: second as string[], cb };
+		return { file: first, args: second as string[], env, cb };
 	}
 	const tokens = first.split(/\s+/).filter(Boolean);
-	return { file: tokens[0] ?? "", args: tokens.slice(1), cb };
+	return { file: tokens[0] ?? "", args: tokens.slice(1), env, cb };
 }
 
 function stubExecFile(opts: StubOptions): ExecCall[] {
@@ -71,8 +81,8 @@ function stubExecFile(opts: StubOptions): ExecCall[] {
 	vi.mocked(child_process.execFile).mockImplementation(((
 		...callArgs: unknown[]
 	) => {
-		const { file, args, cb } = normalizeExecFileCall(callArgs);
-		calls.push({ file, args });
+		const { file, args, env, cb } = normalizeExecFileCall(callArgs);
+		calls.push({ file, args, env });
 		const r = opts.handler(file, args);
 		setImmediate(() => cb(r.error ?? null, r.stdout ?? "", r.stderr ?? ""));
 		return {} as unknown as child_process.ChildProcess;
@@ -172,6 +182,25 @@ describe("npm.ts", () => {
 			});
 			const err = await verifyInstall("claude-code");
 			expect(err).toBe("spawn claude ENOENT");
+		});
+
+		test("strips CoDev's shim dir from the child's PATH", async () => {
+			// Without this, `codev --version` resolves ~/.codev-hub/bin/codev.cmd,
+			// which re-execs `codevhub codev` and reports on our own shim instead
+			// of the binary npm just installed — the observed symptom was the
+			// agent's error arriving prefixed with "Starting CoDev Code...".
+			const origPath = process.env.PATH;
+			process.env.PATH = [shimDir(), "/usr/bin", "/bin"].join(delimiter);
+			try {
+				const calls = stubExecFile({ handler: () => ({ stdout: "1.0.0" }) });
+				await verifyInstall("codev-code");
+				const dirs = (calls[0]?.env?.PATH ?? "").split(delimiter);
+				expect(dirs).not.toContain(shimDir());
+				// The rest of PATH survives — the agent still has to be findable.
+				expect(dirs).toContain("/usr/bin");
+			} finally {
+				process.env.PATH = origPath;
+			}
 		});
 	});
 
@@ -556,6 +585,198 @@ describe("npm.ts", () => {
 				}
 			});
 		});
+
+		describe("codev-code native binary recovery", () => {
+			const postinstall = join("/fake/root", "codev-code", "postinstall.mjs");
+			const binPath = join("/fake/root", "codev-code", "bin", "codev.exe");
+
+			// The placeholder codev-code leaves at bin/codev.exe when its
+			// postinstall never places the real binary. 476 bytes of shell script
+			// under an .exe name — which is why Windows rejects it as an
+			// incompatible executable rather than reporting a failed install.
+			function stubPlaceholder(size = 476) {
+				return vi
+					.mocked(fs.statSync)
+					.mockImplementation(
+						(pth: fs.PathLike) =>
+							(String(pth) === binPath ? { size } : { size: 0 }) as fs.Stats,
+					);
+			}
+
+			test("re-runs the package's own postinstall and re-verifies", async () => {
+				let codevCalls = 0;
+				const existsSpy = vi
+					.mocked(fs.existsSync)
+					.mockImplementation(() => true);
+				const statSpy = stubPlaceholder();
+				const calls = stubExecFile({
+					handler: (file, args) => {
+						if (file === "npm" && args[0] === "i") return { stdout: "ok" };
+						if (file === "npm" && args[0] === "root") {
+							return { stdout: "/fake/root" };
+						}
+						if (file === "node") return { stdout: "postinstall ok" };
+						if (file === "codev") {
+							codevCalls += 1;
+							if (codevCalls === 1) {
+								return {
+									error: new Error("bad exe"),
+									stderr: "not compatible",
+								};
+							}
+							return { stdout: "1.18.4" };
+						}
+						return { stdout: "" };
+					},
+				});
+				const err = await installAndVerify("codev-code");
+				expect(err).toBeNull();
+				expect(codevCalls).toBe(2);
+				// Run the script directly rather than asking npm to re-run it: npm
+				// skips install scripts for a tree it already considers current, so
+				// the placeholder would survive every retry.
+				const nodeCall = calls.find((c) => c.file === "node");
+				expect(nodeCall?.args).toEqual([postinstall]);
+				statSpy.mockRestore();
+				existsSpy.mockRestore();
+			});
+
+			test("forces the recovery reinstall so npm can't call the tree current", async () => {
+				let codevCalls = 0;
+				const existsSpy = vi
+					.mocked(fs.existsSync)
+					.mockImplementation(() => true);
+				const statSpy = stubPlaceholder();
+				const calls = stubExecFile({
+					handler: (file, args) => {
+						if (file === "npm" && args[0] === "i") return { stdout: "ok" };
+						if (file === "npm" && args[0] === "root") {
+							return { stdout: "/fake/root" };
+						}
+						// The postinstall exits 0 without placing anything (the
+						// platform package was never downloaded), so only a
+						// re-fetching reinstall can fix it.
+						if (file === "node") return { stdout: "" };
+						if (file === "codev") {
+							codevCalls += 1;
+							if (codevCalls <= 2) {
+								return {
+									error: new Error("bad exe"),
+									stderr: "not compatible",
+								};
+							}
+							return { stdout: "1.18.4" };
+						}
+						return { stdout: "" };
+					},
+				});
+				const err = await installAndVerify("codev-code");
+				expect(err).toBeNull();
+				const installs = calls.filter(
+					(c) => c.file === "npm" && c.args[0] === "i",
+				);
+				expect(installs.length).toBe(2);
+				// The first install is the ordinary one and must stay unforced.
+				expect(installs[0]?.args).not.toContain("--force");
+				expect(installs[1]?.args).toContain("--force");
+				// --force never displaces the hardening flags.
+				expect(installs[1]?.args).toContain("--include=optional");
+				expect(installs[1]?.args).toContain("--ignore-scripts=false");
+				statSpy.mockRestore();
+				existsSpy.mockRestore();
+			});
+
+			test("explains the placeholder instead of echoing the OS loader error", async () => {
+				const existsSpy = vi
+					.mocked(fs.existsSync)
+					.mockImplementation(() => true);
+				const statSpy = stubPlaceholder();
+				stubExecFile({
+					handler: (file, args) => {
+						if (file === "npm" && args[0] === "i") return { stdout: "ok" };
+						if (file === "npm" && args[0] === "root") {
+							return { stdout: "/fake/root" };
+						}
+						if (file === "node") return { stdout: "" };
+						if (file === "codev") {
+							return {
+								error: new Error("bad exe"),
+								stderr:
+									"This version of C:\\Program Files\\nodejs\\node_modules\\codev-code\\bin\\codev.exe is not compatible with the version of Windows you're running.",
+							};
+						}
+						return { stdout: "" };
+					},
+				});
+				const err = await installAndVerify("codev-code");
+				// The Windows text blames the OS for a download that never happened,
+				// so the report has to name the real cause and a way out.
+				expect(err).toContain("native binary was never unpacked");
+				expect(err).toContain("placeholder stub");
+				expect(err).toContain("npm i -g codev-code");
+				statSpy.mockRestore();
+				existsSpy.mockRestore();
+			});
+
+			test("passes the agent's own error through when the binary is real", async () => {
+				// A full-size binary that still won't run is a genuine incompatibility
+				// (wrong architecture, unsupported OS). Rewriting that as "the
+				// postinstall didn't run" would send the user after the wrong fix.
+				const existsSpy = vi
+					.mocked(fs.existsSync)
+					.mockImplementation(() => true);
+				const statSpy = stubPlaceholder(177_637_504);
+				stubExecFile({
+					handler: (file, args) => {
+						if (file === "npm" && args[0] === "i") return { stdout: "ok" };
+						if (file === "npm" && args[0] === "root") {
+							return { stdout: "/fake/root" };
+						}
+						if (file === "node") return { stdout: "" };
+						if (file === "codev") {
+							return { error: new Error("x"), stderr: "Illegal instruction" };
+						}
+						return { stdout: "" };
+					},
+				});
+				const err = await installAndVerify("codev-code");
+				expect(err).toContain("Illegal instruction");
+				expect(err).not.toContain("placeholder stub");
+				statSpy.mockRestore();
+				existsSpy.mockRestore();
+			});
+
+			test("surfaces a failed recovery reinstall", async () => {
+				let npmInstalls = 0;
+				const existsSpy = vi
+					.mocked(fs.existsSync)
+					.mockImplementation(() => true);
+				const statSpy = stubPlaceholder();
+				stubExecFile({
+					handler: (file, args) => {
+						if (file === "npm" && args[0] === "i") {
+							npmInstalls += 1;
+							if (npmInstalls === 1) return { stdout: "ok" };
+							return { error: new Error("x"), stderr: "registry offline" };
+						}
+						if (file === "npm" && args[0] === "root") {
+							return { stdout: "/fake/root" };
+						}
+						if (file === "node") {
+							return { error: new Error("x"), stderr: "postinstall failed" };
+						}
+						if (file === "codev") {
+							return { error: new Error("bad exe"), stderr: "not compatible" };
+						}
+						return { stdout: "" };
+					},
+				});
+				const err = await installAndVerify("codev-code");
+				expect(err).toContain("recovery reinstall failed: registry offline");
+				statSpy.mockRestore();
+				existsSpy.mockRestore();
+			});
+		});
 	});
 
 	describe("claudeNativeBinaryMissing", () => {
@@ -600,6 +821,47 @@ describe("npm.ts", () => {
 		test("false (stay quiet) when npm root -g fails", async () => {
 			stubExecFile({ handler: () => ({ error: new Error("boom") }) });
 			expect(await claudeNativeBinaryMissing()).toBe(false);
+		});
+	});
+
+	describe("codevNativeBinaryMissing", () => {
+		// codev-code declares bin/codev.exe on every platform, so the probe uses
+		// the same path everywhere — matching the package's own bin field.
+		const binPath = join("/fake/root", "codev-code", "bin", "codev.exe");
+
+		test("true when the placeholder stub is still in place", async () => {
+			stubExecFile({ handler: () => ({ stdout: "/fake/root" }) });
+			const statSpy = vi
+				.mocked(fs.statSync)
+				.mockImplementation(
+					(p: fs.PathLike) =>
+						(String(p) === binPath ? { size: 476 } : { size: 0 }) as fs.Stats,
+				);
+			expect(await codevNativeBinaryMissing()).toBe(true);
+			statSpy.mockRestore();
+		});
+
+		test("false when the real native binary is in place", async () => {
+			stubExecFile({ handler: () => ({ stdout: "/fake/root" }) });
+			const statSpy = vi
+				.mocked(fs.statSync)
+				.mockImplementation(() => ({ size: 177_637_504 }) as fs.Stats);
+			expect(await codevNativeBinaryMissing()).toBe(false);
+			statSpy.mockRestore();
+		});
+
+		test("false (stay quiet) when the binary path can't be stat'd", async () => {
+			stubExecFile({ handler: () => ({ stdout: "/fake/root" }) });
+			const statSpy = vi.mocked(fs.statSync).mockImplementation(() => {
+				throw new Error("ENOENT");
+			});
+			expect(await codevNativeBinaryMissing()).toBe(false);
+			statSpy.mockRestore();
+		});
+
+		test("false (stay quiet) when npm root -g fails", async () => {
+			stubExecFile({ handler: () => ({ error: new Error("boom") }) });
+			expect(await codevNativeBinaryMissing()).toBe(false);
 		});
 	});
 
