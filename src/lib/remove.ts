@@ -3,7 +3,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { logout } from "@/lib/auth.js";
 import { runCodegraphUninstall, unwireCodevCodeMcp } from "@/lib/codegraph.js";
-import { restoreTool, type Tool } from "@/lib/configure.js";
+import {
+	removeCodevCodeAuthEntries,
+	restoreTool,
+	type Tool,
+} from "@/lib/configure.js";
 import { logError, logInfo, logWarn } from "@/lib/log.js";
 import { uninstallShims } from "@/lib/shims.js";
 
@@ -79,6 +83,7 @@ export async function runRemove(force = false): Promise<RemoveResult> {
 	for (const tool of TOOLS) {
 		steps.push(recordStep(runRestoreOrKeep(tool, force)));
 	}
+	steps.push(recordStep(runScrubCodevAuth()));
 	steps.push(recordStep(runWipeCodevDir()));
 
 	return {
@@ -140,6 +145,33 @@ async function runCodegraphRemoval(): Promise<StepResult> {
 		return {
 			label: "CodeGraph",
 			detail: `skipped: ${errorMessage(err)}`,
+			status: "warning",
+		};
+	}
+}
+
+// Configure writes the gateway key into CoDev Code's own auth store (the
+// config file is keyless), so restoring the config alone would leave a live
+// credential behind. Runs after the restore loop: a restored pre-CoDev config
+// never referenced the entry, and a deleted one certainly didn't. Best-effort
+// like the CodeGraph step — a leftover credential entry is worth a ▲ note,
+// not a failed remove.
+function runScrubCodevAuth(): StepResult {
+	const label = "CoDev Code credential";
+	try {
+		const removed = removeCodevCodeAuthEntries();
+		if (removed.length === 0) {
+			return { label, detail: "none stored", status: "noop" };
+		}
+		return {
+			label,
+			detail: `removed ${removed.join(", ")} from the agent's credential store`,
+			status: "ok",
+		};
+	} catch (err) {
+		return {
+			label,
+			detail: `left in place: ${errorMessage(err)}`,
 			status: "warning",
 		};
 	}

@@ -29,6 +29,10 @@ beforeEach(() => {
 	tempDir = mkdtempSync(join(tmpdir(), "codev-remove-test-"));
 	vi.stubEnv("HOME", tempDir);
 	vi.stubEnv("USERPROFILE", tempDir);
+	// The credential scrub resolves CoDev Code's data dir via XDG_DATA_HOME
+	// before falling back to $HOME/.local/share; clear it so a host that
+	// exports it can't leak test writes into a real data dir.
+	vi.stubEnv("XDG_DATA_HOME", "");
 	// The CodeGraph uninstall step shells out to the `codegraph` CLI. Default it
 	// to a clean success so the remove tests never spawn the real binary (which
 	// would edit the developer's actual agent configs); specific tests override.
@@ -383,5 +387,36 @@ describe("runRemove", () => {
 		expect(config.mcp.codegraph).toBeUndefined();
 		expect(config.mcp.mine.command).toEqual(["mine"]);
 		expect(result.keptPaths).toContain(filePath);
+	});
+});
+
+describe("CoDev Code credential scrub", () => {
+	test("removes the configure-written auth entry, keeping user-connected ones", async () => {
+		stubFetchOk();
+		configureCodevCode(CODEV_CREDS);
+		const authPath = join(tempDir, ".local", "share", "codev", "auth.json");
+		// A provider the user connected inside the agent must survive the remove.
+		writeFileSync(
+			authPath,
+			JSON.stringify({
+				...JSON.parse(readFileSync(authPath, "utf-8")),
+				anthropic: { type: "api", key: "sk-user" },
+			}),
+		);
+
+		const result = await runRemove();
+
+		const step = result.steps.find((s) => s.label === "CoDev Code credential");
+		expect(step?.status).toBe("ok");
+		expect(step?.detail).toContain("netgate");
+		const auth = JSON.parse(readFileSync(authPath, "utf-8"));
+		expect(auth).toEqual({ anthropic: { type: "api", key: "sk-user" } });
+	});
+
+	test("reports noop when no CoDev entry is stored", async () => {
+		stubFetchOk();
+		const result = await runRemove();
+		const step = result.steps.find((s) => s.label === "CoDev Code credential");
+		expect(step?.status).toBe("noop");
 	});
 });

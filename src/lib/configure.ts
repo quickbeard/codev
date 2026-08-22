@@ -163,6 +163,11 @@ const OPENCODE_K = {
 	compaction: atob("Y29tcGFjdGlvbg=="),
 	auto: atob("YXV0bw=="),
 	reserved: atob("cmVzZXJ2ZWQ="),
+	// CoDev Code auth-store entry fields (writeCodevCodeAuthEntry):
+	// `{ "<provider id>": { type: "api", key: "sk-..." } }`.
+	authType: atob("dHlwZQ=="),
+	authTypeApi: atob("YXBp"),
+	authKey: atob("a2V5"),
 };
 
 // The base URL CoDev writes to each tool's config. Read back at export time so
@@ -956,6 +961,18 @@ function configureOpenCodeKind(
 		: AI_GATEWAY_OPENAI_URL();
 	const defaultModel = requireModel(creds);
 	const provider = resolveProvider(creds);
+	// CoDev Code gets a keyless provider block: the credential goes into the
+	// agent's own auth store (its provider registry merges it back in by
+	// provider id at load), so codev.json never carries the API key users were
+	// copying into other tools. Credential first — a keyless config with no
+	// auth entry is a provider that 401s on the first chat, so a failure here
+	// must abort before the config write. The agent's startup migration scrubs
+	// any inline key an older hub wrote, so this writer must never re-add one.
+	// Legacy OpenCode keeps the inline key: it is being retired, and its
+	// upstream auth store lives under a different app dir this hub does not
+	// manage.
+	const keyless = kind === "codev-code-config";
+	if (keyless) writeCodevCodeAuthEntry(provider.id, creds.apiKey);
 	// Fall back to [defaultModel] when `models` is unset so callers that don't
 	// know about the list (e.g. older fixtures, the fallback path with no
 	// fetched list) still produce a valid one-entry map. The chosen model
@@ -1040,7 +1057,7 @@ function configureOpenCodeKind(
 				[OPENCODE_K.name]: provider.name,
 				[OPENCODE_K.options]: {
 					[OPENCODE_K.baseURL]: baseUrl,
-					[OPENCODE_K.apiKey]: creds.apiKey,
+					...(keyless ? {} : { [OPENCODE_K.apiKey]: creds.apiKey }),
 				},
 				[OPENCODE_K.models]: modelsMap,
 			},
@@ -1050,6 +1067,76 @@ function configureOpenCodeKind(
 	seedOpenCodeRecentModel(kind, provider.id, defaultModel);
 
 	return [{ kind, sourcePath, backupPath, created }];
+}
+
+// CoDev Code's credential store — the agent's XDG data dir, not the hub's
+// ~/.codev-hub. Same XDG-override convention as openCodeStateModelPath; only
+// the segment differs (data vs state).
+export function codevCodeAuthPath(): string {
+	const xdg = process.env.XDG_DATA_HOME;
+	if (xdg) return join(xdg, "codev", "auth.json");
+	return join(homedir(), ".local", "share", "codev", "auth.json");
+}
+
+// The store also holds credentials for providers the user connected inside
+// the agent themselves, so both writers below read-merge-write around the one
+// entry they own. A corrupt store parses as empty — the agent itself treats
+// an unparseable auth.json the same way.
+function readCodevCodeAuthStore(path: string): Record<string, unknown> {
+	if (!existsSync(path)) return {};
+	try {
+		const raw = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+			return raw as Record<string, unknown>;
+		}
+		return {};
+	} catch {
+		return {};
+	}
+}
+
+// Atomic staged write (hub auth.ts pattern): the agent writes this file
+// concurrently when the user connects a provider in-CLI, so a rename publishes
+// one whole file or the other, never a torn merge; chmod 0600 before the
+// rename so the published file is never readable by other users.
+function writeCodevCodeAuthStore(
+	path: string,
+	data: Record<string, unknown>,
+): void {
+	mkdirSync(dirname(path), { recursive: true });
+	const tmp = `${path}.${process.pid}.tmp`;
+	writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+	chmodSync(tmp, 0o600);
+	renameSync(tmp, path);
+	chmodSync(path, 0o600);
+}
+
+function writeCodevCodeAuthEntry(providerId: string, apiKey: string): void {
+	const path = codevCodeAuthPath();
+	writeCodevCodeAuthStore(path, {
+		...readCodevCodeAuthStore(path),
+		[providerId]: {
+			[OPENCODE_K.authType]: OPENCODE_K.authTypeApi,
+			[OPENCODE_K.authKey]: apiKey,
+		},
+	});
+}
+
+// `codevhub remove` cleanup: drop the CoDev-owned credential entries from the
+// agent's auth store, leaving providers the user connected themselves.
+// Returns the removed ids; a missing store or no matching entry returns [].
+export function removeCodevCodeAuthEntries(): string[] {
+	const path = codevCodeAuthPath();
+	const existing = readCodevCodeAuthStore(path);
+	const removed = codevProviderIds().filter((id) => id in existing);
+	if (removed.length === 0) return [];
+	writeCodevCodeAuthStore(
+		path,
+		Object.fromEntries(
+			Object.entries(existing).filter(([id]) => !removed.includes(id)),
+		),
+	);
+	return removed;
 }
 
 // OpenCode-family agents persist the TUI's model selection in the XDG state
