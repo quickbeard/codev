@@ -4,7 +4,13 @@ import { join } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
 
 const BASE_URL = atob("aHR0cHM6Ly9uZXRtaW5kLnZpZXR0ZWwudm4=");
-export const BACKEND_URL = `${BASE_URL}/codev-backend`;
+// `CODEV_BACKEND_URL` points the hub at a codev-backend running somewhere
+// else — `bun dev` in that repo serves http://127.0.0.1:8787. Unset in every
+// real install, so the baked URL is what ships. SSO is deliberately NOT
+// overridable: a local backend still verifies tokens against the real
+// provider, so the login flow has to mint a real one.
+export const BACKEND_URL =
+	process.env.CODEV_BACKEND_URL || `${BASE_URL}/codev-backend`;
 export const SSO_URL = `${BASE_URL}/sso-wrapper`;
 export const LOGIN_SUCCESS_URL = `${BASE_URL}/codev/oauth/success`;
 export const SKILLHUB_URL = `${BASE_URL}/netmindhub`;

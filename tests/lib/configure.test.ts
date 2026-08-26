@@ -23,6 +23,9 @@ beforeEach(() => {
 	// XDG_STATE_HOME before falling back to $HOME/.local/state; clear it so a
 	// host that exports it can't leak test writes into a real state dir.
 	vi.stubEnv("XDG_STATE_HOME", "");
+	// Same for the CoDev Code auth-store writer, which resolves its data dir
+	// via XDG_DATA_HOME before falling back to $HOME/.local/share.
+	vi.stubEnv("XDG_DATA_HOME", "");
 	// The configure* functions fall back to AI_GATEWAY_URL()/AI_GATEWAY_OPENAI_URL()
 	// whenever creds carry no baseUrl (the SSO-key path), and those accessors read
 	// gateway_url out of ~/.codev-hub/auth.json. Seed it so the fallback resolves.
@@ -652,7 +655,17 @@ describe("configureCodevCode", () => {
 		expect(config.provider.netgate.options.baseURL).toBe(
 			AI_GATEWAY_OPENAI_URL(),
 		);
-		expect(config.provider.netgate.options.apiKey).toBe("sk-xyz");
+		// The config block is keyless: the credential lands in the agent's own
+		// auth store (below), where its provider registry merges it back in by
+		// id — codev.json must not carry the API key.
+		expect(config.provider.netgate.options.apiKey).toBeUndefined();
+		const auth = JSON.parse(
+			readFileSync(
+				join(tempDir, ".local", "share", "codev", "auth.json"),
+				"utf-8",
+			),
+		);
+		expect(auth.netgate).toEqual({ type: "api", key: "sk-xyz" });
 		expect(config.provider.netgate.models["chosen-model"].name).toBe(
 			"chosen-model",
 		);
@@ -711,7 +724,14 @@ describe("configureCodevCode", () => {
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
 		expect(config.someSetting).toBeUndefined();
 		expect(config.provider.other).toBeUndefined();
-		expect(config.provider.netgate.options.apiKey).toBe("sk-new");
+		expect(config.provider.netgate.options.apiKey).toBeUndefined();
+		const auth = JSON.parse(
+			readFileSync(
+				join(tempDir, ".local", "share", "codev", "auth.json"),
+				"utf-8",
+			),
+		);
+		expect(auth.netgate).toEqual({ type: "api", key: "sk-new" });
 	});
 
 	test("carries the `mcp` map across a rewrite (CodeGraph wiring survives reconfigure)", async () => {
@@ -741,7 +761,16 @@ describe("configureCodevCode", () => {
 			"serve",
 			"--mcp",
 		]);
-		expect(config.provider.netgate.options.apiKey).toBe("sk-new");
+		// The rewrite drops the stale inline key (keyless block); the fresh key
+		// lands in the auth store.
+		expect(config.provider.netgate.options.apiKey).toBeUndefined();
+		const auth = JSON.parse(
+			readFileSync(
+				join(tempDir, ".local", "share", "codev", "auth.json"),
+				"utf-8",
+			),
+		);
+		expect(auth.netgate).toEqual({ type: "api", key: "sk-new" });
 	});
 
 	test("preserves a pre-existing codev.json backup across repeated runs", async () => {
@@ -765,7 +794,14 @@ describe("configureCodevCode", () => {
 		expect(results[0]?.backupPath).toBe(backupPath);
 
 		const config = JSON.parse(readFileSync(filePath, "utf-8"));
-		expect(config.provider.netgate.options.apiKey).toBe("sk-new");
+		expect(config.provider.netgate.options.apiKey).toBeUndefined();
+		const auth = JSON.parse(
+			readFileSync(
+				join(tempDir, ".local", "share", "codev", "auth.json"),
+				"utf-8",
+			),
+		);
+		expect(auth.netgate).toEqual({ type: "api", key: "sk-new" });
 	});
 });
 
@@ -1256,7 +1292,14 @@ describe.each([
 			marker: "original",
 		});
 		const written = JSON.parse(readFileSync(at(".jsonc"), "utf-8"));
-		expect(written.provider.netgate.options.apiKey).toBe("k");
+		expect(written.provider.netgate.options.baseURL).toBe("https://gw.test/v1");
+		// codev-code writes a keyless block (the key goes to its auth store);
+		// legacy opencode still inlines it.
+		if (agent.tool === "codev-code") {
+			expect(written.provider.netgate.options.apiKey).toBeUndefined();
+		} else {
+			expect(written.provider.netgate.options.apiKey).toBe("k");
+		}
 	});
 
 	test("reads a jsonc containing comments and trailing commas", async () => {
@@ -1874,6 +1917,15 @@ describe("custom provider identity", () => {
 		);
 		expect(config.provider["acme-ai"].models.m).toBeDefined();
 		expect(config.provider["acme-ai"].name).toBe("Acme AI");
+		// The auth-store entry follows the custom id, matching the keyless
+		// provider block.
+		const auth = JSON.parse(
+			readFileSync(
+				join(tempDir, ".local", "share", "codev", "auth.json"),
+				"utf-8",
+			),
+		);
+		expect(auth["acme-ai"]).toEqual({ type: "api", key: custom.apiKey });
 	});
 
 	test("continue titles its config with the custom provider name", async () => {
@@ -2127,5 +2179,85 @@ describe("detectConfiguredTools", () => {
 		);
 		const { detectConfiguredTools } = await import("@/lib/configure.js");
 		expect(detectConfiguredTools()).toEqual([]);
+	});
+});
+
+describe("CoDev Code auth store", () => {
+	const authPath = () => join(tempDir, ".local", "share", "codev", "auth.json");
+
+	test("configure preserves entries for providers the user connected", async () => {
+		mkdirSync(join(tempDir, ".local", "share", "codev"), { recursive: true });
+		writeFileSync(
+			authPath(),
+			JSON.stringify({
+				anthropic: { type: "oauth", refresh: "r", access: "a", expires: 1 },
+			}),
+		);
+
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-new", model: "m" });
+
+		const auth = JSON.parse(readFileSync(authPath(), "utf-8"));
+		expect(auth.netgate).toEqual({ type: "api", key: "sk-new" });
+		expect(auth.anthropic).toEqual({
+			type: "oauth",
+			refresh: "r",
+			access: "a",
+			expires: 1,
+		});
+	});
+
+	// The key auto-refresh (refresh.ts) reconfigures with a fresh key; the
+	// entry must follow it rather than pile up or stay stale.
+	test("reconfiguring overwrites the entry in place", async () => {
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-old", model: "m" });
+		configureCodevCode({ apiKey: "sk-rotated", model: "m" });
+
+		const auth = JSON.parse(readFileSync(authPath(), "utf-8"));
+		expect(auth.netgate).toEqual({ type: "api", key: "sk-rotated" });
+	});
+
+	// The agent treats an unparseable auth.json as empty, so the writer does
+	// the same instead of failing the configure step.
+	test("a corrupt store is replaced, not fatal", async () => {
+		mkdirSync(join(tempDir, ".local", "share", "codev"), { recursive: true });
+		writeFileSync(authPath(), "not json{{{");
+
+		const { configureCodevCode } = await import("@/lib/configure.js");
+		configureCodevCode({ apiKey: "sk-new", model: "m" });
+
+		const auth = JSON.parse(readFileSync(authPath(), "utf-8"));
+		expect(auth).toEqual({ netgate: { type: "api", key: "sk-new" } });
+	});
+
+	test("removeCodevCodeAuthEntries drops only the CoDev-owned ids", async () => {
+		mkdirSync(join(tempDir, ".local", "share", "codev"), { recursive: true });
+		writeFileSync(
+			authPath(),
+			JSON.stringify({
+				netgate: { type: "api", key: "sk-sso" },
+				"ai-gateway": { type: "api", key: "sk-fallback" },
+				anthropic: { type: "api", key: "sk-user" },
+			}),
+		);
+
+		const { removeCodevCodeAuthEntries } = await import("@/lib/configure.js");
+		expect(removeCodevCodeAuthEntries().sort()).toEqual([
+			"ai-gateway",
+			"netgate",
+		]);
+
+		const auth = JSON.parse(readFileSync(authPath(), "utf-8"));
+		expect(auth).toEqual({ anthropic: { type: "api", key: "sk-user" } });
+
+		// Nothing left to remove on a second pass.
+		expect(removeCodevCodeAuthEntries()).toEqual([]);
+	});
+
+	test("removeCodevCodeAuthEntries is a no-op without a store", async () => {
+		const { removeCodevCodeAuthEntries } = await import("@/lib/configure.js");
+		expect(removeCodevCodeAuthEntries()).toEqual([]);
+		expect(existsSync(authPath())).toBe(false);
 	});
 });
