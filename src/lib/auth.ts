@@ -73,7 +73,7 @@ export interface ApiKeyCreds {
 	baseUrl?: string;
 	model?: string;
 	// Set only for manually-entered keys, where the user names their own
-	// provider. Absent ⇒ the key is SSO-issued and takes the netGate default
+	// provider. Absent ⇒ the key is SSO-issued and takes the AIGW default
 	// (see lib/provider.ts#resolveProvider).
 	providerId?: string;
 	providerName?: string;
@@ -219,7 +219,7 @@ function saveAuth(data: AuthData): void {
 // Writes the whole api-key block, so an omitted field *clears* it: callers that
 // re-save a key (model switch, re-auth, launch-time refresh) must thread the
 // provider pair through, or a manually-named provider silently reverts to the
-// netGate default on the next write.
+// AIGW default on the next write.
 export function saveApiKey(creds: ApiKeyCreds): void {
 	const existing = readAuthFile() ?? {};
 	writeAuthFile({
@@ -311,7 +311,7 @@ export async function logout(): Promise<boolean> {
 			model: raw.model,
 			// The provider pair belongs to the api-key block above and must travel
 			// with it. Dropping it here silently re-labels a manually-named
-			// provider as the netGate default on the next config write — the same
+			// provider as the AIGW default on the next config write — the same
 			// failure saveApiKey's whole-block rewrite is documented to cause,
 			// reached by a different route.
 			provider_id: raw.provider_id,

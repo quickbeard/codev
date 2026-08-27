@@ -247,7 +247,7 @@ describe("logout", () => {
 	});
 
 	// The provider pair identifies a manually-named provider and is what every
-	// config writer keys off. Losing it here reverts the user to the netGate
+	// config writer keys off. Losing it here reverts the user to the AIGW
 	// default on the next model switch or launch-time key refresh, silently.
 	test("preserves the provider pair alongside the key it belongs to", async () => {
 		const dir = join(tempDir, ".codev-hub");

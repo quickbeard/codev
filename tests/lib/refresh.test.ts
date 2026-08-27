@@ -93,7 +93,7 @@ describe("ensureFreshGatewayKey", () => {
 	test("keeps a manually-named provider across the refresh", async () => {
 		// The reconfigure rewrites the whole agent config, so dropping the
 		// provider here would silently re-label the user's provider as the
-		// netGate default on the next agent launch.
+		// AIGW default on the next agent launch.
 		vi.spyOn(auth, "loadApiKey").mockReturnValue({
 			...CREDS,
 			baseUrl: "https://acme.example.com/v1",

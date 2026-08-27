@@ -10,10 +10,10 @@ export interface ProviderIdentity {
 }
 
 // SSO-issued keys ("Get a new API Key", and "Reuse existing API Key" when the
-// saved key carries no provider of its own) — "netgate" / "netGate".
+// saved key carries no provider of its own) — "aigw" / "AIGW".
 const DEFAULT_PROVIDER: ProviderIdentity = {
-	id: atob("bmV0Z2F0ZQ=="),
-	name: atob("bmV0R2F0ZQ=="),
+	id: atob("YWlndw=="),
+	name: atob("QUlHVw=="),
 };
 
 // The manual path's fallback, used when the user leaves the provider name blank
@@ -23,10 +23,11 @@ const MANUAL_PROVIDER: ProviderIdentity = {
 	name: atob("QUkgR2F0ZXdheQ=="),
 };
 
-// Pre-rename installs wrote this id — "aigateway". Kept purely so detection
-// (and the base_url readback) still recognizes configs written before the
-// netGate rename; nothing writes it any more.
-const LEGACY_PROVIDER_ID = atob("YWlnYXRld2F5");
+// Pre-rename installs wrote these ids — "netgate" (the SSO identity before the
+// AIGW rename) and "aigateway" (before the rename preceding that). Kept purely
+// so detection (and the base_url readback) still recognizes configs written
+// before the renames; nothing writes them any more.
+const LEGACY_PROVIDER_IDS = [atob("bmV0Z2F0ZQ=="), atob("YWlnYXRld2F5")];
 
 // Provider ids end up as TOML bare keys (`[model_providers.<id>]`) and as the
 // left half of OpenCode's `"<id>/<model>"` string, so the slug is restricted to
@@ -59,7 +60,7 @@ export function providerFromName(name: string): ProviderIdentity {
 
 // Configure-time resolution. Credentials carry a provider only when they came
 // from the manual path (or from a saved manual key being reused); everything
-// else is an SSO-issued key and gets the netGate default.
+// else is an SSO-issued key and gets the AIGW default.
 export function resolveProvider(creds: {
 	providerId?: string;
 	providerName?: string;
@@ -78,7 +79,7 @@ export function resolveProvider(creds: {
 // which is the conservative direction this module has always taken.
 export function codevProviderIds(): string[] {
 	const saved = loadApiKey()?.providerId;
-	const ids = [DEFAULT_PROVIDER.id, MANUAL_PROVIDER.id, LEGACY_PROVIDER_ID];
+	const ids = [DEFAULT_PROVIDER.id, MANUAL_PROVIDER.id, ...LEGACY_PROVIDER_IDS];
 	if (saved && !ids.includes(saved)) ids.unshift(saved);
 	return ids;
 }
