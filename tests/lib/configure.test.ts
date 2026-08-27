@@ -297,10 +297,10 @@ describe("configureClaudeCode", () => {
 	});
 
 	// Claude Code clamps the window env var to the model's native window (200000
-	// for anything it doesn't recognize), so a 1M model cannot be described to
-	// it honestly — writing 1000000 would be silently reduced. See
+	// for anything it doesn't recognize), so a larger model cannot be described
+	// to it honestly — writing its 262144 window would be silently reduced. See
 	// claudeWindow/claudeCompactPct.
-	test("pins Claude Code's own 200K ceiling even for a 1M model", async () => {
+	test("pins Claude Code's own 200K ceiling even for a larger model", async () => {
 		const { configureClaudeCode } = await import("@/lib/configure.js");
 		const read = () =>
 			JSON.parse(
@@ -456,7 +456,7 @@ describe("configureOpenCode", () => {
 
 	// The reason `limit.input` is written at all. OpenCode's trigger is
 	// `input − reserved`, and `reserved` is a single top-level value, so `input`
-	// is the only per-model lever — without it a 1M model and a 200K model in
+	// is the only per-model lever — without it a 262K model and a 200K model in
 	// one config cannot both land on their intended triggers.
 	test("gives each model in one config its own compaction trigger", async () => {
 		const { configureOpenCode } = await import("@/lib/configure.js");
@@ -472,10 +472,13 @@ describe("configureOpenCode", () => {
 		const reserved = config.compaction.reserved;
 
 		// True windows, so the TUI's "% context used" gauge stays honest.
-		expect(map["MiniMax/MiniMax-M3"].limit.context).toBe(1000000);
+		expect(map["MiniMax/MiniMax-M3"].limit.context).toBe(262144);
 		expect(map["zai-org/GLM-4.7-cc"].limit.context).toBe(200000);
-		// ...and each fires where it should, off one shared reserve.
-		expect(map["MiniMax/MiniMax-M3"].limit.input - reserved).toBe(800000);
+		// ...and each fires where it should, off one shared reserve. Both
+		// models' 90% target + reserve exceeds their window, so declaredInput's
+		// clamp pins input at the window — triggers stay per-model and never
+		// past the ceiling.
+		expect(map["MiniMax/MiniMax-M3"].limit.input - reserved).toBe(222144);
 		expect(map["zai-org/GLM-4.7-cc"].limit.input - reserved).toBe(160000);
 	});
 
@@ -957,21 +960,21 @@ describe("configureCodex", () => {
 		configureCodex({ apiKey: "sk-codex", model: "m" });
 
 		const config = readCodexToml();
-		// "m" is unknown, so it takes the 200K default.
+		// "m" is unknown, so it takes the 200K default with the 90% trigger.
 		expect(config.model_context_window).toBe(200000);
-		expect(config.model_auto_compact_token_limit).toBe(160000);
+		expect(config.model_auto_compact_token_limit).toBe(180000);
 	});
 
 	test("pins each model's own window, not a shared constant", async () => {
 		const { configureCodex } = await import("@/lib/configure.js");
 
 		configureCodex({ apiKey: "sk-codex", model: "MiniMax/MiniMax-M3" });
-		expect(readCodexToml().model_context_window).toBe(1000000);
-		expect(readCodexToml().model_auto_compact_token_limit).toBe(800000);
+		expect(readCodexToml().model_context_window).toBe(262144);
+		expect(readCodexToml().model_auto_compact_token_limit).toBe(235930);
 
 		configureCodex({ apiKey: "sk-codex", model: "zai-org/GLM-4.7-cc" });
 		expect(readCodexToml().model_context_window).toBe(200000);
-		expect(readCodexToml().model_auto_compact_token_limit).toBe(160000);
+		expect(readCodexToml().model_auto_compact_token_limit).toBe(180000);
 	});
 
 	test("does not touch ~/.claude.json (Codex-only install)", async () => {
@@ -1112,7 +1115,7 @@ describe("configureContinue", () => {
 
 		const raw = readContinueYaml();
 		expect(raw).toContain("defaultCompletionOptions:");
-		expect(raw).toContain("contextLength: 1000000");
+		expect(raw).toContain("contextLength: 262144");
 		expect(raw).toContain("contextLength: 200000");
 		expect(raw.match(/^\s*maxTokens: 65536$/gm)?.length).toBe(2);
 	});

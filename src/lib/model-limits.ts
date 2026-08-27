@@ -15,9 +15,9 @@ export interface ModelLimits {
 	// TUI's "% context used" gauge, so understating it here would misreport
 	// every session.
 	context: number;
-	// Where auto-compaction should fire. Deliberately explicit rather than a
-	// percentage of `context`: the gap between the two is a judgement call per
-	// model, not a constant.
+	// Where auto-compaction should fire: always COMPACT_PCT of the window (see
+	// limitsFromWindow), though a cached gateway-reported entry carries the
+	// number it was derived with.
 	trigger: number;
 	// Max output tokens. Absent ⇒ DEFAULT_OUTPUT_TOKENS.
 	output?: number;
@@ -31,32 +31,28 @@ export const DEFAULT_OUTPUT_TOKENS = 65536;
 // reserve still yields exact per-model triggers.
 export const COMPACT_RESERVED = 40000;
 
-// Percentage used to derive a trigger from a window we didn't pick ourselves,
-// i.e. one reported by the gateway. Table entries state their trigger outright.
-export const DEFAULT_COMPACT_PCT = 80;
+// The trigger is always this share of the window, whatever its source — the
+// table, the default, or a gateway-reported window.
+export const COMPACT_PCT = 90;
 
 // Unrecognized models are treated as 200K-class. Chosen over the older 196608
 // default because it matches the smaller of the two models actually served,
 // and because guessing low is the safe direction: too small a window wastes
 // capacity, too large overruns the model and 400s mid-session.
-export const DEFAULT_LIMITS: ModelLimits = { context: 200000, trigger: 160000 };
+const DEFAULT_WINDOW = 200000;
 
-// The 1M-window model's id, encoded for the same reason FALLBACK_MODEL is in
-// const.ts: the upstream vendor's name stays out of the shipped bundle. Decodes
-// to the exact id `/v1/models` reports; kept separate from FALLBACK_MODEL (which
-// happens to be the same string today) so retargeting the fallback can't
-// silently move this window onto another model.
-const M3_ID = atob("TWluaU1heC9NaW5pTWF4LU0z");
+export const DEFAULT_LIMITS: ModelLimits = limitsFromWindow(DEFAULT_WINDOW);
 
-// Known gateway models. Keyed by the exact id `/v1/models` reports, which is
-// what lands in every agent config.
+// Known gateway models' context windows. Keyed by the exact id `/v1/models`
+// reports, which is what lands in every agent config.
 //
-// The 200K sibling of M3_ID is deliberately absent: DEFAULT_LIMITS already
-// describes it correctly, and an entry that merely restates the default is one
-// more thing to keep in sync.
-const TABLE: Record<string, ModelLimits> = {
-	[M3_ID]: { context: 1000000, trigger: 800000 },
-	"zai-org/GLM-4.7-cc": { context: 200000, trigger: 160000 },
+// M3's window is capped at 262144 on the current deployment (the model
+// supports more, the gateway's resources don't). The 200K sibling is
+// deliberately absent: DEFAULT_WINDOW already describes it correctly, and an
+// entry that merely restates the default is one more thing to keep in sync.
+const TABLE: Record<string, number> = {
+	"MiniMax/MiniMax-M3": 262144,
+	"zai-org/GLM-4.7-cc": 200000,
 };
 
 // Windows reported by the gateway, cached in auth.json by the model-choice
@@ -82,19 +78,21 @@ export function resetModelLimitsCache(): void {
 export function limitsFor(modelId: string): ModelLimits {
 	const remote = remoteLimits()?.[modelId];
 	if (remote) return remote;
-	return TABLE[modelId] ?? DEFAULT_LIMITS;
+	const window = TABLE[modelId];
+	return window ? limitsFromWindow(window) : DEFAULT_LIMITS;
 }
 
-// Turn a gateway-reported window into full limits. Exported for backend.ts,
-// which has the raw max_input_tokens/max_output_tokens and no opinion about
-// where the trigger belongs.
+// Turn a context window into full limits, wherever the window came from.
+// Exported for backend.ts, which has the raw
+// max_input_tokens/max_output_tokens and no opinion about where the trigger
+// belongs.
 export function limitsFromWindow(
 	context: number,
 	output?: number,
 ): ModelLimits {
 	return {
 		context,
-		trigger: Math.round((context * DEFAULT_COMPACT_PCT) / 100),
+		trigger: Math.round((context * COMPACT_PCT) / 100),
 		...(output ? { output } : {}),
 	};
 }

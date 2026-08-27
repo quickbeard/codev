@@ -46,14 +46,14 @@ afterEach(() => {
 });
 
 describe("limitsFor", () => {
-	test("returns the table entry for a known model", () => {
+	test("returns the table entry for a known model, trigger at 90%", () => {
 		expect(limitsFor("MiniMax/MiniMax-M3")).toEqual({
-			context: 1000000,
-			trigger: 800000,
+			context: 262144,
+			trigger: 235930,
 		});
 		expect(limitsFor("zai-org/GLM-4.7-cc")).toEqual({
 			context: 200000,
-			trigger: 160000,
+			trigger: 180000,
 		});
 	});
 
@@ -65,7 +65,7 @@ describe("limitsFor", () => {
 		// Intentionally absent from the table — the default already describes it.
 		expect(limitsFor("MiniMax/MiniMax-M2.7")).toEqual({
 			context: 200000,
-			trigger: 160000,
+			trigger: 180000,
 		});
 	});
 
@@ -83,30 +83,35 @@ describe("limitsFor", () => {
 		writeCachedLimits({ "other/model": { context: 12345, trigger: 9876 } });
 		expect(limitsFor("zai-org/GLM-4.7-cc")).toEqual({
 			context: 200000,
-			trigger: 160000,
+			trigger: 180000,
 		});
 	});
 
 	test("an absent cache file is not an error", () => {
 		expect(limitsFor("MiniMax/MiniMax-M3")).toEqual({
-			context: 1000000,
-			trigger: 800000,
+			context: 262144,
+			trigger: 235930,
 		});
 	});
 });
 
 describe("limitsFromWindow", () => {
-	test("derives the trigger at 80% of a gateway-reported window", () => {
+	test("derives the trigger at 90% of the window", () => {
 		expect(limitsFromWindow(1000000)).toEqual({
 			context: 1000000,
-			trigger: 800000,
+			trigger: 900000,
+		});
+		// A non-round window rounds the trigger: 262144 × 0.9 = 235929.6.
+		expect(limitsFromWindow(262144)).toEqual({
+			context: 262144,
+			trigger: 235930,
 		});
 	});
 
 	test("carries an output cap through when the gateway reports one", () => {
 		expect(limitsFromWindow(200000, 8192)).toEqual({
 			context: 200000,
-			trigger: 160000,
+			trigger: 180000,
 			output: 8192,
 		});
 	});
@@ -132,15 +137,15 @@ describe("compactPct", () => {
 // recognize — and `Rzq` caps the trigger at 80% of that via
 // precomputeBufferFraction. Both were verified against the shipped binary.
 describe("claudeWindow / claudeCompactPct", () => {
-	test("a 1M model is pinned at Claude Code's 200K ceiling, not its true window", () => {
+	test("an above-ceiling model is pinned at Claude Code's 200K, not its true window", () => {
 		const m3 = limitsFor("MiniMax/MiniMax-M3");
-		expect(m3.context).toBe(1000000);
-		// Writing 1000000 would be silently clamped to 200000 anyway.
+		expect(m3.context).toBe(262144);
+		// Writing 262144 would be silently clamped to 200000 anyway.
 		expect(claudeWindow(m3)).toBe(200000);
 	});
 
 	test("the percentage is taken against the clamped window, not the true one", () => {
-		// 800000/1000000 would be 80, but 800000/200000 is 400 — the raw ratio is
+		// 235930/262144 would be 90, but 235930/200000 is 118 — the raw ratio is
 		// meaningless once the window is clamped, so it must be bounded.
 		expect(claudeCompactPct(limitsFor("MiniMax/MiniMax-M3"))).toBe(80);
 		expect(claudeCompactPct(limitsFor("zai-org/GLM-4.7-cc"))).toBe(80);
@@ -180,11 +185,19 @@ describe("claudeWindow / claudeCompactPct", () => {
 describe("declaredInput", () => {
 	// The whole point of limit.input: OpenCode's trigger is
 	// `input − reserved` with ONE global reserve, so input is the only
-	// per-model lever. These are the numbers that must land on target.
-	test("lands each model's trigger exactly on target under one shared reserve", () => {
+	// per-model lever. A model whose 90% target + reserve fits its window
+	// lands exactly on target; the served models' targets don't, so the
+	// clamp pins input at the window — effective triggers stay per-model
+	// and never past the ceiling.
+	test("declares each model's own input under one shared reserve", () => {
+		expect(
+			declaredInput({ context: 1000000, trigger: 900000 }) - COMPACT_RESERVED,
+		).toBe(900000);
 		const m3 = limitsFor("MiniMax/MiniMax-M3");
 		const glm = limitsFor("zai-org/GLM-4.7-cc");
-		expect(declaredInput(m3) - COMPACT_RESERVED).toBe(800000);
+		expect(declaredInput(m3)).toBe(262144);
+		expect(declaredInput(m3) - COMPACT_RESERVED).toBe(222144);
+		expect(declaredInput(glm)).toBe(200000);
 		expect(declaredInput(glm) - COMPACT_RESERVED).toBe(160000);
 	});
 
