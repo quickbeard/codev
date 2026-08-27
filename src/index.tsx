@@ -351,6 +351,7 @@ switch (command) {
 		break;
 	}
 	case "readiness": {
+		requireInteractiveTerminal("readiness");
 		let readiness: ReadinessCliOptions;
 		try {
 			readiness = parseReadinessArgs(args);

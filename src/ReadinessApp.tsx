@@ -13,6 +13,7 @@ import {
 	readinessProfileSelectTitle,
 } from "@/components/ReadinessProfileSelect.js";
 import { Step } from "@/components/Step.js";
+import { useCanType } from "@/components/useCanType.js";
 import {
 	type ReadinessOptions,
 	type ReadinessRunResult,
@@ -76,11 +77,12 @@ export function ReadinessApp({
 	const [session, setSession] = useState<ReadinessProfileSession | null>(null);
 	const [profile, setProfile] = useState<ReadinessProfile | null>(null);
 	const profileFetchMs = useRef(0);
+	const canType = useCanType();
 	// Keep stdin referenced across the async SSO-to-selector transition. Without
 	// continuous input ownership, Ink can emit `beforeExit` after the callback
 	// server closes and unmount just as the agent selector becomes interactive.
 	useInput(() => undefined, {
-		isActive: phase !== "done" && phase !== "failed",
+		isActive: canType && phase !== "done" && phase !== "failed",
 	});
 	const paste = usePasteBack(
 		loginUrl !== null && phase !== "failed" && phase !== "done",
@@ -293,12 +295,11 @@ export function ReadinessApp({
 									</Box>
 								)}
 							</Box>
-						) : (
+						) : phase === "done" ? (
 							<Text color={phase === "done" ? "green" : "red"}>
-								{phase === "done" ? "✓ " : "✗ "}
-								{result?.message}
+								✓ {result?.message}
 							</Text>
-						)}
+						) : null}
 					</Step>
 				)}
 				{phase === "failed" && (
