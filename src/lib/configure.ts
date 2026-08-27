@@ -73,7 +73,7 @@ export interface Credentials {
 	// Absent ⇒ treat as [model], so older call sites stay valid.
 	models?: string[];
 	// The provider the user named on the manual path. Absent ⇒ SSO-issued key,
-	// which gets the built-in netGate identity (lib/provider.ts).
+	// which gets the built-in AIGW identity (lib/provider.ts).
 	providerId?: string;
 	providerName?: string;
 }
@@ -179,7 +179,7 @@ const OPENCODE_K = {
 //   Codex       → config.toml   → model_providers.<provider>.base_url
 //   OpenCode    → opencode.json → provider.<provider>.options.baseURL
 //
-// <provider> is the netGate default for SSO-issued keys, or the id derived from
+// <provider> is the AIGW default for SSO-issued keys, or the id derived from
 // the name the user typed on the manual path — so it's resolved at read time
 // against codevProviderIds() rather than a fixed key.
 //

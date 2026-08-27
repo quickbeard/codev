@@ -81,9 +81,9 @@ describe("providerFromName", () => {
 });
 
 describe("resolveProvider", () => {
-	test("defaults to netGate when the credentials carry no provider", async () => {
+	test("defaults to AIGW when the credentials carry no provider", async () => {
 		const { resolveProvider } = await import("@/lib/provider.js");
-		expect(resolveProvider({})).toEqual({ id: "netgate", name: "netGate" });
+		expect(resolveProvider({})).toEqual({ id: "aigw", name: "AIGW" });
 	});
 
 	test("uses the credentials' provider when present", async () => {
@@ -103,9 +103,14 @@ describe("resolveProvider", () => {
 });
 
 describe("codevProviderIds", () => {
-	test("lists the built-ins, including the pre-rename id", async () => {
+	test("lists the built-ins, including the pre-rename ids", async () => {
 		const { codevProviderIds } = await import("@/lib/provider.js");
-		expect(codevProviderIds()).toEqual(["netgate", "ai-gateway", "aigateway"]);
+		expect(codevProviderIds()).toEqual([
+			"aigw",
+			"ai-gateway",
+			"netgate",
+			"aigateway",
+		]);
 	});
 
 	test("puts a saved custom id first", async () => {
@@ -116,13 +121,25 @@ describe("codevProviderIds", () => {
 	});
 
 	test("does not duplicate a saved id that is already a built-in", async () => {
+		seedAuthFile({ api_key: "sk", provider_id: "aigw" });
+		const { codevProviderIds } = await import("@/lib/provider.js");
+		expect(codevProviderIds()).toEqual([
+			"aigw",
+			"ai-gateway",
+			"netgate",
+			"aigateway",
+		]);
+	});
+
+	test("still recognizes the pre-rename netgate id", async () => {
 		seedAuthFile({ api_key: "sk", provider_id: "netgate" });
 		const { codevProviderIds } = await import("@/lib/provider.js");
-		expect(codevProviderIds()).toEqual(["netgate", "ai-gateway", "aigateway"]);
+		expect(codevProviderIds()).toContain("netgate");
+		expect(codevProviderIds()[0]).toBe("aigw");
 	});
 
 	test("tolerates a missing auth.json", async () => {
 		const { codevProviderIds } = await import("@/lib/provider.js");
-		expect(codevProviderIds()).toContain("netgate");
+		expect(codevProviderIds()).toContain("aigw");
 	});
 });

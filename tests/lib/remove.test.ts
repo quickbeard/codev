@@ -408,7 +408,7 @@ describe("CoDev Code credential scrub", () => {
 
 		const step = result.steps.find((s) => s.label === "CoDev Code credential");
 		expect(step?.status).toBe("ok");
-		expect(step?.detail).toContain("netgate");
+		expect(step?.detail).toContain("aigw");
 		const auth = JSON.parse(readFileSync(authPath, "utf-8"));
 		expect(auth).toEqual({ anthropic: { type: "api", key: "sk-user" } });
 	});
