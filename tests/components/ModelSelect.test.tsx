@@ -125,10 +125,10 @@ describe("ModelSelect", () => {
 			/>,
 		);
 		await tick(50);
-		// The window is stored with a trigger derived at 80%, which is what
+		// The window is stored with a trigger derived at 90%, which is what
 		// configure* consumes — a bare window would not be usable.
 		expect(saved).toHaveBeenCalledWith({
-			alpha: { context: 500000, trigger: 400000 },
+			alpha: { context: 500000, trigger: 450000 },
 		});
 	});
 

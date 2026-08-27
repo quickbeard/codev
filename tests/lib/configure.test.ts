@@ -474,8 +474,10 @@ describe("configureOpenCode", () => {
 		// True windows, so the TUI's "% context used" gauge stays honest.
 		expect(map["MiniMax/MiniMax-M3"].limit.context).toBe(1000000);
 		expect(map["zai-org/GLM-4.7-cc"].limit.context).toBe(200000);
-		// ...and each fires where it should, off one shared reserve.
-		expect(map["MiniMax/MiniMax-M3"].limit.input - reserved).toBe(800000);
+		// ...and each fires where it should, off one shared reserve. The 1M
+		// model lands on its 90% target; the 200K model's target + reserve
+		// exceeds its window, so declaredInput's clamp moves it earlier.
+		expect(map["MiniMax/MiniMax-M3"].limit.input - reserved).toBe(900000);
 		expect(map["zai-org/GLM-4.7-cc"].limit.input - reserved).toBe(160000);
 	});
 
@@ -957,9 +959,9 @@ describe("configureCodex", () => {
 		configureCodex({ apiKey: "sk-codex", model: "m" });
 
 		const config = readCodexToml();
-		// "m" is unknown, so it takes the 200K default.
+		// "m" is unknown, so it takes the 200K default with the 90% trigger.
 		expect(config.model_context_window).toBe(200000);
-		expect(config.model_auto_compact_token_limit).toBe(160000);
+		expect(config.model_auto_compact_token_limit).toBe(180000);
 	});
 
 	test("pins each model's own window, not a shared constant", async () => {
@@ -967,11 +969,11 @@ describe("configureCodex", () => {
 
 		configureCodex({ apiKey: "sk-codex", model: "MiniMax/MiniMax-M3" });
 		expect(readCodexToml().model_context_window).toBe(1000000);
-		expect(readCodexToml().model_auto_compact_token_limit).toBe(800000);
+		expect(readCodexToml().model_auto_compact_token_limit).toBe(900000);
 
 		configureCodex({ apiKey: "sk-codex", model: "zai-org/GLM-4.7-cc" });
 		expect(readCodexToml().model_context_window).toBe(200000);
-		expect(readCodexToml().model_auto_compact_token_limit).toBe(160000);
+		expect(readCodexToml().model_auto_compact_token_limit).toBe(180000);
 	});
 
 	test("does not touch ~/.claude.json (Codex-only install)", async () => {

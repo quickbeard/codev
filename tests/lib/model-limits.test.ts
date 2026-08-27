@@ -46,14 +46,14 @@ afterEach(() => {
 });
 
 describe("limitsFor", () => {
-	test("returns the table entry for a known model", () => {
+	test("returns the table entry for a known model, trigger at 90%", () => {
 		expect(limitsFor("MiniMax/MiniMax-M3")).toEqual({
 			context: 1000000,
-			trigger: 800000,
+			trigger: 900000,
 		});
 		expect(limitsFor("zai-org/GLM-4.7-cc")).toEqual({
 			context: 200000,
-			trigger: 160000,
+			trigger: 180000,
 		});
 	});
 
@@ -65,7 +65,7 @@ describe("limitsFor", () => {
 		// Intentionally absent from the table — the default already describes it.
 		expect(limitsFor("MiniMax/MiniMax-M2.7")).toEqual({
 			context: 200000,
-			trigger: 160000,
+			trigger: 180000,
 		});
 	});
 
@@ -83,30 +83,30 @@ describe("limitsFor", () => {
 		writeCachedLimits({ "other/model": { context: 12345, trigger: 9876 } });
 		expect(limitsFor("zai-org/GLM-4.7-cc")).toEqual({
 			context: 200000,
-			trigger: 160000,
+			trigger: 180000,
 		});
 	});
 
 	test("an absent cache file is not an error", () => {
 		expect(limitsFor("MiniMax/MiniMax-M3")).toEqual({
 			context: 1000000,
-			trigger: 800000,
+			trigger: 900000,
 		});
 	});
 });
 
 describe("limitsFromWindow", () => {
-	test("derives the trigger at 80% of a gateway-reported window", () => {
+	test("derives the trigger at 90% of the window", () => {
 		expect(limitsFromWindow(1000000)).toEqual({
 			context: 1000000,
-			trigger: 800000,
+			trigger: 900000,
 		});
 	});
 
 	test("carries an output cap through when the gateway reports one", () => {
 		expect(limitsFromWindow(200000, 8192)).toEqual({
 			context: 200000,
-			trigger: 160000,
+			trigger: 180000,
 			output: 8192,
 		});
 	});
@@ -140,7 +140,7 @@ describe("claudeWindow / claudeCompactPct", () => {
 	});
 
 	test("the percentage is taken against the clamped window, not the true one", () => {
-		// 800000/1000000 would be 80, but 800000/200000 is 400 — the raw ratio is
+		// 900000/1000000 would be 90, but 900000/200000 is 450 — the raw ratio is
 		// meaningless once the window is clamped, so it must be bounded.
 		expect(claudeCompactPct(limitsFor("MiniMax/MiniMax-M3"))).toBe(80);
 		expect(claudeCompactPct(limitsFor("zai-org/GLM-4.7-cc"))).toBe(80);
@@ -181,10 +181,13 @@ describe("declaredInput", () => {
 	// The whole point of limit.input: OpenCode's trigger is
 	// `input − reserved` with ONE global reserve, so input is the only
 	// per-model lever. These are the numbers that must land on target.
-	test("lands each model's trigger exactly on target under one shared reserve", () => {
+	test("lands each model's trigger on target under one shared reserve", () => {
 		const m3 = limitsFor("MiniMax/MiniMax-M3");
 		const glm = limitsFor("zai-org/GLM-4.7-cc");
-		expect(declaredInput(m3) - COMPACT_RESERVED).toBe(800000);
+		expect(declaredInput(m3) - COMPACT_RESERVED).toBe(900000);
+		// The 200K model's 90% target + reserve exceeds its window, so the
+		// clamp moves its effective trigger earlier — never past the ceiling.
+		expect(declaredInput(glm)).toBe(200000);
 		expect(declaredInput(glm) - COMPACT_RESERVED).toBe(160000);
 	});
 
