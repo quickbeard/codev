@@ -28,7 +28,7 @@ export const FALLBACK_MODEL = atob("TWluaU1heC9NaW5pTWF4LU0z");
 // Context windows and auto-compaction triggers are per-model and live in
 // lib/model-limits.ts. They used to be the flat GATEWAY_CONTEXT_WINDOW /
 // GATEWAY_COMPACT_* constants here, which assumed every gateway model shared
-// one 196608-token window — untrue once the gateway served both a 1M-token and
+// one 196608-token window — untrue once the gateway served a 262144-token and
 // a 200K-token model.
 
 export const VERSION: string = pkg.version;

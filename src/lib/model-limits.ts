@@ -46,11 +46,12 @@ export const DEFAULT_LIMITS: ModelLimits = limitsFromWindow(DEFAULT_WINDOW);
 // Known gateway models' context windows. Keyed by the exact id `/v1/models`
 // reports, which is what lands in every agent config.
 //
-// The 200K sibling of the 1M model is deliberately absent: DEFAULT_WINDOW
-// already describes it correctly, and an entry that merely restates the
-// default is one more thing to keep in sync.
+// M3's window is capped at 262144 on the current deployment (the model
+// supports more, the gateway's resources don't). The 200K sibling is
+// deliberately absent: DEFAULT_WINDOW already describes it correctly, and an
+// entry that merely restates the default is one more thing to keep in sync.
 const TABLE: Record<string, number> = {
-	"MiniMax/MiniMax-M3": 1000000,
+	"MiniMax/MiniMax-M3": 262144,
 	"zai-org/GLM-4.7-cc": 200000,
 };
 
